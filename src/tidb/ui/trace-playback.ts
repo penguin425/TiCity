@@ -27,6 +27,10 @@ interface TracePlaybackCopy {
   readonly resume: string
   readonly next: string
   readonly replay: string
+  readonly loopOn: string
+  readonly loopOff: string
+  readonly loopAction: string
+  readonly iteration: (value: number) => string
   readonly phase: Readonly<Record<TracePlaybackPhase, string>>
   readonly status: Readonly<Record<TraceEventStatus, string>>
   readonly railState: Readonly<Record<RailState, string>>
@@ -49,9 +53,14 @@ const COPY: Readonly<Record<Locale, TracePlaybackCopy>> = {
     resume: '再開',
     next: '次のイベント',
     replay: 'もう一度再生',
+    loopOn: '↻ ループ ON',
+    loopOff: '↻ ループ OFF',
+    loopAction: '同じトレースを繰り返す',
+    iteration: (value) => `${value}周目`,
     phase: {
       idle: '待機',
       playing: '再生中',
+      holding: '完了 · ループ待機',
       paused: '一時停止',
       complete: '完了',
     },
@@ -82,9 +91,14 @@ const COPY: Readonly<Record<Locale, TracePlaybackCopy>> = {
     resume: 'Resume',
     next: 'Next event',
     replay: 'Replay',
+    loopOn: '↻ Loop on',
+    loopOff: '↻ Loop off',
+    loopAction: 'Loop the same trace',
+    iteration: (value) => `Loop ${value}`,
     phase: {
       idle: 'Ready',
       playing: 'Playing',
+      holding: 'Complete · looping',
       paused: 'Paused',
       complete: 'Complete',
     },
@@ -142,6 +156,7 @@ export interface TracePlaybackDockActions {
   readonly onTogglePause: () => void
   readonly onNext: () => void
   readonly onReplay: () => void
+  readonly onToggleLoop: () => void
 }
 
 export interface TracePlaybackDock {
@@ -170,8 +185,9 @@ function railState(
   index: number,
   currentIndex: number,
   phase: TracePlaybackPhase,
+  atEnd: boolean,
 ): RailState {
-  if (phase === 'complete') return 'complete'
+  if (phase === 'complete' || phase === 'holding' || atEnd) return 'complete'
   if (index < currentIndex) return 'complete'
   if (index === currentIndex) return 'current'
   return 'future'
@@ -252,6 +268,7 @@ export function createTracePlaybackDock(
   let railLocale: Locale | null = null
   let railIndex = Number.NaN
   let railPhase: TracePlaybackPhase | null = null
+  let railAtEnd = false
   let announcementKey = ''
   let entries: RailEntry[] = []
 
@@ -365,6 +382,14 @@ export function createTracePlaybackDock(
     className: 'tidb-trace-playback__control is-replay',
     attrs: { type: 'button', 'data-action': 'trace-replay' },
   })
+  const loop = element('button', {
+    className: 'tidb-trace-playback__control is-loop',
+    attrs: {
+      type: 'button',
+      'data-action': 'trace-loop',
+      'aria-pressed': 'false',
+    },
+  })
 
   const onPrevious = (): void => {
     if (!disposed) actions.onPrevious()
@@ -378,10 +403,14 @@ export function createTracePlaybackDock(
   const onReplay = (): void => {
     if (!disposed) actions.onReplay()
   }
+  const onToggleLoop = (): void => {
+    if (!disposed) actions.onToggleLoop()
+  }
   previous.addEventListener('click', onPrevious)
   toggle.addEventListener('click', onToggle)
   next.addEventListener('click', onNext)
   replay.addEventListener('click', onReplay)
+  loop.addEventListener('click', onToggleLoop)
 
   const controls = element(
     'div',
@@ -393,6 +422,7 @@ export function createTracePlaybackDock(
     toggle,
     next,
     replay,
+    loop,
   )
   const root = element(
     'section',
@@ -433,6 +463,7 @@ export function createTracePlaybackDock(
     railLocale = locale
     railIndex = Number.NaN
     railPhase = null
+    railAtEnd = false
     entries = []
     if (!receipt || receipt.events.length === 0) {
       rail.replaceChildren()
@@ -467,14 +498,23 @@ export function createTracePlaybackDock(
     rail.replaceChildren(...entries.map((entry) => entry.root))
   }
 
-  function updateRail(currentIndex: number, playbackPhase: TracePlaybackPhase): void {
-    if (railIndex === currentIndex && railPhase === playbackPhase) return
+  function updateRail(
+    currentIndex: number,
+    playbackPhase: TracePlaybackPhase,
+    atEnd: boolean,
+  ): void {
+    if (
+      railIndex === currentIndex &&
+      railPhase === playbackPhase &&
+      railAtEnd === atEnd
+    ) return
     railIndex = currentIndex
     railPhase = playbackPhase
+    railAtEnd = atEnd
     const copy = COPY[locale]
     const total = entries.length
     for (const entry of entries) {
-      const state = railState(entry.index, currentIndex, playbackPhase)
+      const state = railState(entry.index, currentIndex, playbackPhase, atEnd)
       entry.root.className = `tidb-trace-playback__tick is-${state}`
       entry.root.dataset.state = state
       entry.symbol.textContent = railSymbol(state, entry.event.status)
@@ -511,6 +551,10 @@ export function createTracePlaybackDock(
     root.dataset.eventIndex = String(currentIndex)
     root.dataset.eventCount = String(total)
     root.dataset.motion = playback.motion
+    root.dataset.atEnd = String(playback.atEnd)
+    root.dataset.looping = String(playback.looping)
+    root.dataset.iteration = String(playback.iteration)
+    root.dataset.holdProgress = String(clamp(playback.holdProgress, 0, 1))
     root.dataset.elapsedMs = String(Math.max(0, playback.elapsedMs))
     root.dataset.durationMs = String(Math.max(0, playback.durationMs))
     root.dataset.presentationDurationMs = String(Math.max(0, playback.durationMs))
@@ -524,7 +568,12 @@ export function createTracePlaybackDock(
     )
 
     eyebrow.textContent = copy.eyebrow
-    phase.textContent = copy.phase[playback.phase]
+    const showIteration =
+      playback.iteration > 0 &&
+      (playback.looping || playback.iteration > 1)
+    phase.textContent = showIteration
+      ? `${copy.iteration(playback.iteration)} · ${copy.phase[playback.phase]}`
+      : copy.phase[playback.phase]
     phase.dataset.tracePhase = playback.phase
     position.textContent = `${item} / ${total}`
     domain.textContent = event ? DOMAIN_LABELS[locale][event.domain] : '—'
@@ -544,6 +593,7 @@ export function createTracePlaybackDock(
     eventProgress.setAttribute('aria-label', copy.eventProgress)
     eventProgress.setAttribute('aria-valuenow', String(eventPercent))
 
+    current.setAttribute('aria-live', playback.iteration > 1 ? 'off' : 'polite')
     const nextAnnouncementKey =
       `${locale}:${playback.phase}:${currentIndex}:${event?.id ?? 'none'}`
     if (announcementKey !== nextAnnouncementKey) {
@@ -572,7 +622,7 @@ export function createTracePlaybackDock(
     }
 
     if (railReceipt !== receipt || railLocale !== locale) rebuildRail(receipt)
-    updateRail(currentIndex, playback.phase)
+    updateRail(currentIndex, playback.phase, playback.atEnd)
 
     const canNavigate = hasTrace && currentIndex >= 0
     setDisabled(previous, !canNavigate || currentIndex <= 0)
@@ -582,21 +632,29 @@ export function createTracePlaybackDock(
       !hasTrace || playback.phase === 'idle' || playback.phase === 'complete',
     )
     setDisabled(replay, !hasTrace)
+    setDisabled(loop, !hasTrace)
 
     previous.textContent = copy.previous
     previous.setAttribute('aria-label', copy.previous)
-    const toggleCopy = playback.phase === 'playing'
+    const toggleCopy =
+      playback.phase === 'playing' || playback.phase === 'holding'
       ? copy.pause
       : playback.phase === 'paused'
         ? copy.resume
         : copy.play
     toggle.textContent = toggleCopy
     toggle.setAttribute('aria-label', toggleCopy)
-    toggle.setAttribute('aria-pressed', String(playback.phase === 'playing'))
+    toggle.setAttribute(
+      'aria-pressed',
+      String(playback.phase === 'playing' || playback.phase === 'holding'),
+    )
     next.textContent = copy.next
     next.setAttribute('aria-label', copy.next)
     replay.textContent = copy.replay
     replay.setAttribute('aria-label', copy.replay)
+    loop.textContent = playback.looping ? copy.loopOn : copy.loopOff
+    loop.setAttribute('aria-label', copy.loopAction)
+    loop.setAttribute('aria-pressed', String(playback.looping))
     controls.setAttribute('aria-label', copy.region)
   }
 
@@ -610,6 +668,10 @@ export function createTracePlaybackDock(
     elapsedMs: 0,
     durationMs: 0,
     motion: 'full',
+    atEnd: false,
+    looping: true,
+    iteration: 0,
+    holdProgress: 0,
   }
   render(idlePlayback, null)
 
@@ -635,6 +697,7 @@ export function createTracePlaybackDock(
       toggle.removeEventListener('click', onToggle)
       next.removeEventListener('click', onNext)
       replay.removeEventListener('click', onReplay)
+      loop.removeEventListener('click', onToggleLoop)
       entries = []
       latestPlayback = null
       latestReceipt = null

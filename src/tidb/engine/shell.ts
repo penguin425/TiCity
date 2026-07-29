@@ -15,7 +15,7 @@ import type { CityComponent, TiDBSceneGraph } from '../world/city'
 import type { CityTheme } from '../world/palette'
 import { createCityAudio } from './audio'
 import type { CityAudio } from './audio'
-import { createCityCameraController } from './camera'
+import { CITY_ORBIT, createCityCameraController } from './camera'
 import type { CityCameraController, CityViewMode } from './camera'
 import { createCollisionMap } from './collision'
 import { createCityLabels } from './labels'
@@ -63,6 +63,16 @@ export function cityViewOcclusion(width: number, expanded = true): number {
   return expanded && width > 900 ? Math.min(420, width * 0.32) : 0
 }
 
+export function cityProjectionAspect(
+  width: number,
+  height: number,
+  expanded = true,
+): number {
+  const safeWidth = Math.max(1, width)
+  const safeHeight = Math.max(1, height)
+  return (safeWidth + cityViewOcclusion(safeWidth, expanded)) / safeHeight
+}
+
 export function cityPixelRatio(width: number, devicePixelRatio: number): number {
   const cap = width <= 900 ? 1.25 : 1.5
   return Math.max(1, Math.min(cap, devicePixelRatio || 1))
@@ -107,13 +117,19 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x050b12)
-  scene.fog = new THREE.Fog(0x050b12, TICITY_LAYOUT.fog.near, TICITY_LAYOUT.fog.far)
-
-  const camera = new THREE.PerspectiveCamera(52, width / height, 0.3, 2200)
-  camera.position.set(0, 305, 555)
-  camera.lookAt(0, 12, 25)
   let hudExpanded = options.hudExpanded ?? true
   const initialOcclusion = cityViewOcclusion(width, hudExpanded)
+  const initialFog = TICITY_LAYOUT.fog.night
+  scene.fog = new THREE.Fog(0x050b12, initialFog.near, initialFog.far)
+
+  const camera = new THREE.PerspectiveCamera(
+    52,
+    cityProjectionAspect(width, height, hudExpanded),
+    0.3,
+    4_000,
+  )
+  camera.position.set(...CITY_ORBIT.homePosition)
+  camera.lookAt(...CITY_ORBIT.target)
   if (initialOcclusion > 0) {
     camera.setViewOffset(
       width + initialOcclusion,
@@ -189,7 +205,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
 
   function syncNetworkEmphasis(): void {
     const phase = flows.playback.phase
-    const next = phase === 'playing' || phase === 'paused'
+    const next = phase === 'playing' || phase === 'holding' || phase === 'paused'
     if (next === networkEmphasis) return
     networkEmphasis = next
     city.setNetworkEmphasis(next)
@@ -204,7 +220,12 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     if (scene.background instanceof THREE.Color) {
       scene.background.setHex(night ? 0x050b12 : 0xc7d6e2)
     }
-    if (scene.fog instanceof THREE.Fog) scene.fog.color.setHex(night ? 0x050b12 : 0xc7d6e2)
+    if (scene.fog instanceof THREE.Fog) {
+      const fog = TICITY_LAYOUT.fog[next]
+      scene.fog.color.setHex(night ? 0x050b12 : 0xc7d6e2)
+      scene.fog.near = fog.near
+      scene.fog.far = fog.far
+    }
     hemisphere.color.setHex(night ? 0x91b8db : 0xd9efff)
     hemisphere.groundColor.setHex(night ? 0x0a1018 : 0x71806e)
     hemisphere.intensity = night ? 1.05 : 1.32
@@ -228,8 +249,8 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   function resize(): void {
     const [nextWidth, nextHeight] = measure(container)
     viewportWidth = nextWidth
-    camera.aspect = nextWidth / nextHeight
     const occlusion = cityViewOcclusion(nextWidth, hudExpanded)
+    camera.aspect = cityProjectionAspect(nextWidth, nextHeight, hudExpanded)
     if (occlusion > 0) {
       camera.setViewOffset(
         nextWidth + occlusion,

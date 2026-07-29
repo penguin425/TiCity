@@ -11,6 +11,7 @@ import {
   buildTracePresentationSchedule,
   createTraceFlows,
   resolveTraceEndpoint,
+  TRACE_LOOP_HOLD_MS,
 } from './trace-flows'
 import * as THREE from 'three'
 
@@ -139,6 +140,83 @@ describe('TraceReceipt-driven city flows', () => {
       overallProgress: 0,
     })
     expect(trace.events.map(({ atMs }) => atMs)).toEqual([0, 12, 24])
+    flows.dispose()
+    city.dispose()
+  })
+
+  it('holds the final event, pauses safely, then loops the same receipt', () => {
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    const trace = receipt([
+      event({ id: 'one', atMs: 0, durationMs: 12, domain: 'client' }),
+      event({ id: 'two', atMs: 12, durationMs: 12, domain: 'return' }),
+    ])
+    const modelDuration = trace.durationMs
+    const modelTimes = trace.events.map(({ atMs, durationMs }) => ({ atMs, durationMs }))
+
+    flows.play(trace)
+    expect(flows.playback).toMatchObject({
+      looping: true,
+      iteration: 1,
+      phase: 'playing',
+    })
+    flows.update(flows.playback.durationMs / 1_000 + 1)
+    expect(flows.playback).toMatchObject({
+      phase: 'holding',
+      currentIndex: 1,
+      eventProgress: 1,
+      overallProgress: 1,
+      atEnd: true,
+      iteration: 1,
+    })
+
+    flows.update(TRACE_LOOP_HOLD_MS / 2_000)
+    const holdProgress = flows.playback.holdProgress
+    expect(holdProgress).toBeCloseTo(0.5)
+    flows.setPaused(true)
+    flows.update(10)
+    expect(flows.playback.phase).toBe('paused')
+    expect(flows.playback.holdProgress).toBe(holdProgress)
+
+    flows.setPaused(false)
+    expect(flows.playback.phase).toBe('holding')
+    flows.update(TRACE_LOOP_HOLD_MS / 2_000)
+    expect(flows.playback).toMatchObject({
+      phase: 'playing',
+      currentIndex: 0,
+      eventProgress: 0,
+      overallProgress: 0,
+      atEnd: false,
+      iteration: 2,
+    })
+    expect(trace.durationMs).toBe(modelDuration)
+    expect(trace.events.map(({ atMs, durationMs }) => ({ atMs, durationMs }))).toEqual(
+      modelTimes,
+    )
+    flows.dispose()
+    city.dispose()
+  })
+
+  it('finishes without restarting when looping is disabled', () => {
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    flows.play(receipt([
+      event({ id: 'one', domain: 'client' }),
+      event({ id: 'two', domain: 'return' }),
+    ]))
+    flows.setLooping(false)
+    flows.update(flows.playback.durationMs / 1_000 + 1)
+    expect(flows.playback).toMatchObject({
+      phase: 'complete',
+      atEnd: true,
+      looping: false,
+      iteration: 1,
+    })
+    flows.update(10)
+    expect(flows.playback).toMatchObject({
+      phase: 'complete',
+      iteration: 1,
+    })
     flows.dispose()
     city.dispose()
   })

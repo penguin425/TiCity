@@ -243,7 +243,9 @@ function boot(): void {
     onTogglePause: () => {
       const flows = world?.shell.flows
       if (!flows) return
-      const pause = flows.playback.phase === 'playing'
+      const pause =
+        flows.playback.phase === 'playing' ||
+        flows.playback.phase === 'holding'
       flows.setPaused(pause)
     },
     onNext: () => {
@@ -251,6 +253,11 @@ function boot(): void {
     },
     onReplay: () => {
       world?.shell.flows.replay()
+    },
+    onToggleLoop: () => {
+      const flows = world?.shell.flows
+      if (!flows) return
+      flows.setLooping(!flows.playback.looping)
     },
   })
   traceDock.root.dataset.traceDock = ''
@@ -454,7 +461,12 @@ function boot(): void {
               : copy[locale].none
       regions.value.textContent = String(simulation.state.regions.length)
       trace.value.textContent =
-        playback && (playback.phase === 'playing' || playback.phase === 'paused')
+        playback &&
+        (
+          playback.phase === 'playing' ||
+          playback.phase === 'holding' ||
+          playback.phase === 'paused'
+        )
           ? `${playback.currentIndex + 1}/${playback.total}`
           : latest?.scenarioId === 'commit-protocols'
             ? '1PC / Async / 2PC'

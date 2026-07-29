@@ -8,6 +8,7 @@
 
 import * as THREE from 'three'
 import type { TiDBSceneGraph } from '../world/city'
+import { FOCUS_ANCHORS } from '../world/layout'
 import type { Point3 } from '../world/layout'
 import type { SemanticDomain } from '../world/palette'
 
@@ -136,6 +137,17 @@ export function createCityLabels(
     lastCameraQy = camera.quaternion.y
     lastCameraQz = camera.quaternion.z
     lastCameraQw = camera.quaternion.w
+
+    const overview = FOCUS_ANCHORS['city.overview']
+    const overviewDx = camera.position.x - overview[0]
+    const overviewDy = camera.position.y - overview[1]
+    const overviewDz = camera.position.z - overview[2]
+    const overviewDistanceSq =
+      overviewDx * overviewDx +
+      overviewDy * overviewDy +
+      overviewDz * overviewDz
+    root.classList.toggle('is-overview', overviewDistanceSq > 950 * 950)
+    root.classList.toggle('is-distant', overviewDistanceSq > 1_350 * 1_350)
 
     for (const entry of entries) {
       entry.projected.copy(entry.anchor).project(camera)

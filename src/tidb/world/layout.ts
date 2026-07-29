@@ -29,7 +29,10 @@ export const TICITY_LAYOUT = {
   pdCount: 3,
   tikvCount: 3,
   regionGrid: { columns: 6, rows: 6, pitchX: 13, pitchZ: 12 },
-  fog: { near: 360, far: 1100 },
+  fog: {
+    day: { near: 760, far: 3200 },
+    night: { near: 620, far: 2800 },
+  },
 } as const
 
 export const DISTRICT_BOUNDS = {

@@ -4,6 +4,20 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.3.2] — 2026-07-30
+
+- Expand the orbit overview from a nearly fixed 620-unit ceiling to a
+  PGSimCity-scale 1,650-unit range, with matching camera, fog, and
+  camera-following atmosphere limits.
+- Fade overview labels at long distance so the complete topology remains
+  readable instead of becoming a stack of fixed-size signs.
+- Loop the same immutable `TraceReceipt` after a readable final-state hold,
+  with an explicit Loop toggle, iteration state, pause/resume support, and no
+  model or transaction re-execution.
+- Keep looping opt-in for reduced-motion users, suppress repeated live-region
+  narration, and preserve usable controls from 320 px mobile layouts through
+  narrow panel-open desktop layouts.
+
 ## [0.3.1] — 2026-07-29
 
 - Replace sub-second overlapping City traffic with a renderer-only teaching

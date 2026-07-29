@@ -3,7 +3,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TraceReceipt } from '../model/types'
-import { cityPixelRatio, cityViewOcclusion, hasTraceChanged } from './shell'
+import { CITY_ORBIT } from './camera'
+import {
+  cityPixelRatio,
+  cityProjectionAspect,
+  cityViewOcclusion,
+  hasTraceChanged,
+} from './shell'
 
 describe('city shell trace replay gate', () => {
   it('replays a new receipt object even when deterministic reset reused its id', () => {
@@ -21,6 +27,19 @@ describe('city shell trace replay gate', () => {
     expect(cityViewOcclusion(900)).toBe(0)
     expect(cityViewOcclusion(390)).toBe(0)
     expect(cityViewOcclusion(1440, false)).toBe(0)
+    expect(cityProjectionAspect(1440, 900)).toBeCloseTo((1440 + 420) / 900)
+    expect(cityProjectionAspect(1440, 900, false)).toBeCloseTo(1440 / 900)
+  })
+
+  it('leaves useful orbit room beyond the establishing shot', () => {
+    const dx = CITY_ORBIT.homePosition[0] - CITY_ORBIT.target[0]
+    const dy = CITY_ORBIT.homePosition[1] - CITY_ORBIT.target[1]
+    const dz = CITY_ORBIT.homePosition[2] - CITY_ORBIT.target[2]
+    const homeDistance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    expect(homeDistance).toBeCloseTo(600.25, 1)
+    expect(homeDistance / CITY_ORBIT.maxDistance).toBeLessThanOrEqual(0.37)
+    expect(CITY_ORBIT.maxDistance).toBeGreaterThanOrEqual(1_650)
   })
 
   it('caps fill rate more aggressively on compact displays', () => {

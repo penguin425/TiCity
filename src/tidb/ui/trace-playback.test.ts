@@ -96,6 +96,10 @@ function playback(
     elapsedMs: overrides.elapsedMs ?? 1_200,
     durationMs: overrides.durationMs ?? 4_000,
     motion: overrides.motion ?? 'full',
+    atEnd: overrides.atEnd ?? false,
+    looping: overrides.looping ?? true,
+    iteration: overrides.iteration ?? 1,
+    holdProgress: overrides.holdProgress ?? 0,
   }
 }
 
@@ -105,6 +109,7 @@ function noActions() {
     onTogglePause: () => {},
     onNext: () => {},
     onReplay: () => {},
+    onToggleLoop: () => {},
   }
 }
 
@@ -148,7 +153,7 @@ describe('trace playback dock', () => {
     expect(ticks[3].querySelector('.tidb-trace-playback__tick-symbol')?.textContent).toBe('·')
   })
 
-  it('wires all four controls and removes their listeners on dispose', () => {
+  it('wires all five controls and removes their listeners on dispose', () => {
     const dom = installTestDom()
     const trace = receipt()
     const calls: string[] = []
@@ -157,6 +162,7 @@ describe('trace playback dock', () => {
       onTogglePause: () => calls.push('toggle'),
       onNext: () => calls.push('next'),
       onReplay: () => calls.push('replay'),
+      onToggleLoop: () => calls.push('loop'),
     })
     dock.update(playback(trace, { currentIndex: 1, event: trace.events[1] }), trace)
 
@@ -164,19 +170,25 @@ describe('trace playback dock', () => {
     const toggle = dock.root.querySelector<HTMLButtonElement>('[data-action="trace-toggle"]')!
     const next = dock.root.querySelector<HTMLButtonElement>('[data-action="trace-next"]')!
     const replay = dock.root.querySelector<HTMLButtonElement>('[data-action="trace-replay"]')!
+    const loop = dock.root.querySelector<HTMLButtonElement>('[data-action="trace-loop"]')!
     previous.click()
     toggle.click()
     next.click()
     replay.click()
-    expect(calls).toEqual(['previous', 'toggle', 'next', 'replay'])
+    loop.click()
+    expect(calls).toEqual(['previous', 'toggle', 'next', 'replay', 'loop'])
     expect(toggle.textContent).toBe('Resume')
+    expect(loop.textContent).toBe('↻ Loop on')
+    expect(loop.getAttribute('aria-pressed')).toBe('true')
+    expect(loop.getAttribute('aria-label')).toBe('Loop the same trace')
 
     dock.dispose()
     previous.click()
     toggle.click()
     next.click()
     replay.click()
-    expect(calls).toEqual(['previous', 'toggle', 'next', 'replay'])
+    loop.click()
+    expect(calls).toEqual(['previous', 'toggle', 'next', 'replay', 'loop'])
     expect(dock.root.childNodes).toHaveLength(0)
   })
 
@@ -193,7 +205,9 @@ describe('trace playback dock', () => {
     dock.setLocale('en')
 
     expect(dock.root.getAttribute('aria-label')).toBe('Trace playback')
-    expect(dock.root.querySelector('[data-trace-phase]')?.textContent).toBe('Playing')
+    expect(dock.root.querySelector('[data-trace-phase]')?.textContent).toBe(
+      'Loop 1 · Playing',
+    )
     expect(dock.root.querySelector('[data-action="trace-toggle"]')?.textContent).toBe('Pause')
     expect(dock.root.querySelector('[data-action="trace-replay"]')?.textContent).toBe('Replay')
     expect(
@@ -211,6 +225,8 @@ describe('trace playback dock', () => {
       event: trace.events[3],
       eventProgress: 1,
       overallProgress: 1,
+      atEnd: true,
+      looping: false,
     }), trace)
 
     const ticks = dock.root.querySelectorAll<HTMLElement>('[data-event-index]')
@@ -222,7 +238,51 @@ describe('trace playback dock', () => {
     expect(
       dock.root.querySelector<HTMLButtonElement>('[data-action="trace-replay"]')!.disabled,
     ).toBe(false)
+    expect(dock.root.querySelector('[data-trace-phase]')?.textContent).toBe('Complete')
     expect(ticks[3].querySelector('.tidb-trace-playback__tick-symbol')?.textContent).toBe('×')
+  })
+
+  it('shows the final hold and repeated iteration without repeating live announcements', () => {
+    const dom = installTestDom()
+    const trace = receipt()
+    const dock = createTracePlaybackDock('ja', noActions())
+    dock.update(playback(trace, {
+      phase: 'holding',
+      currentIndex: 3,
+      event: trace.events[3],
+      eventProgress: 1,
+      overallProgress: 1,
+      atEnd: true,
+      looping: true,
+      iteration: 2,
+      holdProgress: 0.5,
+    }), trace)
+
+    expect(dock.root.dataset.phase).toBe('holding')
+    expect(dock.root.dataset.atEnd).toBe('true')
+    expect(dock.root.dataset.looping).toBe('true')
+    expect(dock.root.dataset.iteration).toBe('2')
+    expect(dock.root.dataset.holdProgress).toBe('0.5')
+    expect(dock.root.querySelector('[data-trace-phase]')?.textContent).toBe(
+      '2周目 · 完了 · ループ待機',
+    )
+    expect(
+      dock.root.querySelector('.tidb-trace-playback__current')?.getAttribute('aria-live'),
+    ).toBe('off')
+    expect(
+      dock.root.querySelector<HTMLButtonElement>('[data-action="trace-toggle"]')?.disabled,
+    ).toBe(false)
+    expect(
+      dock.root.querySelector<HTMLButtonElement>('[data-action="trace-toggle"]')?.textContent,
+    ).toBe('一時停止')
+    expect(
+      dock.root.querySelector<HTMLButtonElement>('[data-action="trace-loop"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(
+      [...dock.root.querySelectorAll<HTMLElement>('[data-event-index]')]
+        .every((tick) => tick.dataset.state === 'complete'),
+    ).toBe(true)
   })
 
   it('renders an inert empty state without inventing a current event', () => {

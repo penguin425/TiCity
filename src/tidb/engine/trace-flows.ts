@@ -53,6 +53,8 @@ const MAX_LIFE_MS = 1050
 const EVENT_DWELL_MS = 110
 const MAX_MODEL_GAP_BONUS_MS = 520
 const STATIONARY_DISTANCE = 0.75
+export const TRACE_LOOP_HOLD_MS = 1_800
+const FAILED_TRACE_LOOP_HOLD_MS = 2_600
 
 const _from = new THREE.Vector3()
 const _to = new THREE.Vector3()
@@ -66,7 +68,12 @@ const _forward = new THREE.Vector3(0, 0, 1)
 const _hidden = new THREE.Vector3(0, -1000, 0)
 const _zero = new THREE.Vector3(0, 0, 0)
 
-export type TracePlaybackPhase = 'idle' | 'playing' | 'paused' | 'complete'
+export type TracePlaybackPhase =
+  | 'idle'
+  | 'playing'
+  | 'holding'
+  | 'paused'
+  | 'complete'
 
 export interface TraceFlowPlayback {
   readonly phase: TracePlaybackPhase
@@ -78,6 +85,10 @@ export interface TraceFlowPlayback {
   readonly elapsedMs: number
   readonly durationMs: number
   readonly motion: 'full' | 'reduced'
+  readonly atEnd: boolean
+  readonly looping: boolean
+  readonly iteration: number
+  readonly holdProgress: number
 }
 
 export interface TracePresentationSchedule {
@@ -98,6 +109,7 @@ export interface TraceFlowController {
   update(deltaSeconds: number): void
   setPlaybackRate(rate: number): void
   setPaused(paused: boolean): void
+  setLooping(enabled: boolean): void
   step(direction: -1 | 1): void
   replay(): void
   setTheme(theme: CityTheme): void
@@ -320,11 +332,14 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   let clockMs = 0
   let playbackRate = 1
   let presentationPaused = false
+  let loopHoldMs = 0
+  let iteration = 0
   let theme: CityTheme = 'night'
   const reducedMotion =
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  let looping = !reducedMotion
   const playbackState = {
     phase: 'idle' as TracePlaybackPhase,
     currentIndex: -1,
@@ -335,6 +350,10 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     elapsedMs: 0,
     durationMs: 0,
     motion: reducedMotion ? 'reduced' as const : 'full' as const,
+    atEnd: false,
+    looping,
+    iteration: 0,
+    holdProgress: 0,
   }
 
   for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -462,6 +481,10 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
 
   function syncPlaybackState(): void {
     const index = currentIndex()
+    const atEnd = eventCount > 0 && clockMs >= durationMs
+    const holdDuration = events[eventCount - 1]?.status === 'failed'
+      ? FAILED_TRACE_LOOP_HOLD_MS
+      : TRACE_LOOP_HOLD_MS
     playbackState.currentIndex = index
     playbackState.total = eventCount
     playbackState.event = index >= 0 ? events[index] : null
@@ -471,15 +494,31 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     playbackState.overallProgress = eventCount === 0
       ? 0
       : clamp((index + playbackState.eventProgress) / eventCount, 0, 1)
-    playbackState.elapsedMs = clockMs
+    playbackState.elapsedMs = Math.min(clockMs, durationMs)
     playbackState.durationMs = durationMs
+    playbackState.atEnd = atEnd
+    playbackState.looping = looping
+    playbackState.iteration = iteration
+    playbackState.holdProgress = atEnd && looping
+      ? clamp(loopHoldMs / holdDuration, 0, 1)
+      : 0
     playbackState.phase = eventCount === 0
       ? 'idle'
-      : clockMs >= durationMs
-        ? 'complete'
-        : presentationPaused || playbackRate === 0
-          ? 'paused'
+      : presentationPaused || playbackRate === 0
+        ? 'paused'
+        : atEnd
+          ? looping
+            ? 'holding'
+            : 'complete'
           : 'playing'
+  }
+
+  function restartIteration(automatic: boolean): void {
+    resetPool()
+    eventScheduled.fill(0)
+    clockMs = 0
+    loopHoldMs = 0
+    iteration = automatic ? iteration + 1 : eventCount > 0 ? 1 : 0
   }
 
   function updateGuide(eventIndex: number, eventProgress: number): void {
@@ -555,10 +594,12 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   function play(receipt: TraceReceipt): void {
     resetPool()
     clockMs = 0
+    loopHoldMs = 0
     dropped = 0
     presentationPaused = false
     events = receipt.events
     eventCount = events.length
+    iteration = eventCount > 0 ? 1 : 0
     eventDomain = new Uint8Array(eventCount)
     eventFailed = new Uint8Array(eventCount)
     eventRoutes = new Float32Array(eventCount * 7)
@@ -597,8 +638,17 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
 
   function update(deltaSeconds: number): void {
     const effectiveRate = presentationPaused ? 0 : playbackRate
-    const deltaMs = Math.max(0, deltaSeconds) * 1000 * effectiveRate
-    clockMs = Math.min(durationMs, clockMs + deltaMs)
+    const realDeltaMs = Math.max(0, deltaSeconds) * 1000
+    const deltaMs = realDeltaMs * effectiveRate
+    if (clockMs < durationMs) {
+      clockMs = Math.min(durationMs, clockMs + deltaMs)
+    } else if (eventCount > 0 && looping && effectiveRate > 0) {
+      loopHoldMs += realDeltaMs
+      const holdDuration = events[eventCount - 1]?.status === 'failed'
+        ? FAILED_TRACE_LOOP_HOLD_MS
+        : TRACE_LOOP_HOLD_MS
+      if (loopHoldMs >= holdDuration) restartIteration(true)
+    }
     for (let eventIndex = 0; eventIndex < eventCount; eventIndex++) {
       if (!eventScheduled[eventIndex] && eventStarts[eventIndex] <= clockMs) spawn(eventIndex)
     }
@@ -664,21 +714,23 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       presentationPaused = paused
       syncPlaybackState()
     },
+    setLooping(enabled: boolean): void {
+      looping = enabled
+      if (!enabled) loopHoldMs = 0
+      syncPlaybackState()
+    },
     step(direction: -1 | 1): void {
       if (eventCount === 0) return
       const from = playbackState.currentIndex < 0 ? 0 : playbackState.currentIndex
       const target = clamp(from + direction, 0, eventCount - 1)
       presentationPaused = true
-      resetPool()
-      eventScheduled.fill(0)
+      restartIteration(false)
       clockMs = eventStarts[target] + eventLife[target] * 0.55
       update(0)
     },
     replay(): void {
       if (eventCount === 0) return
-      resetPool()
-      eventScheduled.fill(0)
-      clockMs = 0
+      restartIteration(false)
       presentationPaused = false
       syncPlaybackState()
       updateGuide(playbackState.currentIndex, playbackState.eventProgress)
@@ -698,6 +750,8 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       eventCount = 0
       durationMs = 0
       clockMs = 0
+      loopHoldMs = 0
+      iteration = 0
       presentationPaused = false
       syncPlaybackState()
     },
