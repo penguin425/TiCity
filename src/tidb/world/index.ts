@@ -13,6 +13,7 @@ import type { CityTheme } from './palette'
 export interface WorldOptions {
   readonly theme?: CityTheme
   readonly mode?: CityViewMode
+  readonly hudExpanded?: boolean
   readonly autoStart?: boolean
   readonly onSelect?: (component: CityComponent | null) => void
 }
@@ -24,6 +25,7 @@ export interface WorldHandle {
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
+  setHudExpanded(expanded: boolean): void
   resize(): void
   enableAudio(): Promise<boolean>
   dispose(): void
@@ -53,6 +55,9 @@ export function createTiDBWorld(
     },
     setMode(mode: CityViewMode): void {
       shell.setMode(mode)
+    },
+    setHudExpanded(expanded: boolean): void {
+      shell.setHudExpanded(expanded)
     },
     resize(): void {
       shell.resize()

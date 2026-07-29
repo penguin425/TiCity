@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-theme="night">
+<html lang="ja" data-theme="day">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -11,7 +11,7 @@
       content="TiDBの分散SQLアーキテクチャを歩いて観察できる、決定論的な3D教育モデル。"
     />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#07121f" />
+    <meta name="theme-color" content="#d7e9f1" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="TiCity" />
     <meta property="og:title" content="TiCity · Distributed SQL, made visible" />
@@ -20,6 +20,26 @@
       content="An independent 3D educational model of TiDB, TiKV, TiFlash, transactions, and Raft."
     />
     <meta property="og:url" content="https://penguin425.github.io/TiCity/" />
+    <meta
+      property="og:image"
+      content="https://penguin425.github.io/TiCity/og.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="TiCity visualizes TiDB, PD, TiKV Region voters, GC, and TiFlash as an interactive night-time data city."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TiCity · Distributed SQL, made visible" />
+    <meta
+      name="twitter:description"
+      content="An independent 3D educational model of TiDB, TiKV, TiFlash, transactions, and Raft."
+    />
+    <meta
+      name="twitter:image"
+      content="https://penguin425.github.io/TiCity/og.png"
+    />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>TiCity · 分散SQLを歩いて理解する</title>
     <script>
@@ -34,7 +54,7 @@
           // Storage can be unavailable; the document defaults remain usable.
         }
         document.documentElement.lang = language === 'en' ? 'en' : 'ja'
-        document.documentElement.dataset.theme = theme === 'day' ? 'day' : 'night'
+        document.documentElement.dataset.theme = theme === 'night' ? 'night' : 'day'
       })()
     </script>
   </head>

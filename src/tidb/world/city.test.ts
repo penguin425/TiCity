@@ -55,6 +55,47 @@ describe('TiCity scene graph', () => {
     city.dispose()
   })
 
+  it('keeps decorative detail inside the scene-graph rendering budget', () => {
+    const city = createTiDBSceneGraph()
+    const geometries = new Set<THREE.BufferGeometry>()
+    const materials = new Set<THREE.Material>()
+    let drawables = 0
+    let instancedMeshes = 0
+    let instances = 0
+    let shadowCasters = 0
+
+    city.root.traverse((object) => {
+      const drawable = object as THREE.Object3D & {
+        geometry?: THREE.BufferGeometry
+        material?: THREE.Material | THREE.Material[]
+      }
+      if (drawable.geometry && drawable.material) {
+        drawables += 1
+        geometries.add(drawable.geometry)
+        const boundMaterials = Array.isArray(drawable.material)
+          ? drawable.material
+          : [drawable.material]
+        for (const material of boundMaterials) materials.add(material)
+      }
+      if (object instanceof THREE.InstancedMesh) {
+        instancedMeshes += 1
+        instances += object.count
+      }
+      if (object.castShadow) shadowCasters += 1
+    })
+
+    // These are ceilings rather than golden counts: visual polish has room to
+    // evolve, while an accidental mesh-per-window or shadow-per-detail change
+    // still fails clearly.
+    expect(drawables).toBeLessThanOrEqual(225)
+    expect(geometries.size).toBeLessThanOrEqual(225)
+    expect(materials.size).toBeLessThanOrEqual(45)
+    expect(shadowCasters).toBeLessThanOrEqual(55)
+    expect(instancedMeshes).toBeGreaterThanOrEqual(30)
+    expect(instances).toBeGreaterThanOrEqual(1_000)
+    city.dispose()
+  })
+
   it('projects leader election and hotspot state without losing it on theme change', () => {
     const city = createTiDBSceneGraph()
     const simulation = createTiDBSimulation({ seed: 7 })

@@ -80,7 +80,13 @@ describe('TiDB diagnostic projections', () => {
 
     expect(root.querySelectorAll('[data-model-label="true"]').length).toBeGreaterThanOrEqual(6)
     expect(root.querySelectorAll('pre[tabindex="0"]')).toHaveLength(SYMPTOM_GUIDES.length)
+    expect(root.querySelectorAll('[data-summary-metric]')).toHaveLength(DIAGNOSE_SECTIONS.length)
+    expect(root.querySelectorAll('.tidb-diagnose__spark[role="img"]'))
+      .toHaveLength(DIAGNOSE_SECTIONS.length)
+    expect(root.querySelectorAll('.tidb-diagnose__guide-sql'))
+      .toHaveLength(SYMPTOM_GUIDES.length)
     expect(root.textContent).toContain('MODEL / SIMULATED')
+    expect(root.textContent).toContain('Model health summary')
     expect(root.textContent).toContain('txn-7')
   })
 })

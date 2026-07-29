@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity v0.2 targets **TiDB v8.5 LTS**. This document records which visible
+TiCity v0.3 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
 which capabilities are not implemented.
 
@@ -57,4 +57,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.2.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.3.

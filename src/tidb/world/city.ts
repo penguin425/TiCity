@@ -17,6 +17,7 @@ import {
   regionPeerPosition,
 } from './layout'
 import type { ComponentAnchorId, PlanBounds, Point3, RouteLeg } from './layout'
+import { createCityEnvironment } from './environment'
 import { SEMANTIC_COLORS, createCityMaterials } from './palette'
 import type { CityMaterials, CityTheme, SemanticDomain } from './palette'
 
@@ -78,6 +79,7 @@ export interface TiDBSceneGraph {
   readonly materials: CityMaterials
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
+  updateVisuals(deltaSeconds: number): void
   setTheme(theme: CityTheme): void
   setFocus(id: string | null): void
   dispose(): void
@@ -159,11 +161,12 @@ function addBox(
   position: Point3,
   material: THREE.Material,
   name: string,
+  castShadow = false,
 ): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), material)
   mesh.position.set(position[0], position[1], position[2])
   mesh.name = name
-  mesh.castShadow = true
+  mesh.castShadow = castShadow
   mesh.receiveShadow = true
   parent.add(mesh)
   return mesh
@@ -177,14 +180,145 @@ function addCylinder(
   material: THREE.Material,
   name: string,
   sides = 12,
+  castShadow = false,
 ): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, sides), material)
   mesh.position.set(position[0], position[1], position[2])
   mesh.name = name
-  mesh.castShadow = true
+  mesh.castShadow = castShadow
   mesh.receiveShadow = true
   parent.add(mesh)
   return mesh
+}
+
+interface BoxInstance {
+  readonly position: Point3
+  readonly size: Point3
+  readonly rotationY?: number
+}
+
+function addInstancedBoxes(
+  parent: THREE.Object3D,
+  instances: readonly BoxInstance[],
+  material: THREE.Material,
+  name: string,
+  castShadow = false,
+): THREE.InstancedMesh {
+  const geometry = new THREE.BoxGeometry(1, 1, 1)
+  const mesh = new THREE.InstancedMesh(geometry, material, instances.length)
+  mesh.name = name
+  mesh.castShadow = castShadow
+  mesh.receiveShadow = castShadow
+  const matrix = new THREE.Matrix4()
+  const position = new THREE.Vector3()
+  const scale = new THREE.Vector3()
+  const rotation = new THREE.Quaternion()
+  const axis = new THREE.Vector3(0, 1, 0)
+  for (let index = 0; index < instances.length; index++) {
+    const instance = instances[index]
+    position.set(instance.position[0], instance.position[1], instance.position[2])
+    scale.set(instance.size[0], instance.size[1], instance.size[2])
+    rotation.setFromAxisAngle(axis, instance.rotationY ?? 0)
+    matrix.compose(position, rotation, scale)
+    mesh.setMatrixAt(index, matrix)
+  }
+  mesh.instanceMatrix.needsUpdate = true
+  parent.add(mesh)
+  return mesh
+}
+
+function addFacadeWindows(
+  parent: THREE.Object3D,
+  center: Point3,
+  width: number,
+  height: number,
+  depth: number,
+  columns: number,
+  rows: number,
+  material: THREE.Material,
+  name: string,
+): THREE.InstancedMesh {
+  const instances: BoxInstance[] = []
+  const panelWidth = Math.max(1.2, (width - 5) / columns * 0.6)
+  const panelHeight = Math.max(0.7, (height - 5) / rows * 0.38)
+  const yBottom = center[1] - height / 2 + 3.2
+  const yStep = (height - 5.2) / Math.max(1, rows - 1)
+  const xStep = (width - 7) / Math.max(1, columns - 1)
+  const sideColumns = Math.max(2, Math.round(columns * depth / width))
+  const zStep = (depth - 7) / Math.max(1, sideColumns - 1)
+  for (let row = 0; row < rows; row++) {
+    const y = yBottom + row * yStep
+    for (let column = 0; column < columns; column++) {
+      const x = center[0] - (width - 7) / 2 + column * xStep
+      instances.push(
+        { position: [x, y, center[2] + depth / 2 + 0.12], size: [panelWidth, panelHeight, 0.32] },
+        { position: [x, y, center[2] - depth / 2 - 0.12], size: [panelWidth, panelHeight, 0.32] },
+      )
+    }
+    for (let column = 0; column < sideColumns; column++) {
+      const z = center[2] - (depth - 7) / 2 + column * zStep
+      instances.push(
+        { position: [center[0] + width / 2 + 0.12, y, z], size: [0.32, panelHeight, panelWidth] },
+        { position: [center[0] - width / 2 - 0.12, y, z], size: [0.32, panelHeight, panelWidth] },
+      )
+    }
+  }
+  return addInstancedBoxes(parent, instances, material, name)
+}
+
+function addHorizontalBands(
+  parent: THREE.Object3D,
+  center: Point3,
+  width: number,
+  height: number,
+  depth: number,
+  count: number,
+  material: THREE.Material,
+  name: string,
+): THREE.InstancedMesh {
+  const instances: BoxInstance[] = []
+  for (let index = 0; index < count; index++) {
+    const y = center[1] - height / 2 + ((index + 1) / (count + 1)) * height
+    instances.push({
+      position: [center[0], y, center[2]],
+      size: [width + 0.7, 0.45, depth + 0.7],
+    })
+  }
+  return addInstancedBoxes(parent, instances, material, name)
+}
+
+function addBoxOutline(
+  parent: THREE.Object3D,
+  size: Point3,
+  position: Point3,
+  material: THREE.LineBasicMaterial,
+  name: string,
+): THREE.LineSegments {
+  const lines = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(size[0], size[1], size[2]), 24),
+    material,
+  )
+  lines.position.set(position[0], position[1], position[2])
+  lines.name = name
+  lines.renderOrder = 5
+  parent.add(lines)
+  return lines
+}
+
+function addHorizontalRing(
+  parent: THREE.Object3D,
+  radius: number,
+  tube: number,
+  position: Point3,
+  material: THREE.Material,
+  name: string,
+): THREE.Mesh {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 36), material)
+  ring.position.set(position[0], position[1], position[2])
+  ring.rotation.x = Math.PI / 2
+  ring.name = name
+  parent.add(ring)
+  return ring
 }
 
 function addCollider(
@@ -283,16 +417,6 @@ function raftNetwork(material: THREE.LineBasicMaterial): CityNetwork {
   return { domain: 'raft', object, componentIds: ids }
 }
 
-function makeGround(materials: CityMaterials): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(TICITY_LAYOUT.groundSize, TICITY_LAYOUT.groundSize, 1, 1)
-  const mesh = new THREE.Mesh(geometry, materials.ground)
-  mesh.rotation.x = -Math.PI / 2
-  mesh.position.y = -0.2
-  mesh.receiveShadow = true
-  mesh.name = 'ticity:ground'
-  return mesh
-}
-
 function addDistrictPad(
   root: THREE.Object3D,
   bounds: PlanBounds,
@@ -319,14 +443,44 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const colliders: CityCollider[] = []
   const networks: CityNetwork[] = []
 
-  const ground = makeGround(materials)
-  root.add(ground)
+  const environment = createCityEnvironment()
+  const ground = environment.ground
+  root.add(environment.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
   clients.name = 'district:clients'
   addDistrictPad(clients, DISTRICT_BOUNDS.clients, materials.pavement, 'clients:apron')
-  addBox(clients, [64, 9, 22], [0, 4.8, -288], materials.darkStructure, 'clients:terminal')
+  addBox(clients, [64, 9, 22], [0, 4.8, -288], materials.darkStructure, 'clients:terminal', true)
+  addBox(clients, [74, 1.6, 30], [0, 10.1, -288], materials.trim, 'clients:canopy')
+  addBox(clients, [28, 7, 16], [0, 13.7, -288], materials.structure, 'clients:dispatch-deck', true)
+  addBox(clients, [32, 1.2, 20], [0, 17.8, -288], materials.client, 'clients:signal-roof')
+  for (const x of [-26, 26]) {
+    addCylinder(clients, 2.6, 32, [x, 25, -288], materials.trim, 'clients:uplink-mast', 10, true)
+    addHorizontalRing(clients, 5.4, 0.55, [x, 42, -288], materials.client, 'clients:uplink-ring')
+    addHorizontalRing(clients, 3.2, 0.38, [x, 48, -288], materials.window, 'clients:uplink-signal')
+  }
+  addCylinder(clients, 5, 52, [0, 43, -288], materials.client, 'clients:request-beacon', 12, true)
+  addHorizontalRing(clients, 9, 0.8, [0, 69, -288], materials.client, 'clients:request-ring')
+  addHorizontalRing(clients, 5.5, 0.48, [0, 77, -288], materials.window, 'clients:request-signal')
+  addFacadeWindows(
+    clients,
+    [0, 13.7, -288],
+    28,
+    7,
+    16,
+    5,
+    2,
+    materials.window,
+    'clients:dispatch-windows',
+  )
+  addBoxOutline(
+    clients,
+    [64, 9, 22],
+    [0, 4.8, -288],
+    materials.edge,
+    'clients:terminal-outline',
+  )
   for (let i = 0; i < 5; i++) {
     addBox(
       clients,
@@ -357,9 +511,30 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     const anchor = COMPONENT_ANCHORS[`tiproxy.${proxy}` as 'tiproxy.0' | 'tiproxy.1']
     const group = new THREE.Group()
     group.name = `tiproxy:${proxy}`
-    addBox(group, [5, 14, 5], [anchor[0] - 8, 7, anchor[2]], materials.structure, 'gate:left')
-    addBox(group, [5, 14, 5], [anchor[0] + 8, 7, anchor[2]], materials.structure, 'gate:right')
+    addBox(group, [5, 14, 5], [anchor[0] - 8, 7, anchor[2]], materials.structure, 'gate:left', true)
+    addBox(group, [5, 14, 5], [anchor[0] + 8, 7, anchor[2]], materials.structure, 'gate:right', true)
     addBox(group, [21, 4, 5], [anchor[0], 13, anchor[2]], materials.sql, 'gate:balancer')
+    addBox(group, [27, 1.2, 11], [anchor[0], 0.8, anchor[2]], materials.trim, 'gate:threshold')
+    addInstancedBoxes(
+      group,
+      [
+        { position: [anchor[0] - 8, 7, anchor[2] + 2.65], size: [1.5, 8.5, 0.35] },
+        { position: [anchor[0] + 8, 7, anchor[2] + 2.65], size: [1.5, 8.5, 0.35] },
+      ],
+      materials.window,
+      'gate:status-lights',
+    )
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(5.2, 0.65, 8, 32), materials.sql)
+    halo.position.set(anchor[0], 13, anchor[2] + 3)
+    halo.name = 'gate:connection-halo'
+    group.add(halo)
+    addBoxOutline(
+      group,
+      [21, 4, 5],
+      [anchor[0], 13, anchor[2]],
+      materials.edge,
+      'gate:balancer-outline',
+    )
     proxyDistrict.add(group)
     registerGroup(
       registry,
@@ -384,9 +559,60 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     const anchor = COMPONENT_ANCHORS[`tidb.${server}` as 'tidb.0' | 'tidb.1' | 'tidb.2']
     const group = new THREE.Group()
     group.name = `tidb:${server}`
-    addBox(group, [30, 30, 30], [anchor[0], 15.7, anchor[2]], materials.structure, 'sql:tower')
-    addBox(group, [23, 3, 23], [anchor[0], 22, anchor[2]], materials.sql, 'sql:optimizer')
-    addCylinder(group, 3, 13, [anchor[0], 36, anchor[2]], materials.sql, 'sql:stateless-core', 10)
+    addBox(group, [30, 30, 30], [anchor[0], 15.7, anchor[2]], materials.structure, 'sql:tower', true)
+    addBox(group, [24, 9, 24], [anchor[0], 34.7, anchor[2]], materials.darkStructure, 'sql:upper-tier', true)
+    addBox(group, [18, 7, 18], [anchor[0], 42.7, anchor[2]], materials.structure, 'sql:planner-tier')
+    addBox(group, [32, 2.4, 32], [anchor[0], 29.8, anchor[2]], materials.sql, 'sql:optimizer')
+    addCylinder(group, 3.2, 13, [anchor[0], 52.4, anchor[2]], materials.sql, 'sql:stateless-core', 10)
+    addCylinder(group, 0.65, 13, [anchor[0], 63.5, anchor[2]], materials.trim, 'sql:antenna', 8)
+    addHorizontalRing(group, 7.2, 0.7, [anchor[0], 49, anchor[2]], materials.sql, 'sql:execution-ring')
+    addHorizontalRing(group, 5, 0.45, [anchor[0], 57.5, anchor[2]], materials.window, 'sql:signal-ring')
+    addFacadeWindows(
+      group,
+      [anchor[0], 15.7, anchor[2]],
+      30,
+      30,
+      30,
+      4,
+      5,
+      materials.window,
+      'sql:tower-windows',
+    )
+    addFacadeWindows(
+      group,
+      [anchor[0], 34.7, anchor[2]],
+      24,
+      9,
+      24,
+      4,
+      2,
+      materials.window,
+      'sql:upper-windows',
+    )
+    addHorizontalBands(
+      group,
+      [anchor[0], 15.7, anchor[2]],
+      30,
+      30,
+      30,
+      4,
+      materials.trim,
+      'sql:tower-bands',
+    )
+    addBoxOutline(
+      group,
+      [30, 30, 30],
+      [anchor[0], 15.7, anchor[2]],
+      materials.edge,
+      'sql:tower-outline',
+    )
+    addBoxOutline(
+      group,
+      [24, 9, 24],
+      [anchor[0], 34.7, anchor[2]],
+      materials.edge,
+      'sql:upper-outline',
+    )
     tidbDistrict.add(group)
     registerGroup(
       registry,
@@ -409,6 +635,23 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const pdHub = new THREE.Group()
   pdHub.name = 'pd:control'
   addCylinder(pdHub, 30, 4, [232, 2.4, -102], materials.darkStructure, 'pd:control-deck', 24)
+  addCylinder(pdHub, 19, 20, [232, 12.5, -102], materials.structure, 'pd:control-tower', 18, true)
+  addCylinder(pdHub, 12, 28, [232, 26.5, -102], materials.darkStructure, 'pd:tso-core', 16, true)
+  addCylinder(pdHub, 2.2, 24, [232, 48, -102], materials.tso, 'pd:clock-spire', 10)
+  addHorizontalRing(pdHub, 22, 1.1, [232, 8, -102], materials.tso, 'pd:scheduler-ring')
+  addHorizontalRing(pdHub, 15, 0.8, [232, 22, -102], materials.window, 'pd:tso-ring')
+  addHorizontalRing(pdHub, 8.5, 0.55, [232, 40, -102], materials.tso, 'pd:clock-ring')
+  addFacadeWindows(
+    pdHub,
+    [232, 12.5, -102],
+    31,
+    18,
+    31,
+    6,
+    4,
+    materials.window,
+    'pd:control-windows',
+  )
   pdDistrict.add(pdHub)
   registerGroup(
     registry,
@@ -424,8 +667,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     const anchor = COMPONENT_ANCHORS[`pd.${node}` as 'pd.0' | 'pd.1' | 'pd.2']
     const group = new THREE.Group()
     group.name = `pd:${node}`
-    addCylinder(group, 9, 14, [anchor[0], 7.4, anchor[2]], materials.structure, 'pd:node', 12)
+    addCylinder(group, 9, 14, [anchor[0], 7.4, anchor[2]], materials.structure, 'pd:node', 12, true)
     addCylinder(group, 4.5, 15, [anchor[0], 10, anchor[2]], materials.tso, 'pd:tso-clock', 12)
+    addCylinder(group, 0.65, 12, [anchor[0], 23, anchor[2]], materials.trim, 'pd:node-antenna', 8)
+    addHorizontalRing(group, 7.2, 0.45, [anchor[0], 16, anchor[2]], materials.window, 'pd:node-status-ring')
     pdDistrict.add(group)
     registerGroup(
       registry,
@@ -450,7 +695,65 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     const anchor = COMPONENT_ANCHORS[`tikv.${store}` as 'tikv.0' | 'tikv.1' | 'tikv.2']
     const group = new THREE.Group()
     group.name = `tikv:${store}`
-    addBox(group, [100, 5, 100], [anchor[0], 2.9, anchor[2]], materials.darkStructure, 'tikv:store')
+    addBox(group, [100, 5, 100], [anchor[0], 2.9, anchor[2]], materials.darkStructure, 'tikv:store', true)
+    addBoxOutline(
+      group,
+      [100, 5, 100],
+      [anchor[0], 2.9, anchor[2]],
+      materials.edge,
+      'tikv:deck-outline',
+    )
+    const cornerPylons: BoxInstance[] = []
+    const cornerCaps: BoxInstance[] = []
+    for (const dx of [-44, 44]) {
+      for (const dz of [-44, 44]) {
+        cornerPylons.push({
+          position: [anchor[0] + dx, 10.5, anchor[2] + dz],
+          size: [5, 16, 5],
+        })
+        cornerCaps.push({
+          position: [anchor[0] + dx, 19, anchor[2] + dz],
+          size: [6.8, 1.4, 6.8],
+        })
+      }
+    }
+    addInstancedBoxes(group, cornerPylons, materials.trim, 'tikv:campus-pylons', true)
+    addInstancedBoxes(group, cornerCaps, materials.kv, 'tikv:campus-beacons')
+    addBox(
+      group,
+      [36, 8, 3.2],
+      [anchor[0], 9, anchor[2] - 49],
+      materials.kv,
+      'tikv:store-sign',
+    )
+    addFacadeWindows(
+      group,
+      [anchor[0], 9, anchor[2] - 49],
+      36,
+      8,
+      3.2,
+      6,
+      2,
+      materials.window,
+      'tikv:store-sign-lights',
+    )
+    addCylinder(
+      group,
+      2.4,
+      18,
+      [anchor[0], 12, anchor[2] + 47],
+      materials.trim,
+      'tikv:telemetry-mast',
+      10,
+    )
+    addHorizontalRing(
+      group,
+      6.5,
+      0.55,
+      [anchor[0], 21, anchor[2] + 47],
+      materials.kv,
+      'tikv:telemetry-ring',
+    )
     campusRoot.add(group)
     registerGroup(
       registry,
@@ -467,11 +770,11 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const peerCount = TICITY_LAYOUT.regionCount * TICITY_LAYOUT.peersPerRegion
   const peerBase = new Float32Array(peerCount * 3)
   const peerComponents = new Array<CityComponent>(peerCount)
-  const peerGeometry = new THREE.BoxGeometry(8.4, 5.2, 7.2)
+  const peerGeometry = new THREE.BoxGeometry(8.4, 7.2, 7.2)
   const peerMaterial = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0x1a3144,
-    emissiveIntensity: 0.72,
+    emissiveIntensity: 0.94,
     roughness: 0.62,
     metalness: 0.22,
     vertexColors: true,
@@ -494,7 +797,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       peerBase[peerInstance * 3 + 1] = point[1]
       peerBase[peerInstance * 3 + 2] = point[2]
       _color.setHex(leader ? SEMANTIC_COLORS.night.raft : SEMANTIC_COLORS.night.kv)
-      if (!leader) _color.multiplyScalar(0.54)
+      if (!leader) _color.multiplyScalar(0.76)
       peers.setColorAt(peerInstance, _color)
       const component: CityComponent = {
         id: `region.${region}.peer.${store}`,
@@ -517,16 +820,76 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   peers.instanceMatrix.needsUpdate = true
   if (peers.instanceColor) peers.instanceColor.needsUpdate = true
   campusRoot.add(peers)
+
+  const peerLights: BoxInstance[] = []
+  for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
+      const point = regionPeerPosition(store, region)
+      peerLights.push(
+        {
+          position: [point[0] - 1.8, point[1] + 0.2, point[2] + 3.68],
+          size: [1.4, 0.55, 0.24],
+        },
+        {
+          position: [point[0] + 1.8, point[1] + 0.2, point[2] + 3.68],
+          size: [1.4, 0.55, 0.24],
+        },
+      )
+    }
+  }
+  addInstancedBoxes(
+    campusRoot,
+    peerLights,
+    materials.window,
+    'tikv:peer-status-lights',
+  )
   root.add(campusRoot)
 
   /* GC yard makes safe-point progress spatially distinct from compaction. */
   const gc = new THREE.Group()
   gc.name = 'district:gc'
   addDistrictPad(gc, DISTRICT_BOUNDS.gc, materials.pavement, 'gc:apron')
-  addBox(gc, [76, 7, 58], [-231, 3.8, 215], materials.darkStructure, 'gc:yard')
+  addBox(gc, [76, 7, 58], [-231, 3.8, 215], materials.darkStructure, 'gc:yard', true)
   for (let bin = 0; bin < 5; bin++) {
-    addCylinder(gc, 6, 9, [-259 + bin * 14, 8, 215], materials.gc, `gc:versions:${bin}`, 10)
+    const x = -259 + bin * 14
+    addCylinder(gc, 6, 9, [x, 8, 215], materials.gc, `gc:versions:${bin}`, 10)
+    addHorizontalRing(gc, 6.2, 0.42, [x, 12.5, 215], materials.window, `gc:bin-ring:${bin}`)
   }
+  addInstancedBoxes(
+    gc,
+    [
+      { position: [-265, 15, 190], size: [4, 24, 4] },
+      { position: [-197, 15, 190], size: [4, 24, 4] },
+      { position: [-265, 15, 240], size: [4, 24, 4] },
+      { position: [-197, 15, 240], size: [4, 24, 4] },
+      { position: [-231, 27, 190], size: [72, 4, 4] },
+      { position: [-231, 27, 240], size: [72, 4, 4] },
+    ],
+    materials.trim,
+    'gc:reclaimer-gantry',
+    true,
+  )
+  addBox(gc, [28, 18, 18], [-231, 16, 244], materials.structure, 'gc:control-room', true)
+  addFacadeWindows(
+    gc,
+    [-231, 16, 244],
+    28,
+    18,
+    18,
+    5,
+    3,
+    materials.window,
+    'gc:control-windows',
+  )
+  addCylinder(gc, 2.2, 28, [-270, 18, 239], materials.trim, 'gc:exhaust-stack', 10)
+  addHorizontalRing(gc, 3.4, 0.48, [-270, 32, 239], materials.gc, 'gc:safe-point-beacon')
+  addBoxOutline(
+    gc,
+    [76, 7, 58],
+    [-231, 3.8, 215],
+    materials.edge,
+    'gc:yard-outline',
+  )
   root.add(gc)
   registerGroup(
     registry,
@@ -544,16 +907,44 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const tiflash = new THREE.Group()
   tiflash.name = 'district:tiflash'
   addDistrictPad(tiflash, DISTRICT_BOUNDS.tiflash, materials.pavement, 'tiflash:apron')
-  addBox(tiflash, [82, 8, 66], [230, 4.4, 216], materials.darkStructure, 'tiflash:store')
+  addBox(tiflash, [82, 8, 66], [230, 4.4, 216], materials.darkStructure, 'tiflash:store', true)
+  const tiflashWindows: BoxInstance[] = []
+  const tiflashCrowns: BoxInstance[] = []
   for (let column = 0; column < 6; column++) {
+    const x = 196 + column * 14
+    const height = 28 + (column % 2) * 8
+    const y = 18 + (column % 2) * 4
     addBox(
       tiflash,
-      [8, 28 + (column % 2) * 8, 38],
-      [196 + column * 14, 18 + (column % 2) * 4, 216],
+      [8, height, 38],
+      [x, y, 216],
       materials.tiflash,
       `tiflash:column:${column}`,
+      true,
     )
+    for (let row = 0; row < 5; row++) {
+      tiflashWindows.push({
+        position: [x, y - height / 2 + 5 + row * ((height - 9) / 4), 235.2],
+        size: [4.8, 1.1, 0.38],
+      })
+    }
+    tiflashCrowns.push({
+      position: [x, y + height / 2 + 2.5, 216],
+      size: [10, 4.2 + (column % 2) * 1.5, 42],
+    })
   }
+  addInstancedBoxes(tiflash, tiflashWindows, materials.window, 'tiflash:column-windows')
+  addInstancedBoxes(tiflash, tiflashCrowns, materials.trim, 'tiflash:column-crowns')
+  addCylinder(tiflash, 4, 30, [230, 25, 248], materials.trim, 'tiflash:mpp-spine', 12)
+  addHorizontalRing(tiflash, 10, 0.75, [230, 40, 248], materials.tiflash, 'tiflash:mpp-ring')
+  addHorizontalRing(tiflash, 6.5, 0.5, [230, 47, 248], materials.window, 'tiflash:learner-ring')
+  addBoxOutline(
+    tiflash,
+    [82, 8, 66],
+    [230, 4.4, 216],
+    materials.edge,
+    'tiflash:store-outline',
+  )
   root.add(tiflash)
   registerGroup(
     registry,
@@ -589,7 +980,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
         _color.setHex(
           leader ? SEMANTIC_COLORS[next].raft : SEMANTIC_COLORS[next].kv,
         )
-        if (!leader) _color.multiplyScalar(next === 'night' ? 0.54 : 0.84)
+        if (!leader) _color.multiplyScalar(next === 'night' ? 0.76 : 0.9)
         peers.setColorAt(instance, _color)
       }
     }
@@ -637,7 +1028,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
               ? SEMANTIC_COLORS[theme].raft
               : SEMANTIC_COLORS[theme].kv,
         )
-        if (!leader && !unhealthy) _color.multiplyScalar(theme === 'night' ? 0.54 : 0.84)
+        if (!leader && !unhealthy) _color.multiplyScalar(theme === 'night' ? 0.76 : 0.9)
         peers.setColorAt(instance, _color)
 
         component.peerRole = leader ? 'leader' : 'follower'
@@ -674,10 +1065,14 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       return true
     },
     updateState,
+    updateVisuals(deltaSeconds: number): void {
+      environment.update(deltaSeconds)
+    },
     setTheme(next: CityTheme): void {
       if (next === theme) return
       theme = next
       materials.apply(next)
+      environment.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -687,6 +1082,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       if (focused) focused.object.userData.focused = true
     },
     dispose(): void {
+      environment.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()

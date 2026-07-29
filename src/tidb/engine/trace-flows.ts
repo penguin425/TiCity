@@ -166,7 +166,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   root.name = 'ticity:trace-flows'
 
   /* A freight pod reads as a transported unit, not a tracer round. */
-  const geometry = new THREE.BoxGeometry(1.15, 0.8, 1.35)
+  const geometry = new THREE.BoxGeometry(1.9, 1.15, 2.35)
   const material = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     vertexColors: true,
@@ -176,6 +176,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   mesh.name = 'trace-flow:packets'
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
   mesh.frustumCulled = false
+  mesh.count = 0
   root.add(mesh)
 
   const free = new Int16Array(MAX_PARTICLES)
@@ -226,6 +227,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     freeCount = MAX_PARTICLES
     for (let i = 0; i < MAX_PARTICLES; i++) free[i] = MAX_PARTICLES - 1 - i
     mesh.instanceMatrix.needsUpdate = true
+    mesh.count = 0
     activity.fill(0)
   }
 
@@ -242,6 +244,14 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     particleDomain[particle] = eventDomain[eventIndex]
     particleFailed[particle] = eventFailed[eventIndex]
     paintParticle(particle)
+  }
+
+  function syncDrawCount(): void {
+    let highest = -1
+    for (let index = 0; index < activeCount; index++) {
+      highest = Math.max(highest, active[index])
+    }
+    mesh.count = highest + 1
   }
 
   function play(receipt: TraceReceipt): void {
@@ -287,6 +297,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     }
 
     activity.fill(0)
+    const hadActive = activeCount > 0
     let index = 0
     while (index < activeCount) {
       const particle = active[index]
@@ -334,8 +345,11 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       activity[particleDomain[particle]]++
       index++
     }
-    mesh.instanceMatrix.needsUpdate = true
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+    syncDrawCount()
+    if (hadActive || activeCount > 0) {
+      mesh.instanceMatrix.needsUpdate = true
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+    }
   }
 
   return {

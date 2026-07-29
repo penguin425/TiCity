@@ -4,6 +4,19 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.3.0] — 2026-07-29
+
+- Rebuild the 3D City presentation with a procedural sky, clouds, stars,
+  finite ground plate, road grid, street furniture, skyline, district pulses,
+  and persistent collision-aware labels.
+- Give TiProxy, TiDB, PD, TiKV, GC, and TiFlash distinct layered architecture,
+  facade details, semantic lighting, and clearer daytime and night-time themes.
+- Add adaptive desktop bloom, capped pixel ratios, reduced night shadow cost,
+  a collapsible control panel, and guarded scene-rendering budgets.
+- Enrich Machine with a temporal execution rail and Diagnose with compact
+  model-health telemetry while preserving responsive and accessible layouts.
+- Add a current product screenshot and social-preview image.
+
 ## [0.2.0] — 2026-07-29
 
 - Rename the project from TiDB City to TiCity.
