@@ -184,7 +184,16 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   let lastTime = 0
   let lastStateTick = -1
   let lastTrace: TraceReceipt | null = null
+  let networkEmphasis = false
   const focusAnchor = new THREE.Vector3()
+
+  function syncNetworkEmphasis(): void {
+    const phase = flows.playback.phase
+    const next = phase === 'playing' || phase === 'paused'
+    if (next === networkEmphasis) return
+    networkEmphasis = next
+    city.setNetworkEmphasis(next)
+  }
 
   function setTheme(next: CityTheme): void {
     theme = next
@@ -253,6 +262,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     controls.update(delta)
     city.updateVisuals(delta)
     flows.update(delta)
+    syncNetworkEmphasis()
     audio.update(flows.activity)
     picker.update()
     labels.update()
@@ -269,10 +279,11 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       city.updateState(state)
     }
     /*
-     * Controls can change while the deterministic clock is paused, so this
-     * projection cannot be gated only by state.tick.
+     * Model pause and trace presentation pause are intentionally separate.
+     * A completed receipt remains replayable while the deterministic workload
+     * is held in step mode; explicit UI actions synchronize them when wanted.
      */
-    flows.setPlaybackRate(state.controls.paused ? 0 : state.controls.playbackSpeed)
+    flows.setPlaybackRate(state.controls.playbackSpeed)
     if (receipt && traceChanged) {
       lastTrace = receipt
       flows.play(receipt)
@@ -280,6 +291,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       lastTrace = null
       flows.stop()
     }
+    syncNetworkEmphasis()
   }
 
   function focus(targetId: string): boolean {

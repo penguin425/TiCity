@@ -4,6 +4,17 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.3.1] — 2026-07-29
+
+- Replace sub-second overlapping City traffic with a renderer-only teaching
+  clock that preserves the original deterministic `TraceReceipt` timestamps.
+- Add a persistent Trace Dock with the current event, source and target,
+  event rail, progress, pause, previous/next step, and replay controls.
+- Highlight the active route with moving directional chevrons, a larger data
+  pod, source/target rings, local-operation pulses, and dimmed background links.
+- Keep the causal route readable on mobile and with reduced-motion preferences,
+  with regression gates for timing, controls, accessibility, and render budgets.
+
 ## [0.3.0] — 2026-07-29
 
 - Rebuild the 3D City presentation with a procedural sky, clouds, stars,

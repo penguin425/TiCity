@@ -47,6 +47,38 @@ describe('TiCity scene graph', () => {
     city.dispose()
   })
 
+  it('dims static networks for a foreground trace and restores themed opacity', () => {
+    const city = createTiDBSceneGraph()
+    const { dataLine, controlLine, htapLine, raft } = city.materials
+
+    expect(dataLine.opacity).toBeCloseTo(0.74)
+    expect(controlLine.opacity).toBeCloseTo(0.68)
+    expect(htapLine.opacity).toBeCloseTo(0.7)
+    expect(raft.opacity).toBeCloseTo(0.34)
+
+    city.setNetworkEmphasis(true)
+    expect(dataLine.opacity).toBeLessThan(0.12)
+    expect(controlLine.opacity).toBeLessThan(0.12)
+    expect(htapLine.opacity).toBeLessThan(0.12)
+    expect(raft.opacity).toBeLessThan(0.08)
+
+    city.setTheme('day')
+    expect(dataLine.opacity).toBeLessThan(0.12)
+    expect(controlLine.opacity).toBeLessThan(0.12)
+    expect(htapLine.opacity).toBeLessThan(0.12)
+    expect(raft.opacity).toBeLessThan(0.08)
+
+    city.setNetworkEmphasis(false)
+    expect(dataLine.opacity).toBeCloseTo(0.74)
+    expect(controlLine.opacity).toBeCloseTo(0.68)
+    expect(htapLine.opacity).toBeCloseTo(0.7)
+    expect(raft.opacity).toBeCloseTo(0.48)
+
+    city.setTheme('night')
+    expect(raft.opacity).toBeCloseTo(0.34)
+    city.dispose()
+  })
+
   it('resolves a peer by its InstancedMesh instance id', () => {
     const city = createTiDBSceneGraph()
     const peer = city.registry.get('region.17.peer.2')

@@ -17,7 +17,14 @@
 - Diagnose health summary, severity hierarchy, and compact visual telemetry
 - Rendering, responsive-layout, accessibility, and social-preview gates
 
-## Deliberately outside v0.3
+## v0.3.1
+
+- Renderer-only teaching clock that keeps model timestamps unchanged
+- Foreground Trace Dock with event progress and true pause/step/replay controls
+- Directional route chevrons, endpoint rings, local-operation pulses, and background dimming
+- Compact mobile and reduced-motion trace presentation
+
+## Deliberately outside v0.3.x
 
 - Connecting to or changing a live TiDB cluster
 - Executing SQL, showing real `EXPLAIN`, returning rows, or querying metrics

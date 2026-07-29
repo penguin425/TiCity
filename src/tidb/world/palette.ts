@@ -70,8 +70,32 @@ export interface CityMaterials {
   readonly ground: THREE.MeshStandardMaterial
   readonly all: readonly THREE.Material[]
   apply(theme: CityTheme): void
+  setNetworkEmphasis(active: boolean): void
   dispose(): void
 }
+
+const NETWORK_OPACITY: Readonly<
+  Record<
+    CityTheme,
+    Readonly<Record<'raft' | 'data' | 'control' | 'htap', number>>
+  >
+> = {
+  night: {
+    raft: 0.34,
+    data: 0.74,
+    control: 0.68,
+    htap: 0.7,
+  },
+  day: {
+    raft: 0.48,
+    data: 0.74,
+    control: 0.68,
+    htap: 0.7,
+  },
+}
+
+/** Leave the topology readable without competing with a foreground trace. */
+const EMPHASIZED_NETWORK_OPACITY_FACTOR = 0.14
 
 function semanticMaterial(domain: SemanticDomain): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -193,7 +217,20 @@ export function createCityMaterials(): CityMaterials {
     ground,
   ]
 
+  let currentTheme: CityTheme = 'night'
+  let networkEmphasis = false
+
+  function applyNetworkOpacity(): void {
+    const opacity = NETWORK_OPACITY[currentTheme]
+    const factor = networkEmphasis ? EMPHASIZED_NETWORK_OPACITY_FACTOR : 1
+    raft.opacity = opacity.raft * factor
+    dataLine.opacity = opacity.data * factor
+    controlLine.opacity = opacity.control * factor
+    htapLine.opacity = opacity.htap * factor
+  }
+
   function apply(theme: CityTheme): void {
+    currentTheme = theme
     const palette = SEMANTIC_COLORS[theme]
     const night = theme === 'night'
     structure.color.setHex(night ? 0x334f68 : 0xcbd7dd)
@@ -225,10 +262,10 @@ export function createCityMaterials(): CityMaterials {
       material.emissiveIntensity = night ? 0.44 : 0
     }
     raft.color.setHex(palette.raft)
-    raft.opacity = night ? 0.34 : 0.48
     dataLine.color.setHex(palette.sql)
     controlLine.color.setHex(palette.tso)
     htapLine.color.setHex(palette.tiflash)
+    applyNetworkOpacity()
   }
 
   return {
@@ -253,6 +290,10 @@ export function createCityMaterials(): CityMaterials {
     ground,
     all,
     apply,
+    setNetworkEmphasis(active: boolean): void {
+      networkEmphasis = active
+      applyNetworkOpacity()
+    },
     dispose(): void {
       for (const material of all) material.dispose()
     },
