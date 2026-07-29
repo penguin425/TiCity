@@ -1,29 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-.12 -.12 9.24 9.24" role="img" aria-label="PGSimCity buffer-frame elephant">
-  <title>PGSimCity buffer-frame elephant</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>
-    <pattern id="clean-frames" width="1" height="1" patternUnits="userSpaceOnUse">
-      <rect x=".08" y=".08" width=".84" height=".84" rx=".04" fill="#3fa7ff"/>
-    </pattern>
-    <path id="elephant" d="
-      M2 0h6v1H2z
-      M1 1h8v1H1z
-      M0 2h9v1H0z
-      M0 3h2v1H0z M3 3h6v1H3z
-      M0 4h9v1H0z
-      M0 5h1v1H0z M2 5h7v1H2z
-      M0 6h1v1H0z M2 6h7v1H2z
-      M0 7h1v1H0z M3 7h2v1H3z M7 7h2v1H7z
-      M0 8h2v1H0z M3 8h2v1H3z M7 8h2v1H7z"/>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#34d5ff"/>
+      <stop offset="1" stop-color="#7d8cff"/>
+    </linearGradient>
   </defs>
-
-  <!-- The dark silhouette forms a stable grid on both light and dark tab strips. -->
-  <use href="#elephant" fill="#070b14"/>
-
-  <!-- A 9x9 buffer-frame elephant: head and curled trunk at left, body and legs
-       at right. At 16px each frame has a 1.7px pitch. -->
-  <use href="#elephant" fill="url(#clean-frames)"/>
-
-  <!-- Live shared-buffer state: one dirty frame and one pinned frame. -->
-  <rect x="6.08" y="2.08" width=".84" height=".84" rx=".04" fill="#ff4d6d"/>
-  <rect x="4.08" y="4.08" width=".84" height=".84" rx=".04" fill="#ffd166"/>
+  <path d="M64 4 116 34v60l-52 30-52-30V34z" fill="#07121f" stroke="url(#g)" stroke-width="5"/>
+  <path d="M31 89V59l16-9 16 9v30l-16 9zm38 0V39l16-9 16 9v50l-16 9z" fill="none" stroke="#ffcc42" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M25 104h78" stroke="#34d5ff" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="47" cy="65" r="4" fill="#ff6b6b"/>
+  <circle cx="85" cy="47" r="4" fill="#ff6b6b"/>
 </svg>

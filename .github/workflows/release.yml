@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'tidb-city-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Verify and publish static archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate release tag and source
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          package_version="$(node --print "require('./package.json').version")"
+          lock_version="$(node --print "require('./package-lock.json').packages[''].version")"
+          expected_tag="tidb-city-v${package_version}"
+          test "${GITHUB_REF_NAME}" = "${expected_tag}"
+          test "${lock_version}" = "${package_version}"
+          git fetch --no-tags origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          git merge-base --is-ancestor "${GITHUB_SHA}" "refs/remotes/origin/${DEFAULT_BRANCH}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release
+        run: |
+          npm test
+          npm run test:license
+          npm run typecheck
+          npm run build
+        env:
+          TIDBCITY_GIT_SHA: ${{ github.sha }}
+
+      - name: Package static site and notices
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#tidb-city-}"
+          package_name="TiDB-City-${release_version}"
+          package_dir="release/${package_name}"
+          mkdir -p "${package_dir}/site"
+          cp -R dist/. "${package_dir}/site/"
+          cp LICENSE NOTICE README.md CHANGELOG.md "${package_dir}/"
+          cp public/THIRD_PARTY_NOTICES.txt "${package_dir}/THIRD_PARTY_NOTICES"
+          tar -C release -czf "release/${package_name}.tar.gz" "${package_name}"
+          (
+            cd release
+            sha256sum "${package_name}.tar.gz" > "${package_name}.sha256"
+          )
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_version="${GITHUB_REF_NAME#tidb-city-}"
+          package_name="TiDB-City-${release_version}"
+          gh release create "${GITHUB_REF_NAME}" \
+            "release/${package_name}.tar.gz" \
+            "release/${package_name}.sha256" \
+            --verify-tag \
+            --title "TiDB City ${release_version}" \
+            --generate-notes
