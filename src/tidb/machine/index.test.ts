@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { installTestDom } from '../../../test/dom'
-import { MACHINE_LANES, mountMachine } from './index'
+import { MACHINE_CSS, MACHINE_LANES, mountMachine } from './index'
 
 describe('TiCity Machine replay', () => {
   it('draws TSO, transaction, Raft, KV, and TiFlash as separate lanes', () => {
@@ -30,6 +30,14 @@ describe('TiCity Machine replay', () => {
     expect(root.querySelectorAll('[data-event-domain="raft"]')).toHaveLength(1)
     expect(root.querySelector('[data-lane="txn2pc"]')?.textContent).toContain('2PC')
     expect(root.querySelector('[data-lane="raft"]')?.textContent).toContain('Raft')
+  })
+
+  it('uses the same semantic domain tokens as the 3D city', () => {
+    for (const domain of MACHINE_LANES) {
+      expect(MACHINE_CSS).toContain(
+        `[data-lane="${domain}"] { --lane-color: var(--domain-${domain}`,
+      )
+    }
   })
 
   it('renders an honest empty replay state', () => {
@@ -64,5 +72,55 @@ describe('TiCity Machine replay', () => {
     expect(marker?.getAttribute('class')).toContain('is-failed')
     expect(marker?.getAttribute('aria-label')).toContain('failed')
     expect(root.textContent).toContain('status: failed')
+  })
+
+  it('renders time, duration, and causal structure around the current event', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      initialIndex: 1,
+      receipt: {
+        id: 'causal-trace',
+        events: [
+          { id: 'tso', at: 0, duration: 2, domain: 'tso', label: 'allocate start_ts' },
+          { id: 'prewrite', at: 3, duration: 4, domain: 'txn2pc', label: 'prewrite primary' },
+          { id: 'raft', at: 8, duration: 3, domain: 'raft', label: 'replicate proposal' },
+        ],
+      },
+    })
+
+    expect(root.querySelectorAll('[data-time-tick]')).toHaveLength(6)
+    expect(root.querySelectorAll('[data-event-duration]')).toHaveLength(3)
+    expect(root.querySelectorAll('[data-causal-from]')).toHaveLength(2)
+    expect(root.querySelector('[data-event-index="1"]')?.getAttribute('aria-current')).toBe('step')
+    expect(root.querySelector('[data-causal-to="prewrite"]')?.getAttribute('class')).toContain('is-current')
+    expect(root.textContent).toContain('Duration')
+    expect(root.textContent).toContain('4 ms')
+  })
+
+  it('lets keyboard users select a timeline event and keeps focus on it', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'ja',
+      receipt: {
+        id: 'keyboard-trace',
+        events: [
+          { id: 'sql', at: 0, domain: 'sql', label: 'SQLを受信' },
+          { id: 'kv', at: 2, domain: 'kv', label: 'MVCCを読み取り' },
+        ],
+      },
+    })
+
+    const target = root.querySelector('[data-event-index="1"]')
+    const keydown = new Event('keydown', { cancelable: true })
+    Object.defineProperty(keydown, 'key', { value: 'Enter' })
+    target?.dispatchEvent(keydown)
+
+    const selected = root.querySelector('[data-event-index="1"]')
+    expect(selected?.getAttribute('aria-current')).toBe('step')
+    expect((globalThis.document as unknown as { activeElement: unknown }).activeElement).toBe(selected)
+    expect(root.textContent).toContain('現在のイベント')
   })
 })

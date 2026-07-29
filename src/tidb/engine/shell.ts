@@ -4,6 +4,10 @@
  */
 
 import * as THREE from 'three'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import type { TiCityState, TraceReceipt } from '../model/types'
 import { FOCUS_COMPONENT_TARGETS, TICITY_LAYOUT } from '../world/layout'
 import { createTiDBSceneGraph } from '../world/city'
@@ -14,6 +18,7 @@ import type { CityAudio } from './audio'
 import { createCityCameraController } from './camera'
 import type { CityCameraController, CityViewMode } from './camera'
 import { createCollisionMap } from './collision'
+import { createCityLabels } from './labels'
 import { createCityPicker } from './picker'
 import type { CityPicker } from './picker'
 import { createTraceFlows } from './trace-flows'
@@ -22,6 +27,7 @@ import type { TraceFlowController } from './trace-flows'
 export interface CityShellOptions {
   readonly theme?: CityTheme
   readonly mode?: CityViewMode
+  readonly hudExpanded?: boolean
   readonly autoStart?: boolean
   readonly onSelect?: (component: CityComponent | null) => void
 }
@@ -39,6 +45,7 @@ export interface CityShell {
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
+  setHudExpanded(expanded: boolean): void
   resize(): void
   start(): void
   stop(): void
@@ -52,8 +59,13 @@ export function hasTraceChanged(
   return previous !== next
 }
 
-export function cityViewOcclusion(width: number): number {
-  return width > 900 ? Math.min(420, width * 0.32) : 0
+export function cityViewOcclusion(width: number, expanded = true): number {
+  return expanded && width > 900 ? Math.min(420, width * 0.32) : 0
+}
+
+export function cityPixelRatio(width: number, devicePixelRatio: number): number {
+  const cap = width <= 900 ? 1.25 : 1.5
+  return Math.max(1, Math.min(cap, devicePixelRatio || 1))
 }
 
 function measure(container: HTMLElement): readonly [number, number] {
@@ -80,7 +92,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   renderer.toneMappingExposure = 1.08
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFShadowMap
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
+  renderer.setPixelRatio(cityPixelRatio(width, window.devicePixelRatio))
   renderer.setSize(width, height, false)
   renderer.domElement.style.display = 'block'
   renderer.domElement.style.width = '100%'
@@ -97,10 +109,11 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   scene.background = new THREE.Color(0x050b12)
   scene.fog = new THREE.Fog(0x050b12, TICITY_LAYOUT.fog.near, TICITY_LAYOUT.fog.far)
 
-  const camera = new THREE.PerspectiveCamera(52, width / height, 0.3, 1400)
-  camera.position.set(0, 260, 510)
+  const camera = new THREE.PerspectiveCamera(52, width / height, 0.3, 2200)
+  camera.position.set(0, 305, 555)
   camera.lookAt(0, 12, 25)
-  const initialOcclusion = cityViewOcclusion(width)
+  let hudExpanded = options.hudExpanded ?? true
+  const initialOcclusion = cityViewOcclusion(width, hudExpanded)
   if (initialOcclusion > 0) {
     camera.setViewOffset(
       width + initialOcclusion,
@@ -125,7 +138,12 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   key.shadow.camera.bottom = -330
   key.shadow.camera.near = 20
   key.shadow.camera.far = 760
-  scene.add(hemisphere, ambient, key, key.target)
+  key.shadow.bias = -0.00045
+  key.shadow.normalBias = 0.42
+  const fill = new THREE.DirectionalLight(0x6f9fd0, 0.42)
+  fill.position.set(-280, 170, 260)
+  fill.target.position.set(0, 16, 10)
+  scene.add(hemisphere, ambient, key, key.target, fill, fill.target)
 
   const city = createTiDBSceneGraph()
   const flows = createTraceFlows(city)
@@ -145,9 +163,21 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     onSelect: options.onSelect,
   })
   scene.add(picker.object)
+  const labels = createCityLabels(container, camera, city)
   const audio = createCityAudio()
+  const composer = new EffectComposer(renderer)
+  composer.setPixelRatio(cityPixelRatio(width, window.devicePixelRatio))
+  composer.setSize(width, height)
+  const renderPass = new RenderPass(scene, camera)
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.34, 0.38, 0.9)
+  const outputPass = new OutputPass()
+  composer.addPass(renderPass)
+  composer.addPass(bloomPass)
+  composer.addPass(outputPass)
 
   let theme: CityTheme = options.theme ?? 'night'
+  let viewportWidth = width
+  let postProcessing = false
   let raf = 0
   let running = false
   let disposed = false
@@ -168,19 +198,29 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     if (scene.fog instanceof THREE.Fog) scene.fog.color.setHex(night ? 0x050b12 : 0xc7d6e2)
     hemisphere.color.setHex(night ? 0x91b8db : 0xd9efff)
     hemisphere.groundColor.setHex(night ? 0x0a1018 : 0x71806e)
-    hemisphere.intensity = night ? 1.3 : 1.65
+    hemisphere.intensity = night ? 1.05 : 1.32
     ambient.color.setHex(night ? 0x6b9fc2 : 0xffffff)
-    ambient.intensity = night ? 0.9 : 0.48
+    ambient.intensity = night ? 0.54 : 0.3
     key.color.setHex(night ? 0xc8e4ff : 0xfff0cf)
-    key.intensity = night ? 2.1 : 3.4
+    key.intensity = night ? 2.35 : 3.25
+    key.castShadow = !night
+    fill.color.setHex(night ? 0x557fb8 : 0x97bce2)
+    fill.intensity = night ? 0.62 : 0.46
+    renderer.shadowMap.enabled = !night
     renderer.toneMapping = night ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping
-    renderer.toneMappingExposure = night ? 1.08 : 1
+    renderer.toneMappingExposure = night ? 1.18 : 0.98
+    bloomPass.enabled = night
+    postProcessing =
+      night &&
+      viewportWidth > 900 &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
   }
 
   function resize(): void {
     const [nextWidth, nextHeight] = measure(container)
+    viewportWidth = nextWidth
     camera.aspect = nextWidth / nextHeight
-    const occlusion = cityViewOcclusion(nextWidth)
+    const occlusion = cityViewOcclusion(nextWidth, hudExpanded)
     if (occlusion > 0) {
       camera.setViewOffset(
         nextWidth + occlusion,
@@ -194,9 +234,16 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       camera.clearViewOffset()
     }
     camera.updateProjectionMatrix()
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
+    renderer.setPixelRatio(cityPixelRatio(nextWidth, window.devicePixelRatio))
     renderer.setSize(nextWidth, nextHeight, false)
+    composer.setPixelRatio(cityPixelRatio(nextWidth, window.devicePixelRatio))
+    composer.setSize(nextWidth, nextHeight)
+    postProcessing =
+      theme === 'night' &&
+      nextWidth > 900 &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
     picker?.resize()
+    labels.update(true)
   }
 
   function frame(time: number): void {
@@ -204,10 +251,13 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     const delta = lastTime === 0 ? 1 / 60 : Math.min(0.05, Math.max(0, (time - lastTime) / 1000))
     lastTime = time
     controls.update(delta)
+    city.updateVisuals(delta)
     flows.update(delta)
     audio.update(flows.activity)
     picker.update()
-    renderer.render(scene, camera)
+    labels.update()
+    if (postProcessing) composer.render()
+    else renderer.render(scene, camera)
     raf = window.requestAnimationFrame(frame)
   }
 
@@ -274,6 +324,11 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     setMode(mode: CityViewMode): void {
       controls.setMode(mode)
     },
+    setHudExpanded(expanded: boolean): void {
+      if (hudExpanded === expanded) return
+      hudExpanded = expanded
+      resize()
+    },
     resize,
     start,
     stop,
@@ -284,10 +339,12 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       resizeObserver?.disconnect()
       window.removeEventListener('resize', resize)
       audio.dispose()
+      labels.dispose()
       picker.dispose()
       controls.dispose()
       flows.dispose()
       city.dispose()
+      composer.dispose()
       renderer.dispose()
       renderer.domElement.remove()
       scene.clear()

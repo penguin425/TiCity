@@ -40,7 +40,7 @@ export function resolveTheme(search = window.location.search): Theme {
   const requested = new URLSearchParams(search).get('theme')
   if (requested === 'day' || requested === 'night') return requested
   const saved = safeStorage()?.getItem(THEME_STORAGE_KEY)
-  return saved === 'day' ? 'day' : 'night'
+  return saved === 'night' ? 'night' : 'day'
 }
 
 export function applyTheme(theme: Theme): void {

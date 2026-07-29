@@ -56,6 +56,9 @@ const copy = {
     fly: '飛行',
     walk: '歩行',
     sound: '音',
+    panel: '操作',
+    showPanel: '操作パネルを開く',
+    hidePanel: '操作パネルを閉じる',
     canvas: 'TiCityの対話型3Dアーキテクチャ。画面上の表示切替またはキーボードで探索できます。',
     hint: 'ドラッグ: 回転 · wheel: zoom · Fly/Walk: WASD · 建物をclick: 詳細',
     selected: '選択したコンポーネント',
@@ -84,6 +87,9 @@ const copy = {
     fly: 'Fly',
     walk: 'Walk',
     sound: 'Sound',
+    panel: 'Panel',
+    showPanel: 'Open control panel',
+    hidePanel: 'Close control panel',
     canvas: 'TiCity interactive 3D architecture. Use the view controls or keyboard to explore.',
     hint: 'Drag: orbit · wheel: zoom · Fly/Walk: WASD · click a building: inspect',
     selected: 'Selected component',
@@ -183,6 +189,10 @@ function boot(): void {
 
   const layout = document.createElement('div')
   layout.className = 'tidb-layout'
+  let panelExpanded =
+    window.innerWidth <= 900 ||
+    new URLSearchParams(location.search).get('panel') === 'open'
+  layout.dataset.panel = panelExpanded ? 'open' : 'closed'
 
   const pageTitle = document.createElement('h1')
   pageTitle.className = 'visually-hidden'
@@ -213,6 +223,7 @@ function boot(): void {
     world = createTiDBWorld(worldHost, {
       theme: document.documentElement.dataset.theme === 'day' ? 'day' : 'night',
       mode: 'orbit',
+      hudExpanded: panelExpanded,
       onSelect,
     })
     world.shell.renderer.domElement.setAttribute('aria-label', copy[locale].canvas)
@@ -235,6 +246,25 @@ function boot(): void {
   viewActions.className = 'tidb-view-actions'
   const viewButtons = new Map<CityViewMode, HTMLButtonElement>()
 
+  const panelButton = button(copy[locale].panel, () => {
+    panelExpanded = !panelExpanded
+    layout.dataset.panel = panelExpanded ? 'open' : 'closed'
+    panelButton.setAttribute('aria-expanded', String(panelExpanded))
+    panelButton.setAttribute('aria-pressed', String(panelExpanded))
+    panelButton.setAttribute(
+      'aria-label',
+      panelExpanded ? copy[locale].hidePanel : copy[locale].showPanel,
+    )
+    world?.setHudExpanded(panelExpanded)
+  }, panelExpanded)
+  panelButton.dataset.action = 'panel'
+  panelButton.setAttribute('aria-controls', 'tidb-control-panel')
+  panelButton.setAttribute('aria-expanded', String(panelExpanded))
+  panelButton.setAttribute(
+    'aria-label',
+    panelExpanded ? copy[locale].hidePanel : copy[locale].showPanel,
+  )
+
   const setView = (mode: CityViewMode) => {
     world?.setMode(mode)
     for (const [candidate, control] of viewButtons) {
@@ -256,7 +286,7 @@ function boot(): void {
     audioButton.setAttribute('aria-pressed', String(enabled))
   })
   audioButton.dataset.action = 'audio'
-  viewActions.append(audioButton)
+  viewActions.append(panelButton, audioButton)
   topCluster.append(navigation.root, viewActions)
   topbar.append(wordmarkHost, topCluster)
 
@@ -272,6 +302,7 @@ function boot(): void {
 
   const uiHost = document.createElement('div')
   uiHost.className = 'tidb-ui-host'
+  uiHost.id = 'tidb-control-panel'
 
   const applyReceipt = (candidate: unknown): void => {
     if (
@@ -319,7 +350,7 @@ function boot(): void {
       lastTourFocus = target
       world.focus(target)
       if (target === 'city.overview') {
-        world.shell.camera.position.set(0, 260, 510)
+        world.shell.camera.position.set(0, 305, 555)
       }
     },
     onLocaleChange: (next) => {
@@ -331,6 +362,11 @@ function boot(): void {
         control.textContent = copy[next][mode]
       }
       audioButton.textContent = copy[next].sound
+      panelButton.textContent = copy[next].panel
+      panelButton.setAttribute(
+        'aria-label',
+        panelExpanded ? copy[next].hidePanel : copy[next].showPanel,
+      )
       const skip = document.querySelector<HTMLElement>('.skip-link')
       if (skip) skip.textContent = copy[next].skip
       if (world) world.shell.renderer.domElement.setAttribute('aria-label', copy[next].canvas)

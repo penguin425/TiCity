@@ -9,7 +9,15 @@
 - GitHub Pages release with automated verification
 - TiCity product, package, browser API, repository, and release identity
 
-## Deliberately outside v0.2
+## v0.3
+
+- Procedural sky, weather dressing, roads, skyline, and distinct district architecture
+- Collision-aware world labels, adaptive night bloom, and a collapsible City control panel
+- Layered Machine timeline with duration and causal flow
+- Diagnose health summary, severity hierarchy, and compact visual telemetry
+- Rendering, responsive-layout, accessibility, and social-preview gates
+
+## Deliberately outside v0.3
 
 - Connecting to or changing a live TiDB cluster
 - Executing SQL, showing real `EXPLAIN`, returning rows, or querying metrics
