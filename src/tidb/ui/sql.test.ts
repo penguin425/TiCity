@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { installTestDom } from '../../../test/dom'
 import { MAX_SQL_BYTES, mountSqlWorkbench, sqlByteLength, truncateSql } from './sql'
 
-describe('TiDB City SQL workbench', () => {
+describe('TiCity SQL workbench', () => {
   it('routes supported SQL without inventing result rows', () => {
     const dom = installTestDom()
     const root = dom.mount('sql') as unknown as HTMLElement
@@ -59,7 +59,7 @@ describe('TiDB City SQL workbench', () => {
     expect(input.value).toHaveLength(MAX_SQL_BYTES)
     root.querySelector<HTMLButtonElement>('[data-action="analyze"]')!.click()
     expect(analyzed).toHaveLength(MAX_SQL_BYTES)
-    expect(dom.window.localStorage.getItem('tidb-city:sql')).toBeNull()
+    expect(dom.window.localStorage.getItem('ticity:sql')).toBeNull()
   })
 
   it('never cuts a multibyte character into an invalid or oversized string', () => {

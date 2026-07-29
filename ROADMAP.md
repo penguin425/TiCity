@@ -1,14 +1,15 @@
-# TiDB City roadmap
+# TiCity roadmap
 
-## v0.1
+## v0.2
 
 - Deterministic offline model targeting TiDB v8.5 LTS
 - 3D City, 2D Machine, and model Diagnose pages
 - Eight scenarios covering reads, transactions, Raft, hotspots, GC, and HTAP
 - Japanese and English UI
 - GitHub Pages release with automated verification
+- TiCity product, package, browser API, repository, and release identity
 
-## Deliberately outside v0.1
+## Deliberately outside v0.2
 
 - Connecting to or changing a live TiDB cluster
 - Executing SQL, showing real `EXPLAIN`, returning rows, or querying metrics

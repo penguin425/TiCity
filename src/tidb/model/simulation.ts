@@ -29,7 +29,7 @@ import type {
   SqlAnalysis,
   SqlSubmission,
   StoreId,
-  TiDBCityState,
+  TiCityState,
   TiDBControls,
   TiDBSimulationApi,
   TiDBSimulationOptions,
@@ -158,7 +158,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return value < minimum ? minimum : value > maximum ? maximum : value
 }
 
-function createMetrics(): TiDBCityState['metrics'] {
+function createMetrics(): TiCityState['metrics'] {
   return {
     statements: 0,
     reads: 0,
@@ -183,7 +183,7 @@ function createGc(): GcState {
   }
 }
 
-function makeInitialState(seed: number): TiDBCityState {
+function makeInitialState(seed: number): TiCityState {
   return {
     modelVersion: TIDB_MODEL_VERSION,
     seed,
@@ -1582,7 +1582,7 @@ export function createTiDBSimulation(
     }
   }
 
-  function setPlayback(mode: TiDBCityState['playback']): void {
+  function setPlayback(mode: TiCityState['playback']): void {
     state.playback = mode
     if (mode === 'step') {
       /*

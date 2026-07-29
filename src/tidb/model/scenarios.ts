@@ -95,6 +95,6 @@ const SCENARIO_BY_ID = new Map(TIDB_SCENARIOS.map((scenario) => [scenario.id, sc
 
 export function getScenario(id: ScenarioId): TiDBScenarioDefinition {
   const scenario = SCENARIO_BY_ID.get(id)
-  if (!scenario) throw new Error(`Unknown TiDB City scenario: ${id}`)
+  if (!scenario) throw new Error(`Unknown TiCity scenario: ${id}`)
   return scenario
 }

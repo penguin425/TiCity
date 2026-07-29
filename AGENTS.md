@@ -1,8 +1,8 @@
-# TiDB City contributor rules
+# TiCity contributor rules
 
 ## Accuracy boundary
 
-TiDB City is a deterministic educational model of TiDB v8.5 LTS. It is not a
+TiCity is a deterministic educational model of TiDB v8.5 LTS. It is not a
 TiDB emulator, SQL executor, optimizer, metrics endpoint, or live-cluster
 client. UI copy and code must never present model values as measured values.
 Every diagnostic projection must remain visibly labelled `MODEL / SIMULATED`.
@@ -22,7 +22,7 @@ Keep these distinctions explicit:
 - `src/tidb/model/` is pure TypeScript and must never import `three`.
 - `src/tidb/world/layout.ts` is the single source of truth for geography.
 - `src/tidb/world/` and `src/tidb/engine/` read but never mutate
-  `TiDBCityState`.
+  `TiCityState`.
 - UI, Machine, and Diagnose receive model snapshots or typed callbacks. They do
   not create competing simulation state.
 - 2PC and Raft keep separate state transitions, trace domains, visual lanes,

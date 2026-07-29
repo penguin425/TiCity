@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
 import * as THREE from 'three'
-import type { TiDBCityState, TraceReceipt } from '../model/types'
-import { FOCUS_COMPONENT_TARGETS, TIDB_CITY } from '../world/layout'
+import type { TiCityState, TraceReceipt } from '../model/types'
+import { FOCUS_COMPONENT_TARGETS, TICITY_LAYOUT } from '../world/layout'
 import { createTiDBSceneGraph } from '../world/city'
 import type { CityComponent, TiDBSceneGraph } from '../world/city'
 import type { CityTheme } from '../world/palette'
@@ -35,7 +35,7 @@ export interface CityShell {
   readonly picker: CityPicker
   readonly flows: TraceFlowController
   readonly audio: CityAudio
-  update(state: TiDBCityState, trace?: TraceReceipt | null): void
+  update(state: TiCityState, trace?: TraceReceipt | null): void
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
@@ -64,7 +64,7 @@ function measure(container: HTMLElement): readonly [number, number] {
 
 export function createCityShell(container: HTMLElement, options: CityShellOptions = {}): CityShell {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
-    throw new Error('TiDB City requires a browser DOM and WebGL2')
+    throw new Error('TiCity requires a browser DOM and WebGL2')
   }
   const [width, height] = measure(container)
   if (getComputedStyle(container).position === 'static') container.style.position = 'relative'
@@ -89,13 +89,13 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   renderer.domElement.tabIndex = 0
   renderer.domElement.setAttribute(
     'aria-label',
-    'TiDB City interactive architecture. Use the view controls or keyboard to explore.',
+    'TiCity interactive architecture. Use the view controls or keyboard to explore.',
   )
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x050b12)
-  scene.fog = new THREE.Fog(0x050b12, TIDB_CITY.fog.near, TIDB_CITY.fog.far)
+  scene.fog = new THREE.Fog(0x050b12, TICITY_LAYOUT.fog.near, TICITY_LAYOUT.fog.far)
 
   const camera = new THREE.PerspectiveCamera(52, width / height, 0.3, 1400)
   camera.position.set(0, 260, 510)
@@ -211,7 +211,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     raf = window.requestAnimationFrame(frame)
   }
 
-  function update(state: TiDBCityState, trace?: TraceReceipt | null): void {
+  function update(state: TiCityState, trace?: TraceReceipt | null): void {
     const receipt = trace === undefined ? state.lastTrace : trace
     const traceChanged = hasTraceChanged(lastTrace, receipt)
     if (state.tick !== lastStateTick || traceChanged) {

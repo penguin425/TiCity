@@ -111,6 +111,6 @@ try {
   document.body.dataset.ready = 'error'
   const root = document.querySelector<HTMLElement>('#diagnose-app')
   if (root) {
-    root.textContent = 'TiDB Diagnose could not start. See the browser console for details.'
+    root.textContent = 'TiCity Diagnose could not start. See the browser console for details.'
   }
 }

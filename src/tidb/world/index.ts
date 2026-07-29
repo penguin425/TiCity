@@ -1,9 +1,9 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
-import type { TiDBCityState, TraceReceipt } from '../model/types'
+import type { TiCityState, TraceReceipt } from '../model/types'
 import { createCityShell } from '../engine/shell'
 import type { CityShell } from '../engine/shell'
 import type { CityViewMode } from '../engine/camera'
@@ -20,7 +20,7 @@ export interface WorldOptions {
 export interface WorldHandle {
   /** Advanced integration surface; ordinary callers use the methods below. */
   readonly shell: CityShell
-  update(state: TiDBCityState, trace?: TraceReceipt | null): void
+  update(state: TiCityState, trace?: TraceReceipt | null): void
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
@@ -30,7 +30,7 @@ export interface WorldHandle {
 }
 
 /**
- * Mount the standalone TiDB City visual runtime.
+ * Mount the standalone TiCity visual runtime.
  *
  * `update` only projects model state and TraceReceipt events. It never mutates
  * the simulation, issues SQL, or constructs a second transaction model.
@@ -42,7 +42,7 @@ export function createTiDBWorld(
   const shell = createCityShell(container, options)
   return {
     shell,
-    update(state: TiDBCityState, trace?: TraceReceipt | null): void {
+    update(state: TiCityState, trace?: TraceReceipt | null): void {
       shell.update(state, trace)
     },
     focus(targetId: string): boolean {
@@ -74,5 +74,5 @@ export type {
   CityRegistry,
   TiDBSceneGraph,
 } from './city'
-export { COMPONENT_ANCHORS, DISTRICT_BOUNDS, TIDB_CITY, regionPeerPosition } from './layout'
+export { COMPONENT_ANCHORS, DISTRICT_BOUNDS, TICITY_LAYOUT, regionPeerPosition } from './layout'
 export type { CityTheme, SemanticDomain } from './palette'

@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving TiDB City. Start with [AGENTS.md](AGENTS.md), especially
+Thank you for improving TiCity. Start with [AGENTS.md](AGENTS.md), especially
 the accuracy boundary between an educational model and observed TiDB behavior.
 
 ## Development

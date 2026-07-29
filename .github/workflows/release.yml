@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'tidb-city-v*'
+      - 'ticity-v*'
 
 permissions:
   contents: write
@@ -32,7 +32,7 @@ jobs:
           set -euo pipefail
           package_version="$(node --print "require('./package.json').version")"
           lock_version="$(node --print "require('./package-lock.json').packages[''].version")"
-          expected_tag="tidb-city-v${package_version}"
+          expected_tag="ticity-v${package_version}"
           test "${GITHUB_REF_NAME}" = "${expected_tag}"
           test "${lock_version}" = "${package_version}"
           git fetch --no-tags origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
@@ -48,13 +48,13 @@ jobs:
           npm run typecheck
           npm run build
         env:
-          TIDBCITY_GIT_SHA: ${{ github.sha }}
+          TICITY_GIT_SHA: ${{ github.sha }}
 
       - name: Package static site and notices
         run: |
           set -euo pipefail
-          release_version="${GITHUB_REF_NAME#tidb-city-}"
-          package_name="TiDB-City-${release_version}"
+          release_version="${GITHUB_REF_NAME#ticity-}"
+          package_name="TiCity-${release_version}"
           package_dir="release/${package_name}"
           mkdir -p "${package_dir}/site"
           cp -R dist/. "${package_dir}/site/"
@@ -70,11 +70,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          release_version="${GITHUB_REF_NAME#tidb-city-}"
-          package_name="TiDB-City-${release_version}"
+          release_version="${GITHUB_REF_NAME#ticity-}"
+          package_name="TiCity-${release_version}"
           gh release create "${GITHUB_REF_NAME}" \
             "release/${package_name}.tar.gz" \
             "release/${package_name}.sha256" \
             --verify-tag \
-            --title "TiDB City ${release_version}" \
+            --title "TiCity ${release_version}" \
             --generate-notes

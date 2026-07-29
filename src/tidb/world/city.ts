@@ -1,10 +1,10 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
 import * as THREE from 'three'
-import type { TiDBCityState } from '../model/types'
+import type { TiCityState } from '../model/types'
 import {
   COMPONENT_ANCHORS,
   CONTROL_PATHS,
@@ -12,7 +12,7 @@ import {
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
   HTAP_PATHS,
-  TIDB_CITY,
+  TICITY_LAYOUT,
   TIKV_BOUNDS,
   regionPeerPosition,
 } from './layout'
@@ -77,7 +77,7 @@ export interface TiDBSceneGraph {
   readonly networks: readonly CityNetwork[]
   readonly materials: CityMaterials
   getAnchor(id: string, out: THREE.Vector3): boolean
-  updateState(state: TiDBCityState): void
+  updateState(state: TiCityState): void
   setTheme(theme: CityTheme): void
   setFocus(id: string | null): void
   dispose(): void
@@ -257,13 +257,13 @@ function lineNetwork(
 
 function raftNetwork(material: THREE.LineBasicMaterial): CityNetwork {
   /* A triangle per Region: three voter links, visibly distinct from 2PC. */
-  const segments = TIDB_CITY.regionCount * 3
+  const segments = TICITY_LAYOUT.regionCount * 3
   const positions = new Float32Array(segments * 2 * 3)
   const ids: string[] = []
   let cursor = 0
-  for (let region = 0; region < TIDB_CITY.regionCount; region++) {
-    for (let store = 0; store < TIDB_CITY.tikvCount; store++) {
-      const next = (store + 1) % TIDB_CITY.tikvCount
+  for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
+    for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+      const next = (store + 1) % TICITY_LAYOUT.tikvCount
       const from = regionPeerPosition(store, region)
       const to = regionPeerPosition(next, region)
       positions[cursor++] = from[0]
@@ -284,12 +284,12 @@ function raftNetwork(material: THREE.LineBasicMaterial): CityNetwork {
 }
 
 function makeGround(materials: CityMaterials): THREE.Mesh {
-  const geometry = new THREE.PlaneGeometry(TIDB_CITY.groundSize, TIDB_CITY.groundSize, 1, 1)
+  const geometry = new THREE.PlaneGeometry(TICITY_LAYOUT.groundSize, TICITY_LAYOUT.groundSize, 1, 1)
   const mesh = new THREE.Mesh(geometry, materials.ground)
   mesh.rotation.x = -Math.PI / 2
   mesh.position.y = -0.2
   mesh.receiveShadow = true
-  mesh.name = 'tidb-city:ground'
+  mesh.name = 'ticity:ground'
   return mesh
 }
 
@@ -313,7 +313,7 @@ function addDistrictPad(
 
 export function createTiDBSceneGraph(): TiDBSceneGraph {
   const root = new THREE.Group()
-  root.name = 'tidb-city:world'
+  root.name = 'ticity:world'
   const registry = new Registry()
   const materials = createCityMaterials()
   const colliders: CityCollider[] = []
@@ -353,7 +353,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const proxyDistrict = new THREE.Group()
   proxyDistrict.name = 'district:tiproxy'
   addDistrictPad(proxyDistrict, DISTRICT_BOUNDS.tiproxy, materials.pavement, 'tiproxy:apron')
-  for (let proxy = 0; proxy < TIDB_CITY.proxyCount; proxy++) {
+  for (let proxy = 0; proxy < TICITY_LAYOUT.proxyCount; proxy++) {
     const anchor = COMPONENT_ANCHORS[`tiproxy.${proxy}` as 'tiproxy.0' | 'tiproxy.1']
     const group = new THREE.Group()
     group.name = `tiproxy:${proxy}`
@@ -380,7 +380,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const tidbDistrict = new THREE.Group()
   tidbDistrict.name = 'district:tidb'
   addDistrictPad(tidbDistrict, DISTRICT_BOUNDS.tidb, materials.pavement, 'tidb:apron')
-  for (let server = 0; server < TIDB_CITY.tidbCount; server++) {
+  for (let server = 0; server < TICITY_LAYOUT.tidbCount; server++) {
     const anchor = COMPONENT_ANCHORS[`tidb.${server}` as 'tidb.0' | 'tidb.1' | 'tidb.2']
     const group = new THREE.Group()
     group.name = `tidb:${server}`
@@ -420,7 +420,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     pdHub,
     COMPONENT_ANCHORS['pd.control'],
   )
-  for (let node = 0; node < TIDB_CITY.pdCount; node++) {
+  for (let node = 0; node < TICITY_LAYOUT.pdCount; node++) {
     const anchor = COMPONENT_ANCHORS[`pd.${node}` as 'pd.0' | 'pd.1' | 'pd.2']
     const group = new THREE.Group()
     group.name = `pd:${node}`
@@ -444,7 +444,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   /* Multi-Raft TiKV stores. One InstancedMesh contains all 108 peers. */
   const campusRoot = new THREE.Group()
   campusRoot.name = 'district:tikv'
-  for (let store = 0; store < TIDB_CITY.tikvCount; store++) {
+  for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
     const bounds = TIKV_BOUNDS[store]
     addDistrictPad(campusRoot, bounds, materials.pavement, `tikv:${store}:campus`, 1.1)
     const anchor = COMPONENT_ANCHORS[`tikv.${store}` as 'tikv.0' | 'tikv.1' | 'tikv.2']
@@ -464,7 +464,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     )
   }
 
-  const peerCount = TIDB_CITY.regionCount * TIDB_CITY.peersPerRegion
+  const peerCount = TICITY_LAYOUT.regionCount * TICITY_LAYOUT.peersPerRegion
   const peerBase = new Float32Array(peerCount * 3)
   const peerComponents = new Array<CityComponent>(peerCount)
   const peerGeometry = new THREE.BoxGeometry(8.4, 5.2, 7.2)
@@ -482,10 +482,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   peers.castShadow = true
   peers.receiveShadow = true
   let peerInstance = 0
-  for (let store = 0; store < TIDB_CITY.tikvCount; store++) {
-    for (let region = 0; region < TIDB_CITY.regionCount; region++) {
+  for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
       const point = regionPeerPosition(store, region)
-      const leaderStore = region % TIDB_CITY.tikvCount
+      const leaderStore = region % TICITY_LAYOUT.tikvCount
       const leader = store === leaderStore
       _position.set(point[0], point[1], point[2])
       _matrix.compose(_position, _rotation, _scale)
@@ -577,15 +577,15 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
 
   let theme: CityTheme = 'night'
   let focused: CityComponent | undefined
-  let latestState: TiDBCityState | null = null
+  let latestState: TiCityState | null = null
 
   function paintPeers(next: CityTheme): void {
     peerMaterial.emissive.setHex(next === 'night' ? 0x1a3144 : 0x000000)
     peerMaterial.emissiveIntensity = next === 'night' ? 0.72 : 0
-    for (let region = 0; region < TIDB_CITY.regionCount; region++) {
-      for (let store = 0; store < TIDB_CITY.tikvCount; store++) {
-        const instance = store * TIDB_CITY.regionCount + region
-        const leader = store === region % TIDB_CITY.tikvCount
+    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
+      for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+        const instance = store * TICITY_LAYOUT.regionCount + region
+        const leader = store === region % TICITY_LAYOUT.tikvCount
         _color.setHex(
           leader ? SEMANTIC_COLORS[next].raft : SEMANTIC_COLORS[next].kv,
         )
@@ -596,21 +596,21 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     if (peers.instanceColor) peers.instanceColor.needsUpdate = true
   }
 
-  function updateState(state: TiDBCityState): void {
+  function updateState(state: TiCityState): void {
     latestState = state
-    for (let region = 0; region < TIDB_CITY.regionCount; region++) {
+    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
       const regionState = state.regions.find((candidate) => candidate.id === region)
       if (!regionState) continue
       const leaderStore = Math.max(
         0,
         Math.min(
-          TIDB_CITY.tikvCount - 1,
+          TICITY_LAYOUT.tikvCount - 1,
           regionState.leaderStoreId.charCodeAt(regionState.leaderStoreId.length - 1) - 49,
         ),
       )
       const heat = Math.min(1, Math.max(0, regionState.hotScore / 100))
-      for (let store = 0; store < TIDB_CITY.tikvCount; store++) {
-        const instance = store * TIDB_CITY.regionCount + region
+      for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+        const instance = store * TICITY_LAYOUT.regionCount + region
         const component = peerComponents[instance]
         let peerHealthy = true
         for (let peerIndex = 0; peerIndex < regionState.peers.length; peerIndex++) {

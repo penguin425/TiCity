@@ -341,21 +341,21 @@ a {
   scrollbar-gutter: stable;
 }
 
-.tidb-ui-host .tidb-city-ui {
+.tidb-ui-host .ticity-ui {
   border-color: var(--city-line);
   background: var(--city-panel);
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(20px) saturate(130%);
 }
 
-.tidb-ui-host .tidb-city-head {
+.tidb-ui-host .ticity-head {
   display: flex;
   min-height: 2rem;
   justify-content: flex-end;
   margin: -0.5rem 0 0.4rem;
 }
 
-.tidb-ui-host .tidb-city-title {
+.tidb-ui-host .ticity-title {
   display: none;
 }
 

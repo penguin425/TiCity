@@ -1,21 +1,21 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { createTiDBSimulation } from '../model'
-import { TIDB_CITY } from './layout'
+import { TICITY_LAYOUT } from './layout'
 import { createTiDBSceneGraph } from './city'
 
-describe('TiDB City scene graph', () => {
+describe('TiCity scene graph', () => {
   it('builds one selectable peer per Region and TiKV store', () => {
     const city = createTiDBSceneGraph()
     const peers = city.registry.all().filter((component) => component.kind === 'region-peer')
-    expect(peers).toHaveLength(TIDB_CITY.regionCount * TIDB_CITY.peersPerRegion)
+    expect(peers).toHaveLength(TICITY_LAYOUT.regionCount * TICITY_LAYOUT.peersPerRegion)
 
-    for (let region = 0; region < TIDB_CITY.regionCount; region++) {
+    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
       const voters = peers.filter((peer) => peer.regionId === region)
       expect(voters).toHaveLength(3)
       expect(voters.filter((peer) => peer.peerRole === 'leader')).toHaveLength(1)
@@ -35,7 +35,7 @@ describe('TiDB City scene graph', () => {
     const positions = (
       raft as THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>
     ).geometry.getAttribute('position')
-    expect(positions.count / 2).toBe(TIDB_CITY.regionCount * 3)
+    expect(positions.count / 2).toBe(TICITY_LAYOUT.regionCount * 3)
     city.dispose()
   })
 

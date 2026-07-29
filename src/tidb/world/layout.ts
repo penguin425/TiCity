@@ -1,8 +1,8 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  *
- * TiDB City geography. This module deliberately has no three.js dependency so
+ * TiCity geography. This module deliberately has no three.js dependency so
  * the simulation, diagnostics, and geometry tests can share one exact plan.
  */
 
@@ -20,7 +20,7 @@ export interface RouteLeg {
   readonly to: ComponentAnchorId
 }
 
-export const TIDB_CITY = {
+export const TICITY_LAYOUT = {
   groundSize: 720,
   regionCount: 36,
   peersPerRegion: 3,
@@ -141,17 +141,17 @@ export const TIKV_CENTERS: readonly Point3[] = [
 ] as const
 
 export function regionPeerPosition(storeIndex: number, regionIndex: number): Point3 {
-  if (!Number.isInteger(storeIndex) || storeIndex < 0 || storeIndex >= TIDB_CITY.tikvCount) {
-    throw new RangeError(`storeIndex must be 0..${TIDB_CITY.tikvCount - 1}`)
+  if (!Number.isInteger(storeIndex) || storeIndex < 0 || storeIndex >= TICITY_LAYOUT.tikvCount) {
+    throw new RangeError(`storeIndex must be 0..${TICITY_LAYOUT.tikvCount - 1}`)
   }
-  if (!Number.isInteger(regionIndex) || regionIndex < 0 || regionIndex >= TIDB_CITY.regionCount) {
-    throw new RangeError(`regionIndex must be 0..${TIDB_CITY.regionCount - 1}`)
+  if (!Number.isInteger(regionIndex) || regionIndex < 0 || regionIndex >= TICITY_LAYOUT.regionCount) {
+    throw new RangeError(`regionIndex must be 0..${TICITY_LAYOUT.regionCount - 1}`)
   }
   const center = TIKV_CENTERS[storeIndex]
-  const column = regionIndex % TIDB_CITY.regionGrid.columns
-  const row = Math.floor(regionIndex / TIDB_CITY.regionGrid.columns)
-  const x = center[0] + (column - (TIDB_CITY.regionGrid.columns - 1) / 2) * TIDB_CITY.regionGrid.pitchX
-  const z = center[2] + (row - (TIDB_CITY.regionGrid.rows - 1) / 2) * TIDB_CITY.regionGrid.pitchZ
+  const column = regionIndex % TICITY_LAYOUT.regionGrid.columns
+  const row = Math.floor(regionIndex / TICITY_LAYOUT.regionGrid.columns)
+  const x = center[0] + (column - (TICITY_LAYOUT.regionGrid.columns - 1) / 2) * TICITY_LAYOUT.regionGrid.pitchX
+  const z = center[2] + (row - (TICITY_LAYOUT.regionGrid.rows - 1) / 2) * TICITY_LAYOUT.regionGrid.pitchZ
   return [x, 4.1, z]
 }
 

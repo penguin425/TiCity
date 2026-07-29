@@ -37,7 +37,7 @@ export type {
   SqlStatus,
   SqlSubmission,
   StoreId,
-  TiDBCityState,
+  TiCityState,
   TiDBControls,
   TiDBMetrics,
   TiDBSimulationApi,

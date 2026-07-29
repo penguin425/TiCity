@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * TiDB City model contracts. The model owns these values; presentation layers
+ * TiCity model contracts. The model owns these values; presentation layers
  * receive them as projections and must not invent alternate simulation state.
  */
 
@@ -256,7 +256,7 @@ export interface SqlSubmission {
   receipt: TraceReceipt | null
 }
 
-export interface TiDBCityState {
+export interface TiCityState {
   modelVersion: string
   seed: number
   t: number
@@ -280,7 +280,7 @@ export interface TiDBSimulationOptions {
 }
 
 export interface TiDBSimulationApi {
-  readonly state: TiDBCityState
+  readonly state: TiCityState
   update(deltaSeconds: number): void
   setControl<K extends keyof TiDBControls>(key: K, value: TiDBControls[K]): void
   runScenario(id: ScenarioId): TraceReceipt

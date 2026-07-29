@@ -113,6 +113,6 @@ try {
   document.body.dataset.ready = 'error'
   const root = document.querySelector<HTMLElement>('#machine-app')
   if (root) {
-    root.textContent = 'TiDB Machine could not start. See the browser console for details.'
+    root.textContent = 'TiCity Machine could not start. See the browser console for details.'
   }
 }

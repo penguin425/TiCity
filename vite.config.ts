@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// TiDB City changes Copyright 2026 TiDB City contributors.
+// TiCity changes Copyright 2026 TiCity contributors.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -16,7 +16,7 @@ const pkg = JSON.parse(readFileSync(entry('./package.json'), 'utf8')) as {
 const legalFileNames = ['LICENSE', 'NOTICE'] as const
 
 function shortGitSha(): string {
-  const supplied = process.env.TIDBCITY_GIT_SHA ?? process.env.GITHUB_SHA
+  const supplied = process.env.TICITY_GIT_SHA ?? process.env.GITHUB_SHA
   if (supplied && /^[0-9a-f]{7,40}$/i.test(supplied)) {
     return supplied.slice(0, 7).toLowerCase()
   }
@@ -38,7 +38,7 @@ export default defineConfig({
   base: './',
   plugins: [
     {
-      name: 'tidb-city-legal-documents',
+      name: 'ticity-legal-documents',
       generateBundle() {
         for (const fileName of legalFileNames) {
           this.emitFile({
@@ -51,8 +51,8 @@ export default defineConfig({
     },
   ],
   define: {
-    __TIDBCITY_VERSION__: JSON.stringify(pkg.version),
-    __TIDBCITY_GIT_SHA__: JSON.stringify(shortGitSha()),
+    __TICITY_VERSION__: JSON.stringify(pkg.version),
+    __TICITY_GIT_SHA__: JSON.stringify(shortGitSha()),
   },
   server: {
     host: true,

@@ -2,7 +2,7 @@
 
 import { defineConfig, devices } from '@playwright/test'
 
-const previewPort = Number(process.env.TIDBCITY_PREVIEW_PORT ?? 4173)
+const previewPort = Number(process.env.TICITY_PREVIEW_PORT ?? 4173)
 const previewUrl = `http://127.0.0.1:${previewPort}`
 
 export default defineConfig({

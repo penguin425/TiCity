@@ -1,16 +1,16 @@
-# TiDB City
+# TiCity
 
 **TiDBの分散SQLアーキテクチャを、歩いて観察できる決定論的な3Dモデル。**
 
 [PGSimCity](https://github.com/NikolayS/PGSimCity)から派生した、
-Apache-2.0ライセンスの独立した教育プロジェクトです。TiDB CityはTiDB、
+Apache-2.0ライセンスの独立した教育プロジェクトです。TiCityはTiDB、
 TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主要な処理の境界と
 順序を理解するための縮尺モデルです。既定の説明は日本語で、英語へ切り替えられます。
 
-公開先: <https://penguin425.github.io/TiDB-City/>
+公開先: <https://penguin425.github.io/TiCity/>
 
 > [!IMPORTANT]
-> TiDB City v0.1はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.2はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 
@@ -76,27 +76,27 @@ src/tidb/
 ```
 
 - モデルはThree.jsをimportしません。
-- 3D Worldは`TiDBCityState`を変更しません。
+- 3D Worldは`TiCityState`を変更しません。
 - 2PCとRaftは別々の状態機械、色、`TraceEvent.domain`を持ちます。
 - seedと固定stepが同じなら、状態と`TraceReceipt`も同じになります。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-ブラウザコンソールの`window.TIDBCITY`から、モデル、再生、シナリオ、
+ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。
 各表示上の主張と一次資料の対応は
 [モデル境界](docs/MODEL_BOUNDARY.md)に記録しています。
 
 ## 派生元とライセンス
 
-TiDB CityはPGSimCityの履歴を保持したforkです。派生元の基準commitと変更の
+TiCityはPGSimCityの履歴を保持したforkです。派生元の基準commitと変更の
 帰属は[NOTICE](NOTICE)に記載しています。コードは同じ
 [Apache License 2.0](LICENSE)で提供されます。
 
 Copyright 2026 Nikolay Samokhvalov<br>
-TiDB City changes Copyright 2026 TiDB City contributors
+TiCity changes Copyright 2026 TiCity contributors
 
 TiDB、TiKV、TiFlashおよびPingCAPの公式ロゴや資産は同梱していません。
-TiDB CityはPingCAP, Inc.とは独立したプロジェクトで、同社による承認・後援を
+TiCityはPingCAP, Inc.とは独立したプロジェクトで、同社による承認・後援を
 示すものではありません。

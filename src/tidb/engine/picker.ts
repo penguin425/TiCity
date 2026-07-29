@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
@@ -36,7 +36,7 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
   const raycaster = new THREE.Raycaster()
   const candidates = city.registry.roots() as THREE.Object3D[]
   const root = new THREE.Group()
-  root.name = 'tidb-city:selection'
+  root.name = 'ticity:selection'
 
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: SEMANTIC_COLORS.night.return,
@@ -54,7 +54,7 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
   root.add(ring)
 
   const label = document.createElement('div')
-  label.className = 'tidb-city-selection-label'
+  label.className = 'ticity-selection-label'
   label.setAttribute('role', 'status')
   label.setAttribute('aria-live', 'polite')
   label.style.cssText =
