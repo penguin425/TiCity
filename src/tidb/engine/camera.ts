@@ -25,6 +25,13 @@ export interface CityCameraOptions {
   readonly initialMode?: CityViewMode
 }
 
+export const CITY_ORBIT = {
+  homePosition: [0, 305, 555],
+  target: [0, 14, 30],
+  minDistance: 24,
+  maxDistance: 1_650,
+} as const
+
 const _look = new THREE.Vector3()
 const _focusOffset = new THREE.Vector3(88, 72, 104)
 
@@ -40,10 +47,10 @@ export function createCityCameraController(options: CityCameraOptions): CityCame
   const orbit = new OrbitControls(camera, dom)
   orbit.enableDamping = true
   orbit.dampingFactor = 0.075
-  orbit.minDistance = 24
-  orbit.maxDistance = 620
+  orbit.minDistance = CITY_ORBIT.minDistance
+  orbit.maxDistance = CITY_ORBIT.maxDistance
   orbit.maxPolarAngle = Math.PI * 0.495
-  orbit.target.set(0, 14, 30)
+  orbit.target.set(...CITY_ORBIT.target)
   orbit.update()
 
   const pressed = new Set<string>()
@@ -131,7 +138,7 @@ export function createCityCameraController(options: CityCameraOptions): CityCame
       readCameraAngles()
       applyLook()
     } else {
-      orbit.target.set(0, 14, 30)
+      orbit.target.set(...CITY_ORBIT.target)
       orbit.update()
     }
   }

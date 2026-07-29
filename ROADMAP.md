@@ -24,6 +24,13 @@
 - Directional route chevrons, endpoint rings, local-operation pulses, and background dimming
 - Compact mobile and reduced-motion trace presentation
 
+## v0.3.2
+
+- PGSimCity-scale orbit zoom-out with coordinated camera, atmosphere, fog, and label LOD
+- Same-receipt trace looping with a final-state hold and visible iteration state
+- Independent Loop control with reduced-motion opt-in and bounded screen-reader announcements
+- Five-control responsive Trace Dock across mobile and narrow panel-open layouts
+
 ## Deliberately outside v0.3.x
 
 - Connecting to or changing a live TiDB cluster

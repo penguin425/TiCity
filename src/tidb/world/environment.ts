@@ -27,6 +27,8 @@ interface RoadSegment {
   readonly depth: number
 }
 
+const _cameraWorld = new THREE.Vector3()
+
 const ROAD_SEGMENTS: readonly RoadSegment[] = [
   { name: 'client-approach', x: 0, z: -339, width: 28, depth: 40 },
   { name: 'gateway-avenue', x: 0, z: -253, width: 28, depth: 54 },
@@ -374,6 +376,15 @@ function createClouds(material: THREE.PointsMaterial): THREE.Points {
   return clouds
 }
 
+function followCamera(object: THREE.Object3D): void {
+  object.onBeforeRender = (_renderer, _scene, camera) => {
+    camera.getWorldPosition(_cameraWorld)
+    if (object.parent) object.parent.worldToLocal(_cameraWorld)
+    object.position.copy(_cameraWorld)
+    object.updateMatrixWorld(true)
+  }
+}
+
 export function createCityEnvironment(): CityEnvironment {
   const object = new THREE.Group()
   object.name = 'ticity:environment'
@@ -517,10 +528,14 @@ export function createCityEnvironment(): CityEnvironment {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(930, 36, 20), skyMaterial)
   sky.name = 'city:sky-dome'
   sky.renderOrder = -100
+  sky.frustumCulled = false
+  followCamera(sky)
   object.add(sky)
 
   const stars = createStars(starMaterial)
   const clouds = createClouds(cloudMaterial)
+  followCamera(stars)
+  followCamera(clouds)
   object.add(stars, clouds)
 
   const foundation = new THREE.Mesh(

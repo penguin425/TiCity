@@ -113,6 +113,68 @@ test('desktop controls start collapsed and toggle the panel accessibly', async (
   await expect(controls).toBeHidden()
 })
 
+test('orbit view can zoom out to a city-scale overview without clipping the atmosphere', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+
+  const canvas = page.locator('.tidb-world canvas')
+  await expect(canvas).toBeVisible()
+  const initial = await page.evaluate(() => {
+    const { camera } = window.TICITY.world!.shell
+    const target = { x: 0, y: 14, z: 30 }
+    return {
+      distance: Math.hypot(
+        camera.position.x - target.x,
+        camera.position.y - target.y,
+        camera.position.z - target.z,
+      ),
+      far: camera.far,
+    }
+  })
+
+  // One high-resolution trackpad gesture should be enough to exercise the
+  // configured OrbitControls ceiling, independent of browser wheel batching.
+  await canvas.dispatchEvent('wheel', {
+    clientX: 720,
+    clientY: 450,
+    deltaMode: 0,
+    deltaY: 2_000,
+  })
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  }))
+
+  const overview = await page.evaluate(() => {
+    const { camera, scene, city } = window.TICITY.world!.shell
+    const target = { x: 0, y: 14, z: 30 }
+    const sky = city.root.getObjectByName('city:sky-dome')
+    const fogFar = 'far' in (scene.fog ?? {}) ? scene.fog?.far ?? 0 : 0
+    return {
+      distance: Math.hypot(
+        camera.position.x - target.x,
+        camera.position.y - target.y,
+        camera.position.z - target.z,
+      ),
+      far: camera.far,
+      fogFar,
+      skyDistance: sky ? sky.position.distanceTo(camera.position) : Number.POSITIVE_INFINITY,
+      labelsDistant: document.querySelector('.tidb-world-labels')
+        ?.classList.contains('is-distant') ?? false,
+    }
+  })
+
+  expect(initial.distance).toBeGreaterThan(590)
+  expect(initial.distance).toBeLessThan(610)
+  expect(overview.distance).toBeGreaterThan(initial.distance * 2.7)
+  expect(overview.distance).toBeLessThanOrEqual(1_651)
+  expect(overview.far).toBeGreaterThanOrEqual(4_000)
+  expect(overview.fogFar).toBeGreaterThanOrEqual(2_800)
+  expect(overview.skyDistance).toBeLessThan(0.01)
+  expect(overview.labelsDistant).toBe(true)
+})
+
 test('day is the default theme and the selected theme survives reload', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
@@ -271,6 +333,64 @@ test('trace replay keeps the causal route readable and supports transport contro
   await expect(dock).toHaveAttribute('data-phase', 'playing')
   await expect(dock).toHaveAttribute('data-event-index', '0')
 
+  const loop = await page.evaluate(() => {
+    const receipt = window.TICITY.trace
+    if (!receipt) throw new Error('Expected an active TraceReceipt')
+    const flows = window.TICITY.world!.shell.flows
+    const receiptBefore = JSON.stringify(receipt)
+    const presentationDurationBefore = flows.playback.durationMs
+
+    flows.update(presentationDurationBefore / 1_000 + 1)
+    const holding = {
+      phase: flows.playback.phase,
+      atEnd: flows.playback.atEnd,
+      iteration: flows.playback.iteration,
+      currentIndex: flows.playback.currentIndex,
+      total: flows.playback.total,
+    }
+
+    // The longest end hold is 2.6 seconds for a failed trace. Advancing three
+    // real seconds therefore starts the next presentation iteration.
+    flows.update(3)
+    return {
+      holding,
+      looped: {
+        phase: flows.playback.phase,
+        atEnd: flows.playback.atEnd,
+        iteration: flows.playback.iteration,
+        currentIndex: flows.playback.currentIndex,
+        presentationDuration: flows.playback.durationMs,
+      },
+      sameReceiptReference: window.TICITY.trace === receipt,
+      sameReceiptValue: JSON.stringify(window.TICITY.trace) === receiptBefore,
+    }
+  })
+  expect(loop.holding).toEqual({
+    phase: 'holding',
+    atEnd: true,
+    iteration: 1,
+    currentIndex: loop.holding.total - 1,
+    total: loop.holding.total,
+  })
+  expect(loop.looped).toMatchObject({
+    phase: 'playing',
+    atEnd: false,
+    iteration: 2,
+    currentIndex: 0,
+  })
+  expect(loop.looped.presentationDuration).toBeGreaterThan(6_000)
+  expect(loop.sameReceiptReference).toBe(true)
+  expect(loop.sameReceiptValue).toBe(true)
+  await expect(dock).toHaveAttribute('data-looping', 'true')
+  await expect(dock).toHaveAttribute('data-iteration', '2')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  await page.locator('[data-action="trace-replay"]').click()
+  await expect(dock).toHaveAttribute('data-iteration', '1')
+
   // A trace is historical presentation data: it can resume and replay even
   // while the deterministic workload remains held in model step mode.
   await page.evaluate(() => window.TICITY.model.setPlayback('step'))
@@ -291,6 +411,11 @@ test('mobile reduced-motion keeps a static route and usable trace controls', asy
   const dock = page.locator('[data-trace-dock]')
   await expect(dock).toBeVisible()
   await expect(dock).toHaveAttribute('data-motion', 'reduced')
+  await expect(dock).toHaveAttribute('data-looping', 'false')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  )
   await expect(page.locator('[data-trace-label]')).not.toBeEmpty()
   await expect(page.locator('[data-trace-route]')).toBeVisible()
 
@@ -311,6 +436,9 @@ test('mobile reduced-motion keeps a static route and usable trace controls', asy
       instanceMatrix: { array: ArrayLike<number> }
       instanceColor?: { array: ArrayLike<number> } | null
     }
+    // Freeze the presentation clock so this assertion measures reduced-motion
+    // rendering, not an incidental event-boundary transition.
+    flows.setPaused(true)
     flows.update(0.05)
     const before = Array.from(flows.mesh.instanceMatrix.array.slice(0, 16))
     const guideBefore = Array.from(guideMesh.instanceMatrix.array).slice(
@@ -329,6 +457,7 @@ test('mobile reduced-motion keeps a static route and usable trace controls', asy
     const guideColorAfter = guideMesh.instanceColor
       ? Array.from(guideMesh.instanceColor.array).slice(0, guideMesh.count * 3)
       : []
+    flows.setPaused(false)
     return {
       dockInsideWorld:
         dockBox.left >= worldBox.left - 1 &&
@@ -348,7 +477,7 @@ test('mobile reduced-motion keeps a static route and usable trace controls', asy
     }
   })
   expect(layout.dockInsideWorld).toBe(true)
-  expect(layout.controls).toHaveLength(4)
+  expect(layout.controls).toHaveLength(5)
   expect(layout.controls.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true)
   expect(layout.noHorizontalScroll).toBe(true)
   expect(layout.staticPacket).toBe(true)
