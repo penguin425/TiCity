@@ -81,6 +81,7 @@ export interface TiDBSceneGraph {
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
   setTheme(theme: CityTheme): void
+  setNetworkEmphasis(active: boolean): void
   setFocus(id: string | null): void
   dispose(): void
 }
@@ -1075,6 +1076,9 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       environment.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
+    },
+    setNetworkEmphasis(active: boolean): void {
+      materials.setNetworkEmphasis(active)
     },
     setFocus(id: string | null): void {
       if (focused) focused.object.userData.focused = false

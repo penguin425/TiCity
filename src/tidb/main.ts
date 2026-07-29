@@ -25,6 +25,7 @@ import {
   resolveLocale,
   type Locale,
 } from './ui'
+import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTiDBWorld, type WorldHandle } from './world'
 import type { CityComponent } from './world/city'
 import type { CityViewMode } from './engine/camera'
@@ -235,6 +236,39 @@ function boot(): void {
     worldHost.append(fallback)
   }
 
+  const traceDock = createTracePlaybackDock(locale, {
+    onPrevious: () => {
+      world?.shell.flows.step(-1)
+    },
+    onTogglePause: () => {
+      const flows = world?.shell.flows
+      if (!flows) return
+      const pause = flows.playback.phase === 'playing'
+      flows.setPaused(pause)
+    },
+    onNext: () => {
+      world?.shell.flows.step(1)
+    },
+    onReplay: () => {
+      world?.shell.flows.replay()
+    },
+  })
+  traceDock.root.dataset.traceDock = ''
+  if (world) worldHost.append(traceDock.root)
+
+  const setPlayback = (mode: TiCityState['playback']): void => {
+    simulation.setPlayback(mode)
+    world?.shell.flows.setPaused(mode === 'step')
+  }
+
+  const setControl = <K extends keyof TiDBControls>(
+    key: K,
+    value: TiDBControls[K],
+  ): void => {
+    simulation.setControl(key, value)
+    if (key === 'paused') world?.shell.flows.setPaused(Boolean(value))
+  }
+
   const topbar = document.createElement('header')
   topbar.className = 'tidb-topbar'
   const wordmarkHost = document.createElement('div')
@@ -335,14 +369,14 @@ function boot(): void {
       state: simulation.state,
       submitSql,
       runScenario,
-      setControl: (key, value) => simulation.setControl(key, value),
-      setPlayback: simulation.setPlayback,
+      setControl,
+      setPlayback,
     },
     analyzeSql: submitSql,
     onReceipt: applyReceipt,
     onRunScenario: runScenario,
-    onSetControl: (key, value) => simulation.setControl(key, value),
-    onSetPlayback: simulation.setPlayback,
+    onSetControl: setControl,
+    onSetPlayback: setPlayback,
     onTourFocus: (target) => {
       // Tour rendering reports its current chapter. Move only when the
       // chapter changes, not during the initial UI mount or locale rerender.
@@ -370,6 +404,7 @@ function boot(): void {
       const skip = document.querySelector<HTMLElement>('.skip-link')
       if (skip) skip.textContent = copy[next].skip
       if (world) world.shell.renderer.domElement.setAttribute('aria-label', copy[next].canvas)
+      traceDock.setLocale(next)
     },
     machineHref: 'machine/',
     diagnoseHref: 'diagnose/',
@@ -393,24 +428,37 @@ function boot(): void {
     last = now
     simulation.update(deltaSeconds)
     world?.update(simulation.state, currentTrace)
+    const playback = world?.shell.flows.playback
+    if (playback) {
+      traceDock.update(playback, currentTrace)
+      layout.dataset.traceState = playback.phase
+    }
 
     if (now - lastStatus >= 250) {
       lastStatus = now
       qps.value.textContent = String(simulation.state.controls.qps)
       const latest = simulation.state.lastTrace
-      txn.value.textContent = latest
-        ? latest.outcome === 'committed'
-          ? copy[locale].committed
-          : latest.outcome === 'rolled_back'
-            ? copy[locale].rolledBack
-            : latest.outcome === 'succeeded'
-              ? copy[locale].succeeded
-              : copy[locale].failed
-        : copy[locale].none
+      txn.value.textContent =
+        playback?.phase === 'playing'
+          ? 'PLAY'
+          : playback?.phase === 'paused'
+            ? 'PAUSE'
+            : latest
+              ? latest.outcome === 'committed'
+                ? copy[locale].committed
+                : latest.outcome === 'rolled_back'
+                  ? copy[locale].rolledBack
+                  : latest.outcome === 'succeeded'
+                    ? copy[locale].succeeded
+                    : copy[locale].failed
+              : copy[locale].none
       regions.value.textContent = String(simulation.state.regions.length)
-      trace.value.textContent = latest?.scenarioId === 'commit-protocols'
-        ? '1PC / Async / 2PC'
-        : latest?.protocol ?? copy[locale].none
+      trace.value.textContent =
+        playback && (playback.phase === 'playing' || playback.phase === 'paused')
+          ? `${playback.currentIndex + 1}/${playback.total}`
+          : latest?.scenarioId === 'commit-protocols'
+            ? '1PC / Async / 2PC'
+            : latest?.protocol ?? copy[locale].none
     }
     animationFrame = requestAnimationFrame(frame)
   }
@@ -438,7 +486,7 @@ function boot(): void {
       return deepFreezeSnapshot(structuredClone(simulation.state))
     },
     update: (deltaSeconds) => simulation.update(deltaSeconds),
-    setControl: (key, value) => simulation.setControl(key, value),
+    setControl,
     runScenario,
     submitSql,
     requestTrace(request: TraceRequest) {
@@ -446,7 +494,7 @@ function boot(): void {
       applyReceipt(receipt)
       return receipt
     },
-    setPlayback: (mode) => simulation.setPlayback(mode),
+    setPlayback,
     reset,
   }
 
@@ -459,7 +507,7 @@ function boot(): void {
     runScenario,
     submitSql,
     setControl(key, value) {
-      simulation.setControl(key, value)
+      setControl(key, value)
     },
     setView,
     setTheme,
@@ -470,6 +518,7 @@ function boot(): void {
     disposed = true
     cancelAnimationFrame(animationFrame)
     themeObserver.disconnect()
+    traceDock.dispose()
     world?.dispose()
   }, { once: true })
 

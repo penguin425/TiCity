@@ -215,6 +215,148 @@ test('overview labels do not overlap in a short desktop viewport', async ({ page
   expect(overlaps).toEqual([])
 })
 
+test('trace replay keeps the causal route readable and supports transport controls', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await page.evaluate(() => {
+    window.TICITY.runScenario('cross-region-transaction')
+  })
+
+  const dock = page.locator('[data-trace-dock]')
+  await expect(dock).toBeVisible()
+  await expect(dock).toHaveAttribute('data-event-count', '31')
+  await expect(dock).toHaveAttribute('data-phase', 'playing')
+  expect(Number(await dock.getAttribute('data-presentation-duration-ms'))).toBeGreaterThan(6_000)
+  await expect(page.locator('[data-trace-label]')).not.toBeEmpty()
+  await expect(page.locator('[data-trace-route]')).toContainText('→')
+
+  // One presentation second must no longer collapse a 31-event trace.
+  await page.evaluate(() => window.TICITY.world!.shell.flows.update(1))
+  await expect(dock).not.toHaveAttribute('data-phase', 'complete')
+
+  await page.locator('[data-action="trace-toggle"]').click()
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  const pausedIndex = Number(await dock.getAttribute('data-event-index'))
+  await page.evaluate(() => window.TICITY.world!.shell.flows.update(5))
+  await expect(dock).toHaveAttribute('data-event-index', String(pausedIndex))
+
+  await page.locator('[data-action="trace-next"]').click()
+  await expect(dock).toHaveAttribute('data-event-index', String(pausedIndex + 1))
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  if (await page.locator('[data-trace-route]').getAttribute('data-local') === 'true') {
+    await page.locator('[data-action="trace-next"]').click()
+  }
+
+  const visual = await page.evaluate(() => {
+    const { city, flows } = window.TICITY.world!.shell
+    return {
+      guide: (flows.object.getObjectByName('trace-flow:route-guide') as {
+        count?: number
+      } | undefined)?.count ?? 0,
+      endpoints: (flows.object.getObjectByName('trace-flow:endpoints') as {
+        count?: number
+      } | undefined)?.count ?? 0,
+      networkOpacity: city.materials.dataLine.opacity,
+      dropped: flows.dropped,
+    }
+  })
+  expect(visual.guide).toBeGreaterThan(0)
+  expect(visual.endpoints).toBe(2)
+  expect(visual.networkOpacity).toBeLessThan(0.12)
+  expect(visual.dropped).toBe(0)
+
+  await page.locator('[data-action="trace-replay"]').click()
+  await expect(dock).toHaveAttribute('data-phase', 'playing')
+  await expect(dock).toHaveAttribute('data-event-index', '0')
+
+  // A trace is historical presentation data: it can resume and replay even
+  // while the deterministic workload remains held in model step mode.
+  await page.evaluate(() => window.TICITY.model.setPlayback('step'))
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  await page.locator('[data-action="trace-toggle"]').click()
+  await expect(dock).toHaveAttribute('data-phase', 'playing')
+  await page.locator('[data-action="trace-replay"]').click()
+  await expect(dock).toHaveAttribute('data-phase', 'playing')
+  await expect(dock).toHaveAttribute('data-event-index', '0')
+})
+
+test('mobile reduced-motion keeps a static route and usable trace controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+
+  const dock = page.locator('[data-trace-dock]')
+  await expect(dock).toBeVisible()
+  await expect(dock).toHaveAttribute('data-motion', 'reduced')
+  await expect(page.locator('[data-trace-label]')).not.toBeEmpty()
+  await expect(page.locator('[data-trace-route]')).toBeVisible()
+
+  const layout = await page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>('[data-trace-dock]')!
+    const world = document.querySelector<HTMLElement>('.tidb-world')!
+    const dockBox = dock.getBoundingClientRect()
+    const worldBox = world.getBoundingClientRect()
+    const controls = [...dock.querySelectorAll<HTMLButtonElement>('[data-action]')]
+      .filter((control) => getComputedStyle(control).display !== 'none')
+      .map((control) => {
+        const box = control.getBoundingClientRect()
+        return { width: box.width, height: box.height }
+      })
+    const flows = window.TICITY.world!.shell.flows
+    const guideMesh = flows.object.getObjectByName('trace-flow:route-guide') as {
+      count: number
+      instanceMatrix: { array: ArrayLike<number> }
+      instanceColor?: { array: ArrayLike<number> } | null
+    }
+    flows.update(0.05)
+    const before = Array.from(flows.mesh.instanceMatrix.array.slice(0, 16))
+    const guideBefore = Array.from(guideMesh.instanceMatrix.array).slice(
+      0,
+      guideMesh.count * 16,
+    )
+    const guideColorBefore = guideMesh.instanceColor
+      ? Array.from(guideMesh.instanceColor.array).slice(0, guideMesh.count * 3)
+      : []
+    flows.update(0.1)
+    const after = Array.from(flows.mesh.instanceMatrix.array.slice(0, 16))
+    const guideAfter = Array.from(guideMesh.instanceMatrix.array).slice(
+      0,
+      guideMesh.count * 16,
+    )
+    const guideColorAfter = guideMesh.instanceColor
+      ? Array.from(guideMesh.instanceColor.array).slice(0, guideMesh.count * 3)
+      : []
+    return {
+      dockInsideWorld:
+        dockBox.left >= worldBox.left - 1 &&
+        dockBox.right <= worldBox.right + 1 &&
+        dockBox.top >= worldBox.top - 1 &&
+        dockBox.bottom <= worldBox.bottom + 1,
+      controls,
+      noHorizontalScroll: document.documentElement.scrollWidth <= window.innerWidth + 1,
+      staticPacket: before.every((value, index) => value === after[index]),
+      staticGuide:
+        guideBefore.every((value, index) => value === guideAfter[index]) &&
+        guideColorBefore.every((value, index) => value === guideColorAfter[index]),
+      guide: guideMesh.count,
+      endpoints: (flows.object.getObjectByName('trace-flow:endpoints') as {
+        count?: number
+      } | undefined)?.count ?? 0,
+    }
+  })
+  expect(layout.dockInsideWorld).toBe(true)
+  expect(layout.controls).toHaveLength(4)
+  expect(layout.controls.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true)
+  expect(layout.noHorizontalScroll).toBe(true)
+  expect(layout.staticPacket).toBe(true)
+  expect(layout.staticGuide).toBe(true)
+  expect(layout.guide).toBeGreaterThan(0)
+  expect(layout.endpoints).toBe(2)
+})
+
 test('city rendering stays within the desktop frame budget', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
@@ -233,6 +375,7 @@ test('city rendering stays within the desktop frame budget', async ({ page }) =>
       pixelRatio: renderer.getPixelRatio(),
       backingPixels: renderer.domElement.width * renderer.domElement.height,
       cssPixels: renderer.domElement.clientWidth * renderer.domElement.clientHeight,
+      dropped: window.TICITY.world?.shell.flows.dropped ?? 0,
     }
   })
 
@@ -247,6 +390,7 @@ test('city rendering stays within the desktop frame budget', async ({ page }) =>
   expect(metrics.programs).toBeLessThanOrEqual(32)
   expect(metrics.pixelRatio).toBeLessThanOrEqual(1.5)
   expect(metrics.backingPixels).toBeLessThanOrEqual(metrics.cssPixels * 2.25)
+  expect(metrics.dropped).toBe(0)
 })
 
 test('SQL analysis stays local and does not retain a submitted literal', async ({ page }) => {
