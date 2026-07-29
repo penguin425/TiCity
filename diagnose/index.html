@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja" data-theme="night">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="TiDB CityモデルのRegion、quorum、lock、GC、TiFlash lagを確認する診断画面。"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#07121f" />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <title>Diagnose · TiDB City</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#diagnose-app">メインコンテンツへ移動</a>
+    <main id="diagnose-app" tabindex="-1">
+      <p class="page-loading" aria-live="polite">Diagnoseを起動しています…</p>
+    </main>
+    <noscript>このページの実行にはJavaScriptが必要です。</noscript>
+    <script type="module" src="../src/tidb/diagnose/main.ts"></script>
+  </body>
+</html>

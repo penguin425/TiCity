@@ -1,7 +1,8 @@
 name: CI
 
-# Pull requests never reach the Pages deploy workflow, so validate them here.
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -9,31 +10,74 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR supersedes the run that is already going.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Typecheck and build
+  verify:
+    name: Unit, types, and production build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Run deterministic model tests
+        run: npm test
+
+      - name: Verify license, attribution, and offline boundary
+        run: npm run test:license
+
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build
+      - name: Build all static pages
         run: npm run build
+
+      - name: Upload production bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: tidb-city-dist
+          path: dist
+          if-no-files-found: error
+
+  browser:
+    name: Chromium accessibility and smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:e2e
+
+      - name: Upload browser report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore

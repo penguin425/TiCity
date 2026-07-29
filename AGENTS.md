@@ -1,62 +1,59 @@
-# AGENTS.md
+# TiDB City contributor rules
 
-Read and follow [`CLAUDE.md`](CLAUDE.md) before changing this repository. It is
-the source of truth for architecture, style, testing, visual accuracy, and
-delivery rules. [`CONTRIBUTING.md`](CONTRIBUTING.md) is the shorter human guide.
+## Accuracy boundary
 
-## Codex workflow
+TiDB City is a deterministic educational model of TiDB v8.5 LTS. It is not a
+TiDB emulator, SQL executor, optimizer, metrics endpoint, or live-cluster
+client. UI copy and code must never present model values as measured values.
+Every diagnostic projection must remain visibly labelled `MODEL / SIMULATED`.
 
-- Do not commit or push. Leave the working tree for the project owner.
-- Preserve unrelated changes. If work touches `src/engine/renderer.ts`,
-  `src/main.ts`, `src/world/layout.ts`, or `src/core/types.ts`, follow the
-  dedicated-worktree rule in `CLAUDE.md`.
-- Install with `npm install`. Run the development server with `npm run dev` at
-  `http://localhost:5173/`; reuse an existing server rather than starting a
-  competing process. Vite preview uses port 4173.
-- Run `npm test`, `npm run typecheck`, and `npm run build` before handoff.
-  During TDD, `npm run test:watch` is the fast loop.
+Verify TiDB claims against current primary documentation before changing them.
+Keep these distinctions explicit:
 
-## Visual verification
+- transaction 2PC provides atomic commit across keys/Regions;
+- Region Raft replicates each Region and establishes quorum;
+- PD provides timestamps and scheduling metadata; SQL row data does not pass
+  through PD;
+- TiFlash is a learner replica and must not count toward TiKV voter quorum;
+- 1PC and Async Commit are transaction commit optimizations, not Raft modes.
 
-For Slonik plate work, start with:
+## Architecture
+
+- `src/tidb/model/` is pure TypeScript and must never import `three`.
+- `src/tidb/world/layout.ts` is the single source of truth for geography.
+- `src/tidb/world/` and `src/tidb/engine/` read but never mutate
+  `TiDBCityState`.
+- UI, Machine, and Diagnose receive model snapshots or typed callbacks. They do
+  not create competing simulation state.
+- 2PC and Raft keep separate state transitions, trace domains, visual lanes,
+  and semantic colours.
+- With the same model version, seed, controls, fixed steps, and request, state
+  and `TraceReceipt` must be identical.
+
+## Privacy and input
+
+The static application makes no analytics or live-cluster requests. Free-form
+SQL is limited to one statement and 64 KiB, remains in memory, and is only
+classified into a model route. Never persist it, transmit it, execute it, or
+invent result rows. `ReplaySpec` must not contain SQL text or literals.
+
+## Implementation
+
+- TypeScript is strict. Prefer immutable projections and explicit public types.
+- Avoid per-frame allocations in rendering loops; reuse Three.js temporaries.
+- Dispose geometries, materials, listeners, audio nodes, and animation handles.
+- Keep all visible and ARIA text in the Japanese/English catalog.
+- Keyboard operation, reduced motion, colour-independent state, and readable
+  focus rings are required.
+- New model behavior needs deterministic invariant tests. Visible changes need
+  a browser smoke check and screenshot review.
+- Preserve Apache-2.0 headers and the upstream attribution in `NOTICE`.
+
+Run before submitting:
 
 ```bash
-node tools/plot-plate.mjs
+npm test
+npm run typecheck
+npm run build
+npm run test:e2e
 ```
-
-An alternate source file may be passed as the first argument. This prints the
-silhouette, bounding box, segment count, and trunk proportion without a browser
-or GPU.
-
-For anything visible, use the headless driver in this repository:
-
-```bash
-CDP_PORT=9501 node tools/shoot.mjs \
-  http://localhost:5173/ /tmp/pgsimcity.png 45000 1280 760
-```
-
-Choose a unique `CDP_PORT` from 9500–9900 for every concurrent driver. Software
-WebGL runs at roughly 1–3 fps, so allow 45–70 seconds for the scene to settle.
-The optional final argument is JavaScript evaluated before the screenshot.
-
-### At most three browsers at once
-
-`tools/shoot.mjs` takes a slot from a directory semaphore at
-`/tmp/claude-1000/cdp-gate` before it launches, and waits if all slots are
-taken. The cap is three, overridable with `CDP_MAX`.
-
-**Do not raise it, and do not launch Chrome around the driver to avoid it.**
-Each browser rasterises WebGL through SwiftShader on the CPU and spikes to
-1–2 GiB while a frame is in flight. Ten agents screenshotting at once put this
-machine into swap and then into the OOM killer — twice in one session, losing
-in-flight work from every agent running at the time. Queuing is slower per
-screenshot and it finishes; colliding is faster and it does not.
-
-If a run is killed, its slot is reaped after ten minutes, so a dead agent
-cannot deadlock the gate. `tools/reap.sh` clears them immediately along with
-browsers older than fifteen minutes.
-
-`window.PGSIMCITY` exposes `bus`, `sim`, `rig`, `registry`, `gfx`, and `flows`.
-Use `sim.setKnob()`, `sim.runScenario()`, or `bus.emit('focus', { id: '...' })`
-to stage a view. Inspect the screenshot itself and the driver's console and
-exception output; creating an image file alone is not verification.

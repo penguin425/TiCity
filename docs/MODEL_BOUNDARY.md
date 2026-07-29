@@ -1,0 +1,60 @@
+# TiDB City model boundary
+
+TiDB City v0.1 targets **TiDB v8.5 LTS**. This document records which visible
+claims are architectural, which values are deliberately representative, and
+which capabilities are not implemented.
+
+## Claims represented directly
+
+| Visible claim | Model invariant | Primary reference |
+|---|---|---|
+| TiDB Server is stateless SQL compute and sends storage requests to TiKV or TiFlash | TiDB nodes own no Region data; data paths terminate at a storage node | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture) |
+| PD owns cluster metadata, scheduling, and transaction timestamps | PD appears only on control/TSO paths, never on the row-data route | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture) |
+| A Region covers a left-closed, right-open key range and normally has three replicas | Region ranges are contiguous; every Region has exactly three voter peers | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture) |
+| TiDB supports pessimistic and optimistic distributed transactions | Both modes have separate scenario paths and conflict behavior | [Transactions](https://docs.pingcap.com/tidb/v8.5/transaction-overview) |
+| Optimistic distributed transactions use 2PC | Prewrite precedes commit; a modeled conflict moves the transaction to `rolled_back` without claiming a per-key lock inventory | [Optimistic transaction model](https://docs.pingcap.com/tidb/v8.5/optimistic-transaction) |
+| 1PC and Async Commit are transaction optimizations | They alter transaction events but never change Region Raft quorum. Async Commit returns after successful prewrite and shows commit-record resolution as background work; it has no normal Get-commit-ts/Commit phase on the client path | [Latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
+| Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
+| TiFlash is an asynchronously replicated Raft learner for HTAP | It never counts toward TiKV voter quorum and has visible catch-up lag | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview) |
+| Raft Engine stores Raft logs by default in this target line | The TiKV inspector names Raft Engine, not the older RaftDB default | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file) |
+| Active transaction `start_ts` can hold the GC safe point, subject to `tidb_gc_max_wait_time` | The GC scenario shows a short-horizon blocker and names the 86,400-second default; it does not fast-forward the teaching clock by a day | [GC configuration](https://docs.pingcap.com/tidb/v8.5/garbage-collection-configuration) |
+
+## Representative values
+
+The default topology—2 TiProxy, 3 TiDB, 3 PD, 3 TiKV, 1 TiFlash, and 36
+Regions—is sized for a legible city. Event durations, QPS, Region sizes,
+hot scores, GC backlog, and TiFlash lag are teaching-clock values. They are
+deterministic consequences of controls and scenarios, not benchmarks,
+recommendations, SLOs, or measurements from a TiDB cluster.
+
+One rendered Region tile on each TiKV store is a peer of the same logical
+Region. Three tiles with the same Region ID are not three independent Regions.
+The city has 36 stable visual Region slots. A hotspot split can add a 37th
+logical Region to the model and 2D inspectors; the original upper-range Region
+remains projected in the fixed 3D slot.
+
+The demo schema gives a TiFlash replica only to `events`. Its analytical example
+is deliberately routed to MPP so the path can be taught. Real TiDB requires a
+table-level replica and lets the cost-based optimizer choose TiKV, TiFlash, or
+both; an aggregate is not automatically a TiFlash query.
+
+The model treats its accepted single-row, primary-key-constrained mutation as
+small enough for Async Commit when that mode is enabled. Real eligibility also
+depends on feature settings, mutation/key size limits, timestamp bounds, and
+other runtime conditions—not simply on the number of Regions.
+
+## SQL boundary
+
+The workbench accepts at most one 64 KiB statement. A conservative lexer
+recognizes only a small educational subset: point/range reads, aggregates,
+single-row INSERT with an explicit known primary key, primary-key-constrained
+UPDATE/DELETE, and non-ANALYZE EXPLAIN around those forms. `EXPLAIN ANALYZE` is
+rejected because a real TiDB server executes it. Classification yields a
+deep-frozen `ModelPlanNode` and `TraceReceipt`; it does not parse with TiDB,
+execute, optimize, contact a cluster, persist SQL literals, or return rows.
+
+## Provenance labels
+
+- `MODEL / SIMULATED`: generated entirely by TiDB City.
+- `REFERENCE`: a link or command that a person could use on a real cluster.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.1.

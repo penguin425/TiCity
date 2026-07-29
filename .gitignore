@@ -6,6 +6,8 @@ dist/
 dist-ssr/
 .vite/
 *.tsbuildinfo
+playwright-report/
+test-results/
 
 # Local env / secrets
 .env

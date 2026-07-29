@@ -1,27 +1,33 @@
-PGSimCity
-Copyright 2026 Nikolay Samokhvalov
+TiDB City
+Copyright 2026 TiDB City contributors
 
-This product is licensed under the Apache License, Version 2.0 (the "License");
-you may not use this product except in compliance with the License. You may
-obtain a copy of the License at
+This product is derived from PGSimCity:
 
-    http://www.apache.org/licenses/LICENSE-2.0
+    PGSimCity
+    Copyright 2026 Nikolay Samokhvalov
+    https://github.com/NikolayS/PGSimCity
+    Derivation baseline: 5d2d3458fdf06b47d9a7a6b5ffebed99c210d554
 
-A copy of the License is included in the LICENSE file at the root of this
-distribution.
+PGSimCity and TiDB City are licensed under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with the
+License. A copy of the License is included in the LICENSE file at the root of
+this distribution and is available at:
 
-PostgreSQL is a trademark of the PostgreSQL Community Association of Canada.
-PGSimCity is an independent educational project: it is not affiliated with,
-sponsored by, or endorsed by the PostgreSQL project, the PostgreSQL Global
-Development Group, or the PostgreSQL Community Association of Canada. The
-elephant mark and any PostgreSQL naming used in this project are used only to
-refer to PostgreSQL itself.
+    https://www.apache.org/licenses/LICENSE-2.0
 
-This product bundles third-party software distributed under its own license
-terms; see the dependency manifests (package.json, package-lock.json) and the
-license files shipped inside each dependency for details.
+TiDB City replaces PGSimCity's PostgreSQL-specific simulation, visual
+geography, explanatory surfaces, and optional in-browser PostgreSQL runtime
+with a deterministic educational model of TiDB v8.5 LTS architecture.
+Substantial changes include the TiDB state model, Raft and transaction traces,
+the TiDB city world, Japanese and English interfaces, the machine and diagnose
+pages, scenarios, tests, and build/deployment configuration.
 
-The optional query surface bundles PGlite, copyright Electric DB Limited,
-licensed under the Apache License, Version 2.0. PGlite contains PostgreSQL code
-compiled to WebAssembly; PostgreSQL and modifications to it are distributed
-under the PostgreSQL License.
+TiDB, TiKV, TiFlash, PingCAP, and their associated marks are used only to
+identify the technologies described by this educational model. No official
+logos or brand assets are included. TiDB City is an independent project and is
+not affiliated with, sponsored by, endorsed by, or approved by PingCAP, Inc.
+
+This product bundles third-party software under its own license terms. See
+public/THIRD_PARTY_NOTICES.txt, package.json, and package-lock.json for
+details. The principal runtime dependency is three.js, licensed under the
+MIT License.
