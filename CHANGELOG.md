@@ -4,7 +4,7 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
-## Unreleased
+## [0.3.3] — 2026-07-30
 
 - Keep the current pose when entering Fly, move along the full view vector,
   reset stuck input on blur, and restore the last Orbit view on return.

@@ -31,6 +31,13 @@
 - Independent Loop control with reduced-motion opt-in and bounded screen-reader announcements
 - Five-control responsive Trace Dock across mobile and narrow panel-open layouts
 
+## v0.3.3
+
+- Pose-preserving Fly mode with full view-vector movement and stable Pointer Lock
+- Collision-safe Walk entry, restored Orbit views, and complete TiKV/PD collision geometry
+- Hold-to-move Fly and Walk controls across touch layouts
+- Non-overlapping 44 px camera controls on short mobile viewports
+
 ## Deliberately outside v0.3.x
 
 - Connecting to or changing a live TiDB cluster
