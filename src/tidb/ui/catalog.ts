@@ -3,7 +3,7 @@
 export type Locale = 'ja' | 'en'
 
 export const DEFAULT_LOCALE: Locale = 'ja'
-export const LOCALE_STORAGE_KEY = 'tidb-city:lang'
+export const LOCALE_STORAGE_KEY = 'ticity:lang'
 
 export interface LocaleStorage {
   getItem(key: string): string | null
@@ -62,7 +62,7 @@ export interface Messages {
 }
 
 const ja: Messages = {
-  appName: 'TiDB City',
+  appName: 'TiCity',
   citySubtitle: '分散SQLデータベースの内部を歩いて学ぶ',
   language: '言語',
   japanese: '日本語',
@@ -95,7 +95,7 @@ const ja: Messages = {
   projectLicense: 'Apache-2.0ライセンス',
   projectNotice: 'NOTICE / 帰属',
   thirdPartyLicenses: '第三者ライセンス',
-  machineTitle: 'TiDB Machine',
+  machineTitle: 'TiCity Machine',
   machineSubtitle: '同じtraceを層ごとに再生し、2PCとRaft commitを分けて観察します。',
   emptyTrace: '再生できるイベントはありません。',
   play: '再生',
@@ -104,7 +104,7 @@ const ja: Messages = {
   reset: '先頭へ',
   event: 'イベント',
   simulatedTiming: '時間軸は説明用に縮尺されたモデル値です。',
-  diagnoseTitle: 'TiDB Diagnose',
+  diagnoseTitle: 'TiCity Diagnose',
   diagnoseSubtitle: '同じシミュレーション状態を、運用診断に近い表へ投影します。',
   modelLabel: 'MODEL / SIMULATED',
   noRows: '該当するモデル行はありません。',
@@ -113,7 +113,7 @@ const ja: Messages = {
 }
 
 const en: Messages = {
-  appName: 'TiDB City',
+  appName: 'TiCity',
   citySubtitle: 'Walk through the internals of a distributed SQL database',
   language: 'Language',
   japanese: '日本語',
@@ -146,7 +146,7 @@ const en: Messages = {
   projectLicense: 'Apache-2.0 license',
   projectNotice: 'NOTICE / attribution',
   thirdPartyLicenses: 'Third-party licenses',
-  machineTitle: 'TiDB Machine',
+  machineTitle: 'TiCity Machine',
   machineSubtitle: 'Replay one trace by layer and keep 2PC separate from Raft commit.',
   emptyTrace: 'There are no events to replay.',
   play: 'Play',
@@ -155,7 +155,7 @@ const en: Messages = {
   reset: 'Reset',
   event: 'Event',
   simulatedTiming: 'The timeline uses scaled model timing for explanation.',
-  diagnoseTitle: 'TiDB Diagnose',
+  diagnoseTitle: 'TiCity Diagnose',
   diagnoseSubtitle: 'Project the same simulation state into operations-oriented tables.',
   modelLabel: 'MODEL / SIMULATED',
   noRows: 'There are no matching model rows.',

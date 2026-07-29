@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  *
  * A compact horizontal collision map for fly/walk navigation. It consumes the

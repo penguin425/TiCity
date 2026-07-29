@@ -1,12 +1,18 @@
 # Changelog
 
-All notable TiDB City changes are documented here. The inherited PGSimCity
-history remains available in Git before the TiDB City derivation baseline
+All notable TiCity changes are documented here. The inherited PGSimCity
+history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
+
+## [0.2.0] — 2026-07-29
+
+- Rename the project from TiDB City to TiCity.
+- Move the package, browser API, storage keys, Pages URL, repository URL,
+  release tag namespace, and archive names to the TiCity identity.
 
 ## [0.1.0] — 2026-07-29
 
-- Fork PGSimCity under Apache-2.0 and rebrand it as TiDB City.
+- Fork PGSimCity under Apache-2.0 and introduce the initial TiDB City release.
 - Replace the PostgreSQL model with a deterministic TiDB v8.5 LTS topology.
 - Separate transaction 2PC, Region Raft, KV apply, and TiFlash learner traces.
 - Add eight guided scenarios and conservative, non-executing SQL classification.

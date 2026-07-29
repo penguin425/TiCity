@@ -244,7 +244,7 @@ export function mountCityUi(root: HTMLElement, options: CityUiOptions): CityUiHa
     const links = [
       ['machine', 'Machine', options.machineHref ?? 'machine/'],
       ['diagnose', 'Diagnose', options.diagnoseHref ?? 'diagnose/'],
-      ['github', 'GitHub', options.githubHref ?? 'https://github.com/penguin425/TiDB-City/'],
+      ['github', 'GitHub', options.githubHref ?? 'https://github.com/penguin425/TiCity/'],
     ] as const
     for (const [id, label, href] of links) {
       navigation.append(element('a', {
@@ -281,11 +281,11 @@ export function mountCityUi(root: HTMLElement, options: CityUiOptions): CityUiHa
       }))
     }
 
-    root.classList.add('tidb-surface', 'tidb-city-ui')
+    root.classList.add('tidb-surface', 'ticity-ui')
     root.setAttribute('lang', locale)
     const children: Node[] = [
-      element('header', { className: 'tidb-city-head' },
-        element('div', { className: 'tidb-city-title' },
+      element('header', { className: 'ticity-head' },
+        element('div', { className: 'ticity-title' },
           element('h1', { text: CATALOG[locale].appName }),
           element('p', { text: CATALOG[locale].citySubtitle }),
         ),
@@ -321,7 +321,7 @@ export function mountCityUi(root: HTMLElement, options: CityUiOptions): CityUiHa
     dispose() {
       disposed = true
       root.replaceChildren()
-      root.classList.remove('tidb-surface', 'tidb-city-ui')
+      root.classList.remove('tidb-surface', 'ticity-ui')
     },
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  *
  * The public input is deliberately TraceReceipt, not an imperative `emit`.
@@ -9,7 +9,7 @@
 import * as THREE from 'three'
 import type { TraceDomain, TraceEvent, TraceReceipt } from '../model/types'
 import type { TiDBSceneGraph } from '../world/city'
-import { TIDB_CITY } from '../world/layout'
+import { TICITY_LAYOUT } from '../world/layout'
 import { SEMANTIC_COLORS } from '../world/palette'
 import type { CityTheme, SemanticDomain } from '../world/palette'
 
@@ -78,14 +78,14 @@ export interface TraceFlowController {
 }
 
 function normalizedRegion(event: TraceEvent): number {
-  return Math.max(0, Math.min(TIDB_CITY.regionCount - 1, event.regionId ?? 0))
+  return Math.max(0, Math.min(TICITY_LAYOUT.regionCount - 1, event.regionId ?? 0))
 }
 
 function regionPeerId(event: TraceEvent, follower = false): string {
   const region = normalizedRegion(event)
   const leaderStore = region % 3
   const store = follower ? (leaderStore + 1) % 3 : leaderStore
-  if ((event.regionId ?? 0) >= TIDB_CITY.regionCount) return `tikv.${store}`
+  if ((event.regionId ?? 0) >= TICITY_LAYOUT.regionCount) return `tikv.${store}`
   return `region.${region}.peer.${store}`
 }
 
@@ -117,7 +117,7 @@ function componentIdFor(rawValue: string, event: TraceEvent, side: 'source' | 't
   const tikv = numberedComponent('tikv', raw, 3)
   if (tikv) {
     if (event.regionId === undefined) return tikv
-    if (event.regionId >= TIDB_CITY.regionCount) return tikv
+    if (event.regionId >= TICITY_LAYOUT.regionCount) return tikv
     const store = tikv.charCodeAt(tikv.length - 1) - 48
     return `region.${normalizedRegion(event)}.peer.${store}`
   }
@@ -163,7 +163,7 @@ export function resolveTraceEndpoint(
 
 export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   const root = new THREE.Group()
-  root.name = 'tidb-city:trace-flows'
+  root.name = 'ticity:trace-flows'
 
   /* A freight pod reads as a transported unit, not a tracer round. */
   const geometry = new THREE.BoxGeometry(1.15, 0.8, 1.35)

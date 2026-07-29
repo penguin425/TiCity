@@ -1,12 +1,12 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
 import { describe, expect, it } from 'vitest'
 import { createCollisionMap, createCollisionMove } from './collision'
 
-describe('TiDB City collision map', () => {
+describe('TiCity collision map', () => {
   const map = createCollisionMap([
     { id: 'tower', minX: -5, maxX: 5, minY: 0, maxY: 30, minZ: -5, maxZ: 5 },
   ])

@@ -18,13 +18,13 @@ export const CITY_UI_CSS = `
   font: 14px/1.5 ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 .tidb-surface *, .tidb-surface *::before, .tidb-surface *::after { box-sizing: border-box; }
-.tidb-city-ui { padding: 18px; border: 1px solid var(--tc-border); border-radius: 16px; }
-.tidb-city-head, .tidb-section-heading, .tidb-language, .tidb-actions, .tidb-tour-nav {
+.ticity-ui { padding: 18px; border: 1px solid var(--tc-border); border-radius: 16px; }
+.ticity-head, .tidb-section-heading, .tidb-language, .tidb-actions, .tidb-tour-nav {
   display: flex; align-items: center; gap: 10px;
 }
-.tidb-city-head { justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
-.tidb-city-title h1, .tidb-section-heading h2 { margin: 0; font: inherit; font-size: 1.15rem; letter-spacing: .02em; }
-.tidb-city-title p, .tidb-sql-help, .tidb-legal p { color: var(--tc-muted); margin: 4px 0 0; }
+.ticity-head { justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
+.ticity-title h1, .tidb-section-heading h2 { margin: 0; font: inherit; font-size: 1.15rem; letter-spacing: .02em; }
+.ticity-title p, .tidb-sql-help, .tidb-legal p { color: var(--tc-muted); margin: 4px 0 0; }
 .tidb-language { border: 0; padding: 0; margin: 0; }
 .tidb-language legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .tidb-button {
@@ -85,7 +85,7 @@ export const CITY_UI_CSS = `
 .tidb-control-toggle[aria-pressed="true"] { color: var(--tc-yellow); border-color: var(--tc-yellow); }
 .tidb-legal { margin-top: 12px; }
 @media (max-width: 640px) {
-  .tidb-city-ui { padding: 12px; border-radius: 0; }
+  .ticity-ui { padding: 12px; border-radius: 0; }
   .tidb-actions { align-items: stretch; flex-direction: column; }
   .tidb-button { min-height: 42px; }
 }
@@ -95,5 +95,5 @@ export const CITY_UI_CSS = `
 `
 
 export function installCityUiStyles(doc: Document = document): void {
-  installStyle('tidb-city-ui-styles', CITY_UI_CSS, doc)
+  installStyle('ticity-ui-styles', CITY_UI_CSS, doc)
 }

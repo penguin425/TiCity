@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// TiDB City changes Copyright 2026 TiDB City contributors.
+// TiCity changes Copyright 2026 TiCity contributors.
 
 import './app.css'
 
@@ -7,7 +7,7 @@ import { createTiDBSimulation } from './model'
 import type {
   ScenarioId,
   SqlSubmission,
-  TiDBCityState,
+  TiCityState,
   TiDBControls,
   TiDBSimulationApi,
   TraceReceipt,
@@ -56,7 +56,7 @@ const copy = {
     fly: '飛行',
     walk: '歩行',
     sound: '音',
-    canvas: 'TiDB Cityの対話型3Dアーキテクチャ。画面上の表示切替またはキーボードで探索できます。',
+    canvas: 'TiCityの対話型3Dアーキテクチャ。画面上の表示切替またはキーボードで探索できます。',
     hint: 'ドラッグ: 回転 · wheel: zoom · Fly/Walk: WASD · 建物をclick: 詳細',
     selected: '選択したコンポーネント',
     noWebgl: 'WebGL2を開始できませんでした。モデルと解説UIは引き続き利用できます。',
@@ -84,7 +84,7 @@ const copy = {
     fly: 'Fly',
     walk: 'Walk',
     sound: 'Sound',
-    canvas: 'TiDB City interactive 3D architecture. Use the view controls or keyboard to explore.',
+    canvas: 'TiCity interactive 3D architecture. Use the view controls or keyboard to explore.',
     hint: 'Drag: orbit · wheel: zoom · Fly/Walk: WASD · click a building: inspect',
     selected: 'Selected component',
     noWebgl: 'WebGL2 could not start. The model and explanatory interface remain available.',
@@ -99,7 +99,7 @@ const copy = {
   },
 } as const
 
-interface TiDBCityPublicApi {
+interface TiCityPublicApi {
   readonly model: TiDBSimulationApi
   readonly world: WorldHandle | null
   readonly trace: TraceReceipt | null
@@ -113,7 +113,7 @@ interface TiDBCityPublicApi {
 
 declare global {
   interface Window {
-    TIDBCITY: TiDBCityPublicApi
+    TICITY: TiCityPublicApi
   }
 }
 
@@ -186,7 +186,7 @@ function boot(): void {
 
   const pageTitle = document.createElement('h1')
   pageTitle.className = 'visually-hidden'
-  pageTitle.textContent = 'TiDB City'
+  pageTitle.textContent = 'TiCity'
 
   const worldHost = document.createElement('div')
   worldHost.className = 'tidb-world'
@@ -337,7 +337,7 @@ function boot(): void {
     },
     machineHref: 'machine/',
     diagnoseHref: 'diagnose/',
-    githubHref: 'https://github.com/penguin425/TiDB-City/',
+    githubHref: 'https://github.com/penguin425/TiCity/',
   })
 
   hud.append(status, uiHost)
@@ -398,7 +398,7 @@ function boot(): void {
     world?.update(simulation.state, null)
   }
   const publicModel: TiDBSimulationApi = {
-    get state(): TiDBCityState {
+    get state(): TiCityState {
       return deepFreezeSnapshot(structuredClone(simulation.state))
     },
     update: (deltaSeconds) => simulation.update(deltaSeconds),
@@ -414,7 +414,7 @@ function boot(): void {
     reset,
   }
 
-  window.TIDBCITY = {
+  window.TICITY = {
     model: publicModel,
     world,
     get trace() {
@@ -449,6 +449,6 @@ try {
   document.body.dataset.ready = 'error'
   const app = document.querySelector<HTMLElement>('#city-app')
   if (app) {
-    app.textContent = 'TiDB City could not start. See the browser console for details.'
+    app.textContent = 'TiCity could not start. See the browser console for details.'
   }
 }

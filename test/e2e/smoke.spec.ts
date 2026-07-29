@@ -4,9 +4,9 @@ import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
 const pages = [
-  { path: '/', title: /TiDB City/ },
-  { path: '/machine/', title: /Machine · TiDB City/ },
-  { path: '/diagnose/', title: /Diagnose · TiDB City/ },
+  { path: '/', title: /TiCity/ },
+  { path: '/machine/', title: /Machine · TiCity/ },
+  { path: '/diagnose/', title: /Diagnose · TiCity/ },
 ] as const
 
 async function expectNoSeriousAccessibilityViolations(page: Page) {
@@ -35,6 +35,7 @@ for (const surface of pages) {
     await expect(page).toHaveTitle(surface.title)
     await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
     await expect(page.locator('main')).toBeVisible()
+    await expect(page.locator('.tidb-wordmark strong')).toHaveText('TiCity')
     await expectNoSeriousAccessibilityViolations(page)
     expect(thirdPartyRequests).toEqual([])
   })
@@ -48,18 +49,23 @@ test('city exposes the documented model API and defaults to Japanese', async ({ 
   const publicApi = await page.evaluate(() => {
     const api = (
       window as typeof window & {
-        TIDBCITY?: Record<string, unknown>
+        TICITY?: Record<string, unknown>
       }
-    ).TIDBCITY
-    return api ? Object.keys(api).sort() : []
+    ).TICITY
+    const retiredGlobalName = ['TIDB', 'CITY'].join('')
+    return {
+      keys: api ? Object.keys(api).sort() : [],
+      retiredGlobalPresent: Object.prototype.hasOwnProperty.call(window, retiredGlobalName),
+    }
   })
 
-  expect(publicApi).toEqual(
+  expect(publicApi.keys).toEqual(
     expect.arrayContaining(['model', 'runScenario', 'submitSql', 'trace']),
   )
+  expect(publicApi.retiredGlobalPresent).toBe(false)
 
   const snapshot = await page.evaluate(() => {
-    const state = window.TIDBCITY.model.state
+    const state = window.TICITY.model.state
     const before = state.controls.qps
     try {
       state.controls.qps = 9_999
@@ -70,7 +76,7 @@ test('city exposes the documented model API and defaults to Japanese', async ({ 
     return {
       frozen: Object.isFrozen(state) && Object.isFrozen(state.controls),
       before,
-      after: window.TIDBCITY.model.state.controls.qps,
+      after: window.TICITY.model.state.controls.qps,
     }
   })
   expect(snapshot.frozen).toBe(true)
@@ -108,7 +114,7 @@ test('SQL analysis stays local and does not retain a submitted literal', async (
   await expect(page.locator('html')).toHaveAttribute('lang', 'en')
 
   const retained = await page.evaluate(() => ({
-    trace: JSON.stringify(window.TIDBCITY.trace),
+    trace: JSON.stringify(window.TICITY.trace),
     storage: JSON.stringify({ ...localStorage }),
   }))
   expect(retained.trace).not.toContain(secret)

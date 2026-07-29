@@ -5,7 +5,7 @@ import type { Locale } from './ui/catalog'
 export type SurfaceId = 'city' | 'machine' | 'diagnose'
 export type Theme = 'day' | 'night'
 
-const THEME_STORAGE_KEY = 'tidb-city:theme'
+const THEME_STORAGE_KEY = 'ticity:theme'
 
 const text = {
   ja: {
@@ -87,7 +87,7 @@ export function createWordmark(locale: Locale): HTMLDivElement {
   root.className = 'tidb-wordmark'
   const copy = document.createElement('span')
   const name = document.createElement('strong')
-  name.textContent = 'TiDB City'
+  name.textContent = 'TiCity'
   const model = document.createElement('small')
   model.textContent = text[locale].model
   copy.append(name, model)
@@ -146,7 +146,7 @@ export function createNavigation(
       navLink('city', text[locale].city, surface === 'city' ? './' : '../', surface === 'city'),
       navLink('machine', text[locale].machine, surface === 'city' ? 'machine/' : surface === 'machine' ? './' : '../machine/', surface === 'machine'),
       navLink('diagnose', text[locale].diagnose, surface === 'city' ? 'diagnose/' : surface === 'diagnose' ? './' : '../diagnose/', surface === 'diagnose'),
-      navLink('github', text[locale].source, 'https://github.com/penguin425/TiDB-City', false, true),
+      navLink('github', text[locale].source, 'https://github.com/penguin425/TiCity', false, true),
       themeButton,
     )
     const theme = document.documentElement.dataset.theme === 'day' ? 'day' : 'night'

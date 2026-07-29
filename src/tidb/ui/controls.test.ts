@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { installTestDom } from '../../../test/dom'
 import { mountCityUi } from './index'
 
-describe('TiDB City controls', () => {
+describe('TiCity controls', () => {
   it('wires scenarios, controls, and playback through the simulation bridge', () => {
     const dom = installTestDom()
     const root = dom.mount('city') as unknown as HTMLElement

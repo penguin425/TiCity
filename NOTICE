@@ -1,5 +1,5 @@
-TiDB City
-Copyright 2026 TiDB City contributors
+TiCity
+Copyright 2026 TiCity contributors
 
 This product is derived from PGSimCity:
 
@@ -8,23 +8,23 @@ This product is derived from PGSimCity:
     https://github.com/NikolayS/PGSimCity
     Derivation baseline: 5d2d3458fdf06b47d9a7a6b5ffebed99c210d554
 
-PGSimCity and TiDB City are licensed under the Apache License, Version 2.0
+PGSimCity and TiCity are licensed under the Apache License, Version 2.0
 (the "License"). You may not use this product except in compliance with the
 License. A copy of the License is included in the LICENSE file at the root of
 this distribution and is available at:
 
     https://www.apache.org/licenses/LICENSE-2.0
 
-TiDB City replaces PGSimCity's PostgreSQL-specific simulation, visual
+TiCity replaces PGSimCity's PostgreSQL-specific simulation, visual
 geography, explanatory surfaces, and optional in-browser PostgreSQL runtime
 with a deterministic educational model of TiDB v8.5 LTS architecture.
 Substantial changes include the TiDB state model, Raft and transaction traces,
-the TiDB city world, Japanese and English interfaces, the machine and diagnose
+the TiCity world, Japanese and English interfaces, the machine and diagnose
 pages, scenarios, tests, and build/deployment configuration.
 
 TiDB, TiKV, TiFlash, PingCAP, and their associated marks are used only to
 identify the technologies described by this educational model. No official
-logos or brand assets are included. TiDB City is an independent project and is
+logos or brand assets are included. TiCity is an independent project and is
 not affiliated with, sponsored by, endorsed by, or approved by PingCAP, Inc.
 
 This product bundles third-party software under its own license terms. See

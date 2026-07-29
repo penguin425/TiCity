@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  *
  * Audio is opt-in. Oscillators are persistent after enable(), so the animation

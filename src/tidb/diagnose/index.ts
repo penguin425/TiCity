@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { TiDBCityState } from '../model/types'
+import type { TiCityState } from '../model/types'
 import { CATALOG, resolveLocale, type Locale } from '../ui/catalog'
 import { element } from '../ui/dom'
 import { createModelBadge } from '../ui/legal'
@@ -275,7 +275,7 @@ function tiflashRows(state: Record<string, unknown>): DiagnosticRow[] {
   }]
 }
 
-export function projectDiagnostics(snapshot: TiDBCityState | unknown): DiagnosticProjection[] {
+export function projectDiagnostics(snapshot: TiCityState | unknown): DiagnosticProjection[] {
   const state = record(snapshot)
   const sources: Record<DiagnoseSection, () => DiagnosticRow[]> = {
     cluster: () => clusterRows(state),
@@ -293,7 +293,7 @@ export function projectDiagnostics(snapshot: TiDBCityState | unknown): Diagnosti
 }
 
 export interface DiagnoseOptions {
-  snapshot: TiDBCityState | unknown
+  snapshot: TiCityState | unknown
   locale?: Locale
   search?: string
   project?: (snapshot: unknown) => readonly DiagnosticProjection[]

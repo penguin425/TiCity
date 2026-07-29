@@ -1,4 +1,4 @@
-TiDB City third-party notices
+TiCity third-party notices
 
 three.js
 Copyright © 2010-2026 three.js authors

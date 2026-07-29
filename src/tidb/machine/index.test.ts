@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { installTestDom } from '../../../test/dom'
 import { MACHINE_LANES, mountMachine } from './index'
 
-describe('TiDB machine replay', () => {
+describe('TiCity Machine replay', () => {
   it('draws TSO, transaction, Raft, KV, and TiFlash as separate lanes', () => {
     const dom = installTestDom()
     const root = dom.mount('machine')

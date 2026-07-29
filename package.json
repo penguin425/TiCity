@@ -1,18 +1,18 @@
 {
-  "name": "tidb-city",
+  "name": "ticity",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "An independent, deterministic 3D educational model of TiDB architecture and distributed SQL flows.",
-  "author": "TiDB City contributors",
-  "homepage": "https://penguin425.github.io/TiDB-City/",
+  "author": "TiCity contributors",
+  "homepage": "https://penguin425.github.io/TiCity/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/penguin425/TiDB-City.git"
+    "url": "git+https://github.com/penguin425/TiCity.git"
   },
   "bugs": {
-    "url": "https://github.com/penguin425/TiDB-City/issues"
+    "url": "https://github.com/penguin425/TiCity/issues"
   },
   "keywords": [
     "tidb",

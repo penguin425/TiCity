@@ -50,7 +50,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          TIDBCITY_GIT_SHA: ${{ github.sha }}
+          TICITY_GIT_SHA: ${{ github.sha }}
 
       - name: Set up Pages
         uses: actions/configure-pages@v6

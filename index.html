@@ -13,23 +13,23 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#07121f" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="TiDB City" />
-    <meta property="og:title" content="TiDB City · Distributed SQL, made visible" />
+    <meta property="og:site_name" content="TiCity" />
+    <meta property="og:title" content="TiCity · Distributed SQL, made visible" />
     <meta
       property="og:description"
       content="An independent 3D educational model of TiDB, TiKV, TiFlash, transactions, and Raft."
     />
-    <meta property="og:url" content="https://penguin425.github.io/TiDB-City/" />
+    <meta property="og:url" content="https://penguin425.github.io/TiCity/" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <title>TiDB City · 分散SQLを歩いて理解する</title>
+    <title>TiCity · 分散SQLを歩いて理解する</title>
     <script>
       ;(() => {
         const params = new URLSearchParams(location.search)
         let language = params.get('lang')
         let theme = params.get('theme')
         try {
-          language ||= localStorage.getItem('tidb-city:lang')
-          theme ||= localStorage.getItem('tidb-city:theme')
+          language ||= localStorage.getItem('ticity:lang')
+          theme ||= localStorage.getItem('ticity:theme')
         } catch {
           // Storage can be unavailable; the document defaults remain usable.
         }
@@ -46,7 +46,7 @@
           class="boot-logo"
           viewBox="0 0 160 160"
           role="img"
-          aria-label="TiDB City"
+          aria-label="TiCity"
         >
           <path d="M80 8 142 44v72l-62 36-62-36V44z" fill="#07121f" stroke="#34d5ff" stroke-width="4" />
           <path d="M42 102V72l18-10 18 10v30l-18 10zm40 0V51l18-10 18 10v51l-18 10z" fill="none" stroke="#ffcc42" stroke-width="6" stroke-linejoin="round" />
@@ -54,7 +54,7 @@
           <circle cx="60" cy="79" r="5" fill="#ff6b6b" />
           <circle cx="100" cy="58" r="5" fill="#ff6b6b" />
         </svg>
-        <h1>TiDB <span>City</span></h1>
+        <h1>Ti<span>City</span></h1>
         <p>分散SQLの都市を起動しています…</p>
         <p class="boot-boundary">
           TiDB v8.5 LTSを対象にした教育用の縮尺モデルです。実クラスタへの接続やSQL実行は行いません。
@@ -62,7 +62,7 @@
       </section>
     </main>
     <noscript>
-      <p class="noscript">TiDB Cityの実行にはJavaScriptとWebGL2が必要です。</p>
+      <p class="noscript">TiCityの実行にはJavaScriptとWebGL2が必要です。</p>
     </noscript>
     <script type="module" src="./src/tidb/main.ts"></script>
   </body>

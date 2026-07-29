@@ -1,11 +1,11 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { TIDB_CITY } from '../world/layout'
+import { TICITY_LAYOUT } from '../world/layout'
 import type { CollisionMap, CollisionMove } from './collision'
 import { createCollisionMove } from './collision'
 
@@ -178,7 +178,7 @@ export function createCityCameraController(options: CityCameraOptions): CityCame
     const cos = Math.cos(yaw)
     const targetX = camera.position.x + (-sin * forward + cos * strafe) * distance
     const targetZ = camera.position.z + (-cos * forward - sin * strafe) * distance
-    const edge = TIDB_CITY.groundSize * 0.5 - 5
+    const edge = TICITY_LAYOUT.groundSize * 0.5 - 5
 
     if (mode === 'walk') {
       collision.move(

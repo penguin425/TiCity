@@ -412,15 +412,15 @@ function classifyBase(tokens: readonly string[]): SqlAnalysis {
 
   if (first === 'select') {
     if (tokens.slice(1).filter((token) => token === 'select').length > 0) {
-      return emptyAnalysis('unsupported', 'Subqueries are outside the v0.1 model.')
+      return emptyAnalysis('unsupported', 'Subqueries are outside the v0.2 model.')
     }
     for (const token of tokens) {
       if (COMPLEX_SELECT.has(token)) {
-        return emptyAnalysis('unsupported', `${token.toUpperCase()} is outside the v0.1 model.`)
+        return emptyAnalysis('unsupported', `${token.toUpperCase()} is outside the v0.2 model.`)
       }
     }
     if (tokens.includes('or')) {
-      return emptyAnalysis('unsupported', 'OR predicates are ambiguous in the v0.1 route model.')
+      return emptyAnalysis('unsupported', 'OR predicates are ambiguous in the v0.2 route model.')
     }
 
     const table = tableAfter(tokens, 'from')

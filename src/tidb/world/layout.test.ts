@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 TiDB City contributors.
+ * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  */
 
@@ -11,24 +11,24 @@ import {
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
   HTAP_PATHS,
-  TIDB_CITY,
+  TICITY_LAYOUT,
   TIKV_BOUNDS,
   boundsContain,
   boundsOverlap,
   regionPeerPosition,
 } from './layout'
 
-describe('TiDB City layout', () => {
+describe('TiCity layout', () => {
   it('represents 36 Regions with one voter peer in each TiKV store', () => {
     const seen = new Set<string>()
-    for (let region = 0; region < TIDB_CITY.regionCount; region++) {
-      for (let store = 0; store < TIDB_CITY.tikvCount; store++) {
+    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
+      for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
         const point = regionPeerPosition(store, region)
         expect(boundsContain(TIKV_BOUNDS[store], point, 8)).toBe(true)
         seen.add(`${region}:${store}`)
       }
     }
-    expect(seen.size).toBe(TIDB_CITY.regionCount * TIDB_CITY.peersPerRegion)
+    expect(seen.size).toBe(TICITY_LAYOUT.regionCount * TICITY_LAYOUT.peersPerRegion)
   })
 
   it('keeps every instructional district physically separate', () => {
@@ -50,7 +50,7 @@ describe('TiDB City layout', () => {
   })
 
   it('connects each TiKV store to TiFlash only over HTAP routes', () => {
-    expect(HTAP_PATHS).toHaveLength(TIDB_CITY.tikvCount)
+    expect(HTAP_PATHS).toHaveLength(TICITY_LAYOUT.tikvCount)
     expect(new Set(HTAP_PATHS.map((leg) => leg.from))).toEqual(
       new Set(['tikv.0', 'tikv.1', 'tikv.2']),
     )
@@ -67,11 +67,11 @@ describe('TiDB City layout', () => {
 
   it('rejects invalid peer coordinates instead of aliasing a real Region', () => {
     expect(() => regionPeerPosition(-1, 0)).toThrow(RangeError)
-    expect(() => regionPeerPosition(0, TIDB_CITY.regionCount)).toThrow(RangeError)
+    expect(() => regionPeerPosition(0, TICITY_LAYOUT.regionCount)).toThrow(RangeError)
   })
 
   it('keeps every guided-tour focus on the authored city plate', () => {
-    const half = TIDB_CITY.groundSize / 2
+    const half = TICITY_LAYOUT.groundSize / 2
     for (const point of Object.values(FOCUS_ANCHORS)) {
       expect(Math.abs(point[0])).toBeLessThan(half)
       expect(Math.abs(point[2])).toBeLessThan(half)

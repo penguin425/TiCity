@@ -5,14 +5,14 @@ import { describe, expect, it } from 'vitest'
 import { CATALOG, resolveLocale } from './catalog'
 import { TOUR_CHAPTERS } from './tour'
 
-describe('TiDB City locale catalog', () => {
+describe('TiCity locale catalog', () => {
   it('keeps the English catalog structurally identical to Japanese', () => {
     expect(Object.keys(CATALOG.en)).toEqual(Object.keys(CATALOG.ja))
   })
 
   it('prefers a valid URL language, then storage, then Japanese', () => {
     const storage = {
-      getItem: (key: string) => (key === 'tidb-city:lang' ? 'ja' : null),
+      getItem: (key: string) => (key === 'ticity:lang' ? 'ja' : null),
       setItem: () => {},
     }
 
