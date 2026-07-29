@@ -180,6 +180,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   })
   scene.add(picker.object)
   const labels = createCityLabels(container, camera, city)
+  labels.setMode(options.mode ?? 'orbit')
   const audio = createCityAudio()
   const composer = new EffectComposer(renderer)
   composer.setPixelRatio(cityPixelRatio(width, window.devicePixelRatio))
@@ -356,6 +357,8 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     setTheme,
     setMode(mode: CityViewMode): void {
       controls.setMode(mode)
+      labels.setMode(mode)
+      if (mode === 'walk') picker.select(null)
     },
     setHudExpanded(expanded: boolean): void {
       if (hudExpanded === expanded) return

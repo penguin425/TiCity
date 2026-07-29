@@ -664,6 +664,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     pdHub,
     COMPONENT_ANCHORS['pd.control'],
   )
+  addCollider(colliders, 'pd.control', [232, 12.5, -102], [60, 25, 60])
   for (let node = 0; node < TICITY_LAYOUT.pdCount; node++) {
     const anchor = COMPONENT_ANCHORS[`pd.${node}` as 'pd.0' | 'pd.1' | 'pd.2']
     const group = new THREE.Group()
@@ -765,6 +766,12 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       'kv',
       group,
       anchor,
+    )
+    addCollider(
+      colliders,
+      `tikv.${store}`,
+      [anchor[0], 2.9, anchor[2]],
+      [100, 5, 100],
     )
   }
 

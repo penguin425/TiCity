@@ -7,12 +7,14 @@
  */
 
 import * as THREE from 'three'
+import type { CityViewMode } from './camera'
 import type { TiDBSceneGraph } from '../world/city'
 import { FOCUS_ANCHORS } from '../world/layout'
 import type { Point3 } from '../world/layout'
 import type { SemanticDomain } from '../world/palette'
 
 export interface CityLabels {
+  setMode(mode: CityViewMode): void
   update(force?: boolean): void
   dispose(): void
 }
@@ -114,8 +116,10 @@ export function createCityLabels(
   let lastCameraQy = Infinity
   let lastCameraQz = Infinity
   let lastCameraQw = Infinity
+  let hidden = false
 
   function update(force = false): void {
+    if (hidden) return
     const width = Math.max(1, container.clientWidth)
     const height = Math.max(1, container.clientHeight)
     const cameraMoved =
@@ -207,6 +211,11 @@ export function createCityLabels(
   update(true)
 
   return {
+    setMode(mode: CityViewMode): void {
+      hidden = mode === 'walk'
+      root.hidden = hidden
+      if (!hidden) update(true)
+    },
     update,
     dispose(): void {
       root.remove()

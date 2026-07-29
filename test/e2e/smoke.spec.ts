@@ -17,6 +17,37 @@ async function expectNoSeriousAccessibilityViolations(page: Page) {
   expect(violations, JSON.stringify(violations, null, 2)).toEqual([])
 }
 
+interface CameraSnapshot {
+  readonly position: readonly [number, number, number]
+  readonly direction: readonly [number, number, number]
+  readonly quaternion: readonly [number, number, number, number]
+}
+
+async function cameraSnapshot(page: Page): Promise<CameraSnapshot> {
+  return page.evaluate(() => {
+    const { camera } = window.TICITY.world!.shell
+    camera.updateMatrixWorld(true)
+    const matrix = camera.matrixWorld.elements
+    return {
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      direction: [-matrix[8], -matrix[9], -matrix[10]],
+      quaternion: [
+        camera.quaternion.x,
+        camera.quaternion.y,
+        camera.quaternion.z,
+        camera.quaternion.w,
+      ],
+    }
+  })
+}
+
+function distance3(
+  left: readonly [number, number, number],
+  right: readonly [number, number, number],
+): number {
+  return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2])
+}
+
 for (const surface of pages) {
   test(`${surface.path} boots offline and passes the accessibility gate`, async ({ page }) => {
     const thirdPartyRequests: string[] = []
@@ -134,6 +165,27 @@ test('orbit view can zoom out to a city-scale overview without clipping the atmo
     }
   })
 
+  const orbitBeforeDrag = await cameraSnapshot(page)
+  const canvasBox = await canvas.boundingBox()
+  if (!canvasBox) throw new Error('Orbit canvas has no layout box')
+  await page.mouse.move(
+    canvasBox.x + canvasBox.width * 0.62,
+    canvasBox.y + canvasBox.height * 0.48,
+  )
+  await page.mouse.down()
+  await page.mouse.move(
+    canvasBox.x + canvasBox.width * 0.68,
+    canvasBox.y + canvasBox.height * 0.52,
+    { steps: 4 },
+  )
+  await page.mouse.up()
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  }))
+  const orbitAfterDrag = await cameraSnapshot(page)
+  expect(distance3(orbitAfterDrag.position, orbitBeforeDrag.position)).toBeGreaterThan(1)
+  expect(distance3(orbitAfterDrag.direction, orbitBeforeDrag.direction)).toBeGreaterThan(0.01)
+
   // One high-resolution trackpad gesture should be enough to exercise the
   // configured OrbitControls ceiling, independent of browser wheel batching.
   await canvas.dispatchEvent('wheel', {
@@ -173,6 +225,266 @@ test('orbit view can zoom out to a city-scale overview without clipping the atmo
   expect(overview.fogFar).toBeGreaterThanOrEqual(2_800)
   expect(overview.skyDistance).toBeLessThan(0.01)
   expect(overview.labelsDistant).toBe(true)
+})
+
+test('fly keeps the overview pose, follows the full view vector, and clears movement on blur', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+
+  // Stop the render clock so every camera integration below is explicit and
+  // independent of browser scheduling.
+  await page.evaluate(() => window.TICITY.world!.shell.stop())
+  const canvas = page.locator('.tidb-world canvas')
+  const canvasBox = await canvas.boundingBox()
+  if (!canvasBox) throw new Error('Fly canvas has no layout box')
+  await page.mouse.move(
+    canvasBox.x + canvasBox.width * 0.52,
+    canvasBox.y + canvasBox.height * 0.46,
+  )
+  await page.mouse.down()
+  await page.mouse.move(
+    canvasBox.x + canvasBox.width * 0.58,
+    canvasBox.y + canvasBox.height * 0.49,
+  )
+  await page.mouse.up()
+  // Because the render loop is stopped, OrbitControls still has a damping
+  // remainder here. A mode round-trip must not apply that private residue.
+  const overview = await cameraSnapshot(page)
+
+  const fly = page.locator('[data-view="fly"]')
+  await fly.click()
+  await expect(fly).toHaveAttribute('aria-pressed', 'true')
+  const idle = await page.evaluate(() => {
+    const shell = window.TICITY.world!.shell
+    shell.controls.update(1 / 60)
+    return shell.controls.mode
+  })
+  expect(idle).toBe('fly')
+
+  const flyStart = await cameraSnapshot(page)
+  expect(distance3(flyStart.position, overview.position)).toBeLessThan(0.001)
+  expect(distance3(flyStart.direction, overview.direction)).toBeLessThan(0.001)
+
+  const orbit = page.locator('[data-view="orbit"]')
+  await orbit.click()
+  await page.evaluate(() => {
+    const controls = window.TICITY.world!.shell.controls
+    for (let frame = 0; frame < 60; frame++) controls.update(1 / 60)
+  })
+  const orbitRestored = await cameraSnapshot(page)
+  expect(distance3(orbitRestored.position, overview.position)).toBeLessThan(0.01)
+  expect(distance3(orbitRestored.direction, overview.direction)).toBeLessThan(0.001)
+  await fly.click()
+
+  const lookStartX = canvasBox.x + canvasBox.width * 0.55
+  const lookStartY = canvasBox.y + canvasBox.height * 0.5
+  const beforeDragLook = await cameraSnapshot(page)
+  // Start with a trusted mouse press so the canvas owns pointer capture, then
+  // send an unlocked move whose raw movement is deliberately zero. The camera
+  // must derive the drag from client coordinates for touch/Safari parity.
+  await page.mouse.move(lookStartX, lookStartY)
+  await page.mouse.down()
+  await canvas.dispatchEvent('pointermove', {
+    pointerId: 1,
+    pointerType: 'mouse',
+    button: 0,
+    clientX: lookStartX + 80,
+    clientY: lookStartY,
+    movementX: 0,
+    movementY: 0,
+  })
+  await page.mouse.up()
+  const afterDragLook = await cameraSnapshot(page)
+  expect(distance3(afterDragLook.direction, beforeDragLook.direction)).toBeGreaterThan(0.05)
+
+  const forward = await page.evaluate(() => {
+    const { camera, controls: controller } = window.TICITY.world!.shell
+    camera.updateMatrixWorld(true)
+    const matrix = camera.matrixWorld.elements
+    const direction = [-matrix[8], -matrix[9], -matrix[10]] as const
+    const before = [camera.position.x, camera.position.y, camera.position.z] as const
+
+    controller.setMovement('forward', true)
+    controller.update(0.05)
+    controller.setMovement('forward', false)
+
+    const displacement = [
+      camera.position.x - before[0],
+      camera.position.y - before[1],
+      camera.position.z - before[2],
+    ] as const
+    const length = Math.hypot(...displacement)
+    const alignment =
+      (displacement[0] * direction[0] +
+        displacement[1] * direction[1] +
+        displacement[2] * direction[2]) /
+      Math.max(1e-9, length)
+    return { direction, displacement, length, alignment }
+  })
+  expect(forward.direction[1]).toBeLessThan(-0.3)
+  expect(forward.displacement[1]).toBeLessThan(-0.5)
+  expect(forward.length).toBeGreaterThan(1)
+  expect(forward.alignment).toBeGreaterThan(0.995)
+
+  const beforeBlur = await cameraSnapshot(page)
+  await page.keyboard.down('w')
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('blur'))
+    window.TICITY.world!.shell.controls.update(0.05)
+  })
+  await page.keyboard.up('w')
+  const afterBlur = await cameraSnapshot(page)
+  expect(distance3(afterBlur.position, beforeBlur.position)).toBeLessThan(0.001)
+})
+
+test('walk starts safely, moves at pedestrian height, and returns to the saved orbit view', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await page.evaluate(() => window.TICITY.world!.shell.stop())
+  const overview = await cameraSnapshot(page)
+
+  const walk = page.locator('[data-view="walk"]')
+  await walk.click()
+  await expect(walk).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.tidb-world-labels')).toBeHidden()
+
+  const pedestrian = await page.evaluate(() => {
+    const { camera, city, controls: controller } = window.TICITY.world!.shell
+    controller.update(1 / 60)
+    camera.updateMatrixWorld(true)
+    const matrix = camera.matrixWorld.elements
+    const start = [camera.position.x, camera.position.y, camera.position.z] as const
+    const insideCollider = city.colliders.some((box) =>
+      camera.position.x > box.minX - 0.58 &&
+      camera.position.x < box.maxX + 0.58 &&
+      camera.position.z > box.minZ - 0.58 &&
+      camera.position.z < box.maxZ + 0.58
+    )
+
+    controller.setMovement('forward', true)
+    controller.update(0.05)
+    controller.setMovement('forward', false)
+    const end = [camera.position.x, camera.position.y, camera.position.z] as const
+    return {
+      mode: controller.mode,
+      start,
+      end,
+      directionY: -matrix[9],
+      insideCollider,
+      horizontalTravel: Math.hypot(end[0] - start[0], end[2] - start[2]),
+    }
+  })
+
+  expect(pedestrian.mode).toBe('walk')
+  expect(Math.abs(pedestrian.start[0])).toBeLessThanOrEqual(355)
+  expect(Math.abs(pedestrian.start[2])).toBeLessThanOrEqual(355)
+  expect(pedestrian.start[1]).toBeCloseTo(1.7, 3)
+  expect(Math.abs(pedestrian.directionY)).toBeLessThan(0.2)
+  expect(pedestrian.insideCollider).toBe(false)
+  expect(pedestrian.horizontalTravel).toBeGreaterThan(0.2)
+  expect(pedestrian.end[1]).toBeCloseTo(1.7, 3)
+
+  const orbit = page.locator('[data-view="orbit"]')
+  await orbit.click()
+  await expect(orbit).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.tidb-world-labels')).toBeVisible()
+  await page.evaluate(() => {
+    const controls = window.TICITY.world!.shell.controls
+    for (let frame = 0; frame < 120; frame++) controls.update(1 / 60)
+  })
+  const restored = await cameraSnapshot(page)
+  const quaternionDot = Math.abs(
+    overview.quaternion[0] * restored.quaternion[0] +
+    overview.quaternion[1] * restored.quaternion[1] +
+    overview.quaternion[2] * restored.quaternion[2] +
+    overview.quaternion[3] * restored.quaternion[3],
+  )
+  expect(distance3(restored.position, overview.position)).toBeLessThan(0.01)
+  expect(1 - quaternionDot).toBeLessThan(1e-6)
+})
+
+test('short 390px mobile exposes Fly and a non-overlapping movement pad', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 667 })
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+
+  const fly = page.locator('[data-view="fly"]')
+  await expect(fly).toBeVisible()
+  await fly.click()
+  await expect(fly).toHaveAttribute('aria-pressed', 'true')
+
+  const forward = page.locator('[data-camera-move="forward"]')
+  await expect(forward).toBeVisible()
+  const padLayout = await forward.evaluate((control) => {
+    const box = control.getBoundingClientRect()
+    const pad = control.closest('.tidb-movement-pad')!
+    const padBox = pad.getBoundingClientRect()
+    const dockBox = document.querySelector('[data-trace-dock]')!.getBoundingClientRect()
+    const viewBox = document.querySelector('.tidb-view-actions')!.getBoundingClientRect()
+    const targets = [...pad.querySelectorAll<HTMLButtonElement>('button')]
+      .filter((button) => !button.hidden)
+      .map((button) => {
+        const target = button.getBoundingClientRect()
+        return {
+          width: target.width,
+          height: target.height,
+          topHit: button.contains(document.elementFromPoint(
+            target.left + target.width / 2,
+            target.top + target.height / 2,
+          )),
+        }
+      })
+    return {
+      width: box.width,
+      height: box.height,
+      label: control.getAttribute('aria-label') ?? control.textContent?.trim() ?? '',
+      noHorizontalScroll: document.documentElement.scrollWidth <= window.innerWidth + 1,
+      clearOfViewControls: padBox.top >= viewBox.bottom,
+      clearOfTraceDock:
+        padBox.right <= dockBox.left ||
+        dockBox.right <= padBox.left ||
+        padBox.bottom <= dockBox.top ||
+        dockBox.bottom <= padBox.top,
+      targets,
+    }
+  })
+  expect(padLayout.width).toBeGreaterThanOrEqual(44)
+  expect(padLayout.height).toBeGreaterThanOrEqual(44)
+  expect(padLayout.label).not.toBe('')
+  expect(padLayout.noHorizontalScroll).toBe(true)
+  expect(padLayout.clearOfViewControls).toBe(true)
+  expect(padLayout.clearOfTraceDock).toBe(true)
+  expect(
+    padLayout.targets.every(({ width, height, topHit }) =>
+      width >= 44 && height >= 44 && topHit
+    ),
+  ).toBe(true)
+
+  await page.evaluate(() => window.TICITY.world!.shell.stop())
+  const before = await cameraSnapshot(page)
+  const box = await forward.boundingBox()
+  if (!box) throw new Error('Forward camera movement control has no layout box')
+  const pointer = {
+    pointerId: 7,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+    clientX: box.x + box.width / 2,
+    clientY: box.y + box.height / 2,
+  }
+  await forward.dispatchEvent('pointerdown', pointer)
+  await page.evaluate(() => window.TICITY.world!.shell.controls.update(0.05))
+  await forward.dispatchEvent('pointerup', pointer)
+  const moved = await cameraSnapshot(page)
+  expect(distance3(moved.position, before.position)).toBeGreaterThan(1)
+
+  await page.evaluate(() => window.TICITY.world!.shell.controls.update(0.05))
+  const released = await cameraSnapshot(page)
+  expect(distance3(released.position, moved.position)).toBeLessThan(0.001)
 })
 
 test('day is the default theme and the selected theme survives reload', async ({ page }) => {
