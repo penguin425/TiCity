@@ -12,7 +12,7 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 ![TiCityの3D都市でTransaction 2PCの現在経路を示すTrace Dock](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.3.2はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.3.3はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 
@@ -23,7 +23,8 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 - 悲観／楽観トランザクション、prewriteとcommit、1PC／Async Commit／2PC
 - hotspot、Region split、leader election、GC safe point、TiFlash catch-upとMPP
 - 2PC（トランザクションの原子性）とRaft（Region複製）を分離したトレース
-- 昼夜の空、道路、区画サイン、建築照明を備えた俯瞰・飛行・歩行ビュー
+- 昼夜の空、道路、区画サイン、建築照明を備えた俯瞰・視線方向Fly・衝突判定付きWalk
+- Fly／Walkを長押しで移動できる、短いスマートフォン画面にも対応したタッチ操作
 - 現在イベント、経路、進行方向、前後移動と同一トレースのループを示す教育用Trace Dock
 - 都市全体まで引ける俯瞰ズームと、距離に応じて整理される区画サイン
 

@@ -11,11 +11,11 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   /*
-   * GitHub-hosted Chromium uses software WebGL. Running two live Three.js
-   * cities at once can starve Playwright's control channel even though the
-   * assertions themselves are fast and deterministic.
+   * Chromium software WebGL is CPU-heavy. Keep local concurrency bounded and
+   * serialize CI so parallel cities cannot starve Playwright's control channel
+   * even though the assertions themselves are fast and deterministic.
    */
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : 2,
   timeout: process.env.CI ? 60_000 : 30_000,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',
   use: {

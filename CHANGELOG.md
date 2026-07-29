@@ -4,6 +4,15 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.3.3] — 2026-07-30
+
+- Keep the current pose when entering Fly, move along the full view vector,
+  reset stuck input on blur, and restore the last Orbit view on return.
+- Start Walk from a collision-free street with a level view, add the missing
+  TiKV and PD collision geometry, and hide overview labels at pedestrian height.
+- Add responsive hold-to-move controls for Fly and Walk on touch layouts,
+  including Fly altitude controls and bilingual accessible labels.
+
 ## [0.3.2] — 2026-07-30
 
 - Expand the orbit overview from a nearly fixed 620-unit ceiling to a

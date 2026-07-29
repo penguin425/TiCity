@@ -28,7 +28,7 @@ import {
 import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTiDBWorld, type WorldHandle } from './world'
 import type { CityComponent } from './world/city'
-import type { CityViewMode } from './engine/camera'
+import type { CityMovementInput, CityViewMode } from './engine/camera'
 
 const SCENARIOS: readonly ScenarioId[] = [
   'point-read',
@@ -61,9 +61,24 @@ const copy = {
     showPanel: '操作パネルを開く',
     hidePanel: '操作パネルを閉じる',
     canvas: 'TiCityの対話型3Dアーキテクチャ。画面上の表示切替またはキーボードで探索できます。',
-    hint: 'ドラッグ: 回転 · wheel: zoom · Fly/Walk: WASD · 建物をclick: 詳細',
+    hint: {
+      orbit: 'ドラッグ: 回転 · wheel: zoom · 建物をclick: 詳細',
+      fly: 'ドラッグ: 視点 · WASD: 移動 · Space/E: 上昇 · Q: 下降 · wheel: 速度',
+      walk: 'ドラッグ: 視点 · WASD: 歩行 · Shift: 早歩き',
+    },
     selected: '選択したコンポーネント',
     noWebgl: 'WebGL2を開始できませんでした。モデルと解説UIは引き続き利用できます。',
+    movement: {
+      flyControls: '飛行移動',
+      walkControls: '歩行移動',
+      forward: '前へ移動',
+      backward: '後ろへ移動',
+      left: '左へ移動',
+      right: '右へ移動',
+      ascend: '上昇',
+      descend: '下降',
+      sprint: '高速移動',
+    },
     legend: {
       sql: 'SQL / data route',
       tso: 'TSO / control',
@@ -92,9 +107,24 @@ const copy = {
     showPanel: 'Open control panel',
     hidePanel: 'Close control panel',
     canvas: 'TiCity interactive 3D architecture. Use the view controls or keyboard to explore.',
-    hint: 'Drag: orbit · wheel: zoom · Fly/Walk: WASD · click a building: inspect',
+    hint: {
+      orbit: 'Drag: orbit · wheel: zoom · click a building: inspect',
+      fly: 'Drag: look · WASD: move · Space/E: ascend · Q: descend · wheel: speed',
+      walk: 'Drag: look · WASD: walk · Shift: move faster',
+    },
     selected: 'Selected component',
     noWebgl: 'WebGL2 could not start. The model and explanatory interface remain available.',
+    movement: {
+      flyControls: 'Fly movement',
+      walkControls: 'Walk movement',
+      forward: 'Move forward',
+      backward: 'Move backward',
+      left: 'Move left',
+      right: 'Move right',
+      ascend: 'Ascend',
+      descend: 'Descend',
+      sprint: 'Move faster',
+    },
     legend: {
       sql: 'SQL / data route',
       tso: 'TSO / control',
@@ -177,6 +207,219 @@ function createLegend(locale: Locale): HTMLElement {
   return root
 }
 
+interface MovementPad {
+  readonly root: HTMLDivElement
+  setMode(mode: CityViewMode): void
+  setLocale(locale: Locale): void
+  release(): void
+  dispose(): void
+}
+
+interface MovementBinding {
+  readonly input: CityMovementInput
+  readonly button: HTMLButtonElement
+  release(): void
+  dispose(): void
+}
+
+const MOVEMENT_GLYPHS: Readonly<Record<CityMovementInput, string>> = {
+  forward: '↑',
+  backward: '↓',
+  left: '←',
+  right: '→',
+  ascend: '+',
+  descend: '−',
+  sprint: '⇧',
+}
+
+function createMovementPad(
+  initialLocale: Locale,
+  onMovement: (input: CityMovementInput, active: boolean) => void,
+): MovementPad {
+  const root = document.createElement('div')
+  root.className = 'tidb-movement-pad'
+  root.dataset.mode = 'orbit'
+  root.hidden = true
+  root.setAttribute('role', 'group')
+
+  let locale = initialLocale
+  let mode: CityViewMode = 'orbit'
+  const bindings: MovementBinding[] = []
+
+  const movementLabel = (input: CityMovementInput): string => copy[locale].movement[input]
+
+  for (const input of [
+    'forward',
+    'backward',
+    'left',
+    'right',
+    'ascend',
+    'descend',
+    'sprint',
+  ] as const) {
+    const control = document.createElement('button')
+    control.type = 'button'
+    control.className = 'tidb-movement-pad__button'
+    control.dataset.cameraMove = input
+    control.textContent = MOVEMENT_GLYPHS[input]
+    control.setAttribute('aria-pressed', 'false')
+
+    const pointers = new Set<number>()
+    let keyboardActive = false
+    let active = false
+
+    const sync = () => {
+      const next = pointers.size > 0 || keyboardActive
+      if (next === active) return
+      active = next
+      control.setAttribute('aria-pressed', String(active))
+      onMovement(input, active)
+    }
+
+    const release = () => {
+      for (const pointerId of pointers) {
+        if (control.hasPointerCapture?.(pointerId)) {
+          try {
+            control.releasePointerCapture(pointerId)
+          } catch {
+            // The pointer may already have been released by the browser.
+          }
+        }
+      }
+      pointers.clear()
+      keyboardActive = false
+      sync()
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return
+      event.preventDefault()
+      pointers.add(event.pointerId)
+      try {
+        control.setPointerCapture(event.pointerId)
+      } catch {
+        // Capture is an enhancement; window blur still releases the input.
+      }
+      sync()
+    }
+    const endPointer = (event: PointerEvent) => {
+      if (!pointers.delete(event.pointerId)) return
+      if (control.hasPointerCapture?.(event.pointerId)) {
+        try {
+          control.releasePointerCapture(event.pointerId)
+        } catch {
+          // Pointer capture can disappear between pointerup and this check.
+        }
+      }
+      sync()
+    }
+    const onLostPointerCapture = (event: PointerEvent) => {
+      if (pointers.delete(event.pointerId)) sync()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== ' ' && event.key !== 'Enter') return
+      event.preventDefault()
+      event.stopPropagation()
+      keyboardActive = true
+      sync()
+    }
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== ' ' && event.key !== 'Enter') return
+      event.preventDefault()
+      event.stopPropagation()
+      keyboardActive = false
+      sync()
+    }
+    const onBlur = () => {
+      keyboardActive = false
+      sync()
+    }
+    const onClick = (event: MouseEvent) => event.preventDefault()
+
+    control.addEventListener('pointerdown', onPointerDown)
+    control.addEventListener('pointerup', endPointer)
+    control.addEventListener('pointercancel', endPointer)
+    control.addEventListener('lostpointercapture', onLostPointerCapture)
+    control.addEventListener('keydown', onKeyDown)
+    control.addEventListener('keyup', onKeyUp)
+    control.addEventListener('blur', onBlur)
+    control.addEventListener('click', onClick)
+    root.append(control)
+
+    bindings.push({
+      input,
+      button: control,
+      release,
+      dispose(): void {
+        release()
+        control.removeEventListener('pointerdown', onPointerDown)
+        control.removeEventListener('pointerup', endPointer)
+        control.removeEventListener('pointercancel', endPointer)
+        control.removeEventListener('lostpointercapture', onLostPointerCapture)
+        control.removeEventListener('keydown', onKeyDown)
+        control.removeEventListener('keyup', onKeyUp)
+        control.removeEventListener('blur', onBlur)
+        control.removeEventListener('click', onClick)
+      },
+    })
+  }
+
+  const release = () => {
+    for (const binding of bindings) binding.release()
+  }
+  const onWindowBlur = () => release()
+  const onVisibilityChange = () => {
+    if (document.hidden) release()
+  }
+  window.addEventListener('blur', onWindowBlur)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
+  const setLocale = (next: Locale) => {
+    locale = next
+    root.setAttribute(
+      'aria-label',
+      mode === 'walk'
+        ? copy[locale].movement.walkControls
+        : copy[locale].movement.flyControls,
+    )
+    for (const binding of bindings) {
+      const label = movementLabel(binding.input)
+      binding.button.setAttribute('aria-label', label)
+      binding.button.title = label
+    }
+  }
+
+  const setMode = (next: CityViewMode) => {
+    release()
+    mode = next
+    root.dataset.mode = next
+    root.hidden = next === 'orbit'
+    const fly = next === 'fly'
+    for (const binding of bindings) {
+      if (binding.input === 'ascend' || binding.input === 'descend') {
+        binding.button.hidden = !fly
+      }
+    }
+    setLocale(locale)
+  }
+
+  setLocale(locale)
+  setMode(mode)
+
+  return {
+    root,
+    setMode,
+    setLocale,
+    release,
+    dispose(): void {
+      release()
+      window.removeEventListener('blur', onWindowBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      for (const binding of bindings) binding.dispose()
+    },
+  }
+}
+
 function boot(): void {
   const app = document.querySelector<HTMLElement>('#city-app')
   if (!app) throw new Error('Missing #city-app')
@@ -190,10 +433,12 @@ function boot(): void {
 
   const layout = document.createElement('div')
   layout.className = 'tidb-layout'
+  let currentView: CityViewMode = 'orbit'
   let panelExpanded =
     window.innerWidth <= 900 ||
     new URLSearchParams(location.search).get('panel') === 'open'
   layout.dataset.panel = panelExpanded ? 'open' : 'closed'
+  layout.dataset.cameraView = 'orbit'
 
   const pageTitle = document.createElement('h1')
   pageTitle.className = 'visually-hidden'
@@ -210,6 +455,10 @@ function boot(): void {
   const selectedRole = document.createElement('p')
   const selectedDomain = document.createElement('small')
   selected.append(selectedTitle, selectedRole, selectedDomain)
+
+  const hint = document.createElement('p')
+  hint.className = 'tidb-scene-hint'
+  hint.textContent = copy[locale].hint[currentView]
 
   const onSelect = (component: CityComponent | null) => {
     selected.hidden = component === null
@@ -263,6 +512,11 @@ function boot(): void {
   traceDock.root.dataset.traceDock = ''
   if (world) worldHost.append(traceDock.root)
 
+  const movementPad = createMovementPad(locale, (input, active) => {
+    world?.shell.controls.setMovement(input, active)
+  })
+  if (world) worldHost.append(movementPad.root)
+
   const setPlayback = (mode: TiCityState['playback']): void => {
     simulation.setPlayback(mode)
     world?.shell.flows.setPaused(mode === 'step')
@@ -307,7 +561,11 @@ function boot(): void {
   )
 
   const setView = (mode: CityViewMode) => {
+    movementPad.setMode(mode)
     world?.setMode(mode)
+    currentView = mode
+    layout.dataset.cameraView = mode
+    hint.textContent = copy[locale].hint[mode]
     for (const [candidate, control] of viewButtons) {
       control.setAttribute('aria-pressed', String(candidate === mode))
     }
@@ -412,6 +670,8 @@ function boot(): void {
       if (skip) skip.textContent = copy[next].skip
       if (world) world.shell.renderer.domElement.setAttribute('aria-label', copy[next].canvas)
       traceDock.setLocale(next)
+      movementPad.setLocale(next)
+      hint.textContent = copy[next].hint[currentView]
     },
     machineHref: 'machine/',
     diagnoseHref: 'diagnose/',
@@ -419,9 +679,6 @@ function boot(): void {
   })
 
   hud.append(status, uiHost)
-  const hint = document.createElement('p')
-  hint.className = 'tidb-scene-hint'
-  hint.textContent = copy[locale].hint
   const legend = createLegend(locale)
   layout.append(pageTitle, worldHost, topbar, hud, selected, hint, legend)
   app.replaceChildren(layout)
@@ -531,6 +788,7 @@ function boot(): void {
     cancelAnimationFrame(animationFrame)
     themeObserver.disconnect()
     traceDock.dispose()
+    movementPad.dispose()
     world?.dispose()
   }, { once: true })
 

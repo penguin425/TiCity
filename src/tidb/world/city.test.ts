@@ -5,8 +5,9 @@
 
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
+import { createCollisionMap } from '../engine/collision'
 import { createTiDBSimulation } from '../model'
-import { TICITY_LAYOUT } from './layout'
+import { COMPONENT_ANCHORS, TICITY_LAYOUT } from './layout'
 import { createTiDBSceneGraph } from './city'
 
 describe('TiCity scene graph', () => {
@@ -84,6 +85,44 @@ describe('TiCity scene graph', () => {
     const peer = city.registry.get('region.17.peer.2')
     expect(peer?.instanceId).toBeTypeOf('number')
     expect(city.registry.resolve(peer?.object ?? null, peer?.instanceId)).toBe(peer)
+    city.dispose()
+  })
+
+  it('blocks walk movement through every TiKV store deck', () => {
+    const city = createTiDBSceneGraph()
+    const collision = createCollisionMap(city.colliders)
+
+    for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+      const id = `tikv.${store}` as 'tikv.0' | 'tikv.1' | 'tikv.2'
+      const anchor = COMPONENT_ANCHORS[id]
+      const collider = city.colliders.find((candidate) => candidate.id === id)
+
+      expect(collider).toMatchObject({
+        minX: anchor[0] - 50,
+        maxX: anchor[0] + 50,
+        minZ: anchor[2] - 50,
+        maxZ: anchor[2] + 50,
+      })
+      expect(collision.contains(anchor[0], anchor[2], 0.58)).toBe(true)
+    }
+
+    city.dispose()
+  })
+
+  it('blocks walk movement through the central PD control hub', () => {
+    const city = createTiDBSceneGraph()
+    const collision = createCollisionMap(city.colliders)
+    const anchor = COMPONENT_ANCHORS['pd.control']
+    const collider = city.colliders.find((candidate) => candidate.id === 'pd.control')
+
+    expect(collider).toMatchObject({
+      minX: 202,
+      maxX: 262,
+      minZ: -132,
+      maxZ: -72,
+    })
+    expect(collision.contains(anchor[0], anchor[2], 0.58)).toBe(true)
+
     city.dispose()
   })
 
