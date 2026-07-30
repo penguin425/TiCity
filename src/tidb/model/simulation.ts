@@ -35,6 +35,12 @@ import {
   reduceGcLabState,
 } from './gc-lab'
 import {
+  createTiFlashMppLabState,
+  freezeTiFlashMppLabSnapshot,
+  isTiFlashMppLabDelta,
+  reduceTiFlashMppLabState,
+} from './tiflash-mpp-lab'
+import {
   clonePeers,
   createRegions,
   createTopology,
@@ -79,6 +85,7 @@ import type {
   TraceStateSnapshot,
   TraceTransactionSnapshot,
   TraceTransactionStage,
+  TraceTiFlashMppLabSnapshot,
   TransactionState,
 } from './types'
 
@@ -227,6 +234,9 @@ function freezeTraceSnapshot(snapshot: TraceStateSnapshot): TraceStateSnapshot {
       : {}),
     ...(snapshot.gcLab
       ? { gcLab: freezeGcLabSnapshot(snapshot.gcLab) }
+      : {}),
+    ...(snapshot.tiflashMppLab
+      ? { tiflashMppLab: freezeTiFlashMppLabSnapshot(snapshot.tiflashMppLab) }
       : {}),
   })
 }
@@ -524,24 +534,6 @@ export function createTiDBSimulation(
       consumed++
     }
     if (consumed > 0) tiflashQueue.splice(0, consumed)
-    state.tiflash.lagSeconds = state.tiflash.pendingVersions > 0
-      ? Math.max(0, state.tiflash.targetTs - state.tiflash.resolvedTs) / 1_000_000
-      : 0
-  }
-
-  function catchUpTiFlashTo(snapshotTs: number): void {
-    let consumedVersions = 0
-    tiflashQueue = tiflashQueue.filter((pending) => {
-      if (pending.ts > snapshotTs) return true
-      consumedVersions += pending.versions
-      return false
-    })
-    state.tiflash.pendingVersions = Math.max(
-      0,
-      state.tiflash.pendingVersions - consumedVersions,
-    )
-    state.tiflash.resolvedTs = Math.max(state.tiflash.resolvedTs, snapshotTs)
-    state.tiflash.targetTs = Math.max(state.tiflash.targetTs, snapshotTs)
     state.tiflash.lagSeconds = state.tiflash.pendingVersions > 0
       ? Math.max(0, state.tiflash.targetTs - state.tiflash.resolvedTs) / 1_000_000
       : 0
@@ -992,9 +984,9 @@ export function createTiDBSimulation(
       if (state.tiflash.resolvedTs < startTs) {
         builder.add(
           'tiflash',
-          'learner_catch_up',
-          'Wait for TiFlash learner',
-          `TiFlash advanced resolved_ts from ${state.tiflash.resolvedTs} to ${startTs}.`,
+          'learner_snapshot_gate',
+          'Gate the TiFlash snapshot per Region',
+          'A production TiFlash read uses each Region self safe-ts or ReadIndex plus local applied-index waiting; this aggregate route does not advance a node-global resolved-ts to start_ts.',
           {
             source: regions[0]?.leaderStoreId ?? 'tikv-1',
             target: 'tiflash-1',
@@ -1003,16 +995,19 @@ export function createTiDBSimulation(
               state.controls.networkLatencyMs,
               state.controls.tiflashLagSeconds * 1_000,
             ),
-            metadata: { snapshotTs: startTs },
+            metadata: {
+              snapshotTs: startTs,
+              nodeGlobalResolvedTsAdvanced: false,
+              staleRead: false,
+            },
           },
         )
-        catchUpTiFlashTo(startTs)
       }
       builder.add(
         'tiflash',
         'mpp_dispatch',
         'Dispatch MPP fragments',
-        `${regions.length} representative partitions scan a resolved TiFlash snapshot.`,
+        `${regions.length} representative partitions scan after their TiFlash snapshot gates pass.`,
         {
           source: tidbId,
           target: 'tiflash-1',
@@ -1061,6 +1056,1229 @@ export function createTiDBSimulation(
       startTs,
       null,
       warnings.length === 0 ? 'succeeded' : 'failed',
+      null,
+      builder,
+      warnings,
+    )
+  }
+
+  /**
+   * Model-7 fixed TiFlash/MPP vertical slice. Region Raft learner replication
+   * is persistent storage state; MPP tunnels carry ephemeral aggregate blocks.
+   */
+  function traceDetailedTiFlashMpp(
+    id: string,
+    analysis: SqlAnalysis,
+    builder: TraceBuilder,
+    warnings: string[],
+  ): TraceReceipt {
+    let tiflashMppLab: TraceTiFlashMppLabSnapshot =
+      createTiFlashMppLabState()
+
+    function projection(): TraceStateSnapshot {
+      return freezeTraceSnapshot({
+        modelVersion: state.modelVersion,
+        tsoLastAllocated: state.tso.lastAllocated,
+        transaction: null,
+        regions: [],
+        tiflashMppLab,
+      })
+    }
+
+    function addTiFlashMppEvent(
+      domain: TraceDomain,
+      kind: string,
+      label: string,
+      detail: string,
+      options: EventOptions & {
+        deltas: readonly TraceStateDelta[]
+      },
+    ): TraceEvent {
+      if (options.deltas.length === 0) {
+        throw new Error(`TiFlash/MPP event ${kind} requires a typed delta.`)
+      }
+      for (const delta of options.deltas) {
+        if (!isTiFlashMppLabDelta(delta)) {
+          throw new Error(`TiFlash/MPP event ${kind} received ${delta.kind}.`)
+        }
+        tiflashMppLab = reduceTiFlashMppLabState(tiflashMppLab, delta)
+      }
+      return builder.add(domain, kind, label, detail, {
+        ...options,
+        snapshot: projection(),
+      })
+    }
+
+    const commitEvents = new Map<number, TraceEvent>()
+    let presentationFence: string | undefined
+    for (const learner of tiflashMppLab.learners) {
+      const index = learner.leaderCommitIndex + 1
+      const committed = addTiFlashMppEvent(
+        'raft',
+        'tiflash_raft_leader_commit',
+        `Region ${learner.regionId} committed a Raft entry`,
+        'The TiKV leader committed one synthetic table mutation before the analytical query.',
+        {
+          source: learner.leaderStoreId,
+          target: learner.leaderStoreId,
+          regionId: learner.regionId,
+          dependsOn: [],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${learner.regionId}`,
+          deltas: [{
+            kind: 'tiflash_replica_raft_commit',
+            regionId: learner.regionId,
+            index,
+          }],
+          metadata: {
+            plane: 'persistent_region_raft',
+            index,
+            synthetic: true,
+          },
+        },
+      )
+      commitEvents.set(learner.regionId, committed)
+      presentationFence = committed.id
+    }
+
+    const receiveEvents = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const learner of tiflashMppLab.learners) {
+      const committed = commitEvents.get(learner.regionId)
+      if (!committed) throw new Error(`Missing Region ${learner.regionId} commit.`)
+      const received = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_learner_receive',
+        `Region ${learner.regionId} learner received the entry`,
+        'The non-voting TiFlash learner received the ordinary Region Raft log entry through the proxy path.',
+        {
+          source: learner.leaderStoreId,
+          target: learner.learnerStoreId,
+          regionId: learner.regionId,
+          dependsOn: [committed.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${learner.regionId}`,
+          deltas: [{
+            kind: 'tiflash_replica_receive',
+            regionId: learner.regionId,
+            index: learner.leaderCommitIndex,
+            replicationMode: 'raft_log',
+          }],
+          metadata: {
+            plane: 'persistent_region_raft',
+            learnerRole: 'learner',
+            voter: false,
+          },
+        },
+      )
+      receiveEvents.set(learner.regionId, received)
+      presentationFence = received.id
+    }
+
+    const region24Received = receiveEvents.get(24)
+    if (!region24Received) throw new Error('Missing Region 24 receive event.')
+    const apply24 = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_learner_apply_command',
+      'Region 24 applied the Raft command',
+      'TiFlash applied the synthetic Put/Delete command to the Region cache; this is persistent replication, not MPP data.',
+      {
+        source: 'tiflash-proxy',
+        target: 'tiflash-1',
+        regionId: 24,
+        dependsOn: [region24Received.id],
+        branchId: 'region-24',
+        deltas: [{
+          kind: 'tiflash_replica_apply',
+          regionId: 24,
+          index: 241,
+        }],
+        metadata: {
+          plane: 'persistent_region_raft',
+          index: 241,
+        },
+      },
+    )
+    const flush24 = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_dm_committed_flush',
+      'Region 24 wrote committed rows to DeltaMerge',
+      'Committed Region-cache data was written to TiFlash storage before the learner applied index advanced.',
+      {
+        source: 'tiflash-1',
+        target: 'tiflash-1',
+        regionId: 24,
+        dependsOn: [apply24.id],
+        branchId: 'region-24',
+        deltas: [{
+          kind: 'tiflash_replica_dm_flush',
+          regionId: 24,
+          index: 241,
+          aggregateVersionCount: 1,
+        }],
+        metadata: {
+          plane: 'persistent_region_raft',
+          aggregateVersionCount: 1,
+        },
+      },
+    )
+    const applied24 = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_learner_applied_advance',
+      'Region 24 advanced learner applied index',
+      'The applied index advanced only after the committed storage write completed.',
+      {
+        source: 'tiflash-1',
+        target: 'tiflash-1',
+        regionId: 24,
+        dependsOn: [flush24.id],
+        branchId: 'region-24',
+        deltas: [{
+          kind: 'tiflash_replica_applied_advance',
+          regionId: 24,
+          from: 240,
+          to: 241,
+        }],
+        metadata: {
+          plane: 'persistent_region_raft',
+          appliedIndex: 241,
+        },
+      },
+    )
+
+    const queryReceived = addTiFlashMppEvent(
+      'client',
+      'tiflash_mpp_query_received',
+      'TiDB received the grouped aggregate',
+      'The trace retains a synthetic query class and table token, never SQL text, keys, or group values.',
+      {
+        source: 'client',
+        target: 'tidb-1',
+        dependsOn: [
+          applied24.id,
+          receiveEvents.get(25)?.id ?? '',
+          receiveEvents.get(26)?.id ?? '',
+        ],
+        deltas: [{
+          kind: 'tiflash_mpp_query_received',
+          queryToken: 'query-mpp-1',
+          queryClass: 'grouped_aggregate',
+        }],
+        metadata: {
+          queryToken: 'query-mpp-1',
+          queryClass: 'grouped_aggregate',
+        },
+      },
+    )
+
+    const startTs = allocateTs()
+    const snapshotEvent = addTiFlashMppEvent(
+      'tso',
+      'tiflash_mpp_snapshot_tso',
+      'PD allocated the query snapshot TSO',
+      'One synthetic start_ts identifies the MVCC snapshot requested from every Region.',
+      {
+        source: 'tidb-1',
+        target: 'pd-1',
+        dependsOn: [queryReceived.id],
+        deltas: [{
+          kind: 'tiflash_mpp_snapshot_tso',
+          timestamp: startTs,
+        }],
+        metadata: {
+          snapshotTs: startTs,
+          synthetic: true,
+        },
+      },
+    )
+
+    const safeTsUpdated = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_safe_ts_read_state_update',
+      'Per-Region safe-ts read state was observed',
+      'Region 24 can use the self-safe-ts fast path. Regions 25 and 26 remain behind and must use ReadIndex.',
+      {
+        source: 'tiflash-proxy',
+        target: 'tiflash-1',
+        dependsOn: [snapshotEvent.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_safe_ts_update',
+            regionId: 24,
+            leaderSafeTs: startTs,
+            selfSafeTs: startTs,
+            lagBucket: 'none',
+          },
+          {
+            kind: 'tiflash_mpp_safe_ts_update',
+            regionId: 25,
+            leaderSafeTs: startTs,
+            selfSafeTs: 999_998_000,
+            lagBucket: 'about_2s',
+          },
+          {
+            kind: 'tiflash_mpp_safe_ts_update',
+            regionId: 26,
+            leaderSafeTs: startTs,
+            selfSafeTs: 999_998_000,
+            lagBucket: 'about_2s',
+          },
+        ],
+        metadata: {
+          regionCount: 3,
+          correctnessScope: 'per_region',
+        },
+      },
+    )
+
+    const provisioning = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_replica_placement_observed',
+      'TiDB observed provisioned TiFlash replicas',
+      'AVAILABLE and PROGRESS make the access path eligible; they do not prove live snapshot readiness.',
+      {
+        source: 'tidb-1',
+        target: 'tiflash-placement',
+        dependsOn: [safeTsUpdated.id],
+        deltas: [{
+          kind: 'tiflash_mpp_provisioning_observed',
+          available: true,
+          progress: 1,
+          meaning: 'placement_only_not_snapshot_readiness',
+        }],
+        metadata: {
+          available: true,
+          progress: 1,
+          snapshotReady: false,
+        },
+      },
+    )
+    const accessPath = addTiFlashMppEvent(
+      'sql',
+      'tiflash_mpp_access_path_selected',
+      'Optimizer selected the TiFlash MPP path',
+      'This declared success fixture models an allowed costed MPP choice; replica presence alone does not force MPP.',
+      {
+        source: 'tidb-1',
+        target: 'tidb-1',
+        dependsOn: [provisioning.id],
+        deltas: [{
+          kind: 'tiflash_mpp_access_path',
+          selected: true,
+          optimizerMode: 'allow_mpp_costed',
+        }],
+        metadata: {
+          optimizerChoice: 'declared_success_fixture',
+          accessPath: 'tiflash_mpp',
+        },
+      },
+    )
+    const fragmentsBuilt = addTiFlashMppEvent(
+      'sql',
+      'tiflash_mpp_fragments_built',
+      'TiDB built two MPP fragments',
+      'The scan fragment performs partial aggregation and HashPartition; the final fragment receives, aggregates, and PassThroughs to TiDB.',
+      {
+        source: 'tidb-1',
+        target: 'tidb-1',
+        dependsOn: [accessPath.id],
+        deltas: [{
+          kind: 'tiflash_mpp_fragments_build',
+          fragmentCount: 2,
+        }],
+        metadata: {
+          fragmentCount: 2,
+          aggregateStages: 2,
+        },
+      },
+    )
+    const scheduled = addTiFlashMppEvent(
+      'sql',
+      'tiflash_mpp_regions_scheduled',
+      'TiDB grouped Regions by TiFlash store',
+      'Regions 24 and 26 map to one scan task; Region 25 maps to the other. A Region is not automatically one MPP task.',
+      {
+        source: 'tidb-1',
+        target: 'tiflash-scheduler',
+        dependsOn: [fragmentsBuilt.id],
+        deltas: [{
+          kind: 'tiflash_mpp_regions_schedule',
+          regionCount: 3,
+          storeCount: 2,
+          policy: 'group_regions_by_tiflash_address',
+        }],
+        metadata: {
+          regionCount: 3,
+          storeCount: 2,
+        },
+      },
+    )
+    const tasksBuilt = addTiFlashMppEvent(
+      'sql',
+      'tiflash_mpp_tasks_built',
+      'TiDB instantiated four MPP tasks',
+      'Each fragment has one task per participating TiFlash store in this fixture.',
+      {
+        source: 'tidb-1',
+        target: 'tiflash-scheduler',
+        dependsOn: [scheduled.id],
+        deltas: [{
+          kind: 'tiflash_mpp_tasks_build',
+          taskCount: 4,
+        }],
+        metadata: {
+          taskCount: 4,
+          scanTaskCount: 2,
+          finalTaskCount: 2,
+        },
+      },
+    )
+    const tunnelsBuilt = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_mpp_tunnels_registered',
+      'Six ephemeral MPP tunnels were registered',
+      'Four HashPartition task tunnels and two PassThrough root streams carry query blocks; none are Raft replication.',
+      {
+        source: 'tidb-1',
+        target: 'tiflash-1',
+        dependsOn: [tasksBuilt.id],
+        deltas: [{
+          kind: 'tiflash_mpp_tunnels_build',
+          hashTunnelCount: 4,
+          rootTunnelCount: 2,
+        }],
+        metadata: {
+          tunnelCount: 6,
+          persistence: 'ephemeral_query_blocks',
+        },
+      },
+    )
+
+    const dispatchDeltas: TraceStateDelta[] = tiflashMppLab.tasks.map((task) => ({
+      kind: 'tiflash_mpp_task_stage',
+      taskId: task.id,
+      from: 'built',
+      to: 'dispatched',
+    }))
+    const dispatched = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_mpp_dispatch_batch',
+      'TiDB dispatched four tasks concurrently',
+      'The event is a deterministic batch and does not claim a production network arrival order.',
+      {
+        source: 'tidb-1',
+        target: 'tiflash-mpp',
+        dependsOn: [tunnelsBuilt.id],
+        deltas: dispatchDeltas,
+        metadata: {
+          taskCount: 4,
+          concurrent: true,
+        },
+      },
+    )
+    const preparedDeltas: TraceStateDelta[] = tiflashMppLab.tasks.map((task) => ({
+      kind: 'tiflash_mpp_task_stage',
+      taskId: task.id,
+      from: 'dispatched',
+      to: 'prepared',
+    }))
+    const prepared = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_mpp_tasks_prepared',
+      'TiFlash prepared and registered all tasks',
+      'Each task decoded its DAG request, registered tunnels, and became ready for its fragment work.',
+      {
+        source: 'tiflash-mpp',
+        target: 'tiflash-mpp',
+        dependsOn: [dispatched.id],
+        deltas: preparedDeltas,
+        metadata: {
+          preparedTaskCount: 4,
+        },
+      },
+    )
+    const gatingStarted = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_snapshot_gating_started',
+      'Scan tasks began per-Region snapshot gating',
+      'Snapshot correctness is checked independently for every Region before the DeltaMerge scan.',
+      {
+        source: 'tiflash-mpp',
+        target: 'tiflash-learners',
+        dependsOn: [prepared.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-1',
+            from: 'prepared',
+            to: 'snapshot_gating',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-2',
+            from: 'prepared',
+            to: 'snapshot_gating',
+          },
+        ],
+        metadata: {
+          regionCount: 3,
+          nodeGlobalResolvedTsUsed: false,
+        },
+      },
+    )
+
+    const safeChecks = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const regionId of [24, 25, 26]) {
+      const check = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_snapshot_safe_ts_check',
+        `Region ${regionId} compared start_ts with self safe-ts`,
+        regionId === 24
+          ? 'The requested snapshot is at or below this learner self safe-ts, so ReadIndex can be skipped safely.'
+          : 'This learner self safe-ts is behind the requested snapshot, so TiFlash must use ReadIndex and wait for apply.',
+        {
+          source: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          target: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          regionId,
+          dependsOn: [gatingStarted.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_mpp_snapshot_gate',
+            regionId,
+            action: 'check_safe_ts',
+          }],
+          metadata: {
+            gate: 'self_safe_ts_compare',
+            readIndexSkipped: regionId === 24,
+          },
+        },
+      )
+      safeChecks.set(regionId, check)
+      presentationFence = check.id
+    }
+
+    const check24 = safeChecks.get(24)
+    if (!check24) throw new Error('Missing Region 24 safe-ts check.')
+    const ready24 = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_snapshot_gate_ready_safe_ts',
+      'Region 24 passed through self safe-ts',
+      'The learner can serve the requested MVCC snapshot without ReadIndex; this does not mean stale or inconsistent output.',
+      {
+        source: 'tiflash-1',
+        target: 'task-scan-1',
+        regionId: 24,
+        dependsOn: [check24.id],
+        branchId: 'region-24',
+        deltas: [{
+          kind: 'tiflash_mpp_snapshot_gate',
+          regionId: 24,
+          action: 'ready_safe_ts',
+        }],
+        metadata: {
+          gateReason: 'self_safe_ts',
+          staleRead: false,
+        },
+      },
+    )
+
+    const requestEvents = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const regionId of [25, 26]) {
+      const check = safeChecks.get(regionId)
+      if (!check) throw new Error(`Missing Region ${regionId} safe-ts check.`)
+      const requested = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_read_index_requested',
+        `Region ${regionId} requested ReadIndex`,
+        'ReadIndex asks the Region leader for the committed index needed by this snapshot; it does not copy data.',
+        {
+          source: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          target: `tikv-region-${regionId}`,
+          regionId,
+          dependsOn: [check.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_mpp_snapshot_gate',
+            regionId,
+            action: 'request_read_index',
+          }],
+          metadata: {
+            operation: 'read_index',
+            transfersData: false,
+          },
+        },
+      )
+      requestEvents.set(regionId, requested)
+      presentationFence = requested.id
+    }
+
+    const returnEvents = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const [regionId, requiredReadIndex] of [[25, 251], [26, 261]] as const) {
+      const requested = requestEvents.get(regionId)
+      if (!requested) throw new Error(`Missing Region ${regionId} ReadIndex request.`)
+      const returned = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_read_index_returned',
+        `Region ${regionId} received required ReadIndex`,
+        'The response identifies the committed Raft index the local learner must have applied before reading.',
+        {
+          source: `tikv-region-${regionId}`,
+          target: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          regionId,
+          dependsOn: [requested.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_mpp_snapshot_gate',
+            regionId,
+            action: 'return_read_index',
+            requiredReadIndex,
+          }],
+          metadata: {
+            requiredReadIndex,
+            synthetic: true,
+          },
+        },
+      )
+      returnEvents.set(regionId, returned)
+      presentationFence = returned.id
+    }
+
+    const waitEvents = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const regionId of [25, 26]) {
+      const returned = returnEvents.get(regionId)
+      if (!returned) throw new Error(`Missing Region ${regionId} ReadIndex response.`)
+      const waiting = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_learner_wait_applied',
+        `Region ${regionId} waited for learner apply`,
+        'TiFlash waits for local persistent Raft application instead of returning an older snapshot.',
+        {
+          source: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          target: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          regionId,
+          dependsOn: [returned.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${regionId}`,
+          status: 'active',
+          deltas: [{
+            kind: 'tiflash_mpp_snapshot_gate',
+            regionId,
+            action: 'wait_applied',
+          }],
+          metadata: {
+            returnsStaleRows: false,
+          },
+        },
+      )
+      waitEvents.set(regionId, waiting)
+      presentationFence = waiting.id
+    }
+
+    const applyTail = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const [regionId, from, to, storeId] of [
+      [25, 250, 251, 'tiflash-2'],
+      [26, 260, 261, 'tiflash-1'],
+    ] as const) {
+      const waiting = waitEvents.get(regionId)
+      const received = receiveEvents.get(regionId)
+      if (!waiting || !received) {
+        throw new Error(`Missing Region ${regionId} replication prerequisites.`)
+      }
+      const applied = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_learner_apply_command',
+        `Region ${regionId} applied the pending Raft command`,
+        'The learner applied persistent Region state while the query gate waited.',
+        {
+          source: 'tiflash-proxy',
+          target: storeId,
+          regionId,
+          dependsOn: [waiting.id, received.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_replica_apply',
+            regionId,
+            index: to,
+          }],
+          metadata: {
+            plane: 'persistent_region_raft',
+            index: to,
+          },
+        },
+      )
+      const flushed = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_dm_committed_flush',
+        `Region ${regionId} wrote committed rows to DeltaMerge`,
+        'The persistent write completes before this learner publishes the newer applied index.',
+        {
+          source: storeId,
+          target: storeId,
+          regionId,
+          dependsOn: [applied.id],
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_replica_dm_flush',
+            regionId,
+            index: to,
+            aggregateVersionCount: 1,
+          }],
+          metadata: {
+            plane: 'persistent_region_raft',
+            aggregateVersionCount: 1,
+          },
+        },
+      )
+      const advanced = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_learner_applied_advance',
+        `Region ${regionId} reached required applied index`,
+        'The applied-index waiter can now be released without advancing a node-global resolved-ts.',
+        {
+          source: storeId,
+          target: storeId,
+          regionId,
+          dependsOn: [flushed.id],
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_replica_applied_advance',
+            regionId,
+            from,
+            to,
+          }],
+          metadata: {
+            appliedIndex: to,
+            nodeGlobalResolvedTsAdvanced: false,
+          },
+        },
+      )
+      applyTail.set(regionId, advanced)
+      presentationFence = advanced.id
+    }
+
+    const readIndexReady = new Map<number, TraceEvent>()
+    presentationFence = undefined
+    for (const regionId of [25, 26]) {
+      const advanced = applyTail.get(regionId)
+      if (!advanced) throw new Error(`Missing Region ${regionId} apply tail.`)
+      const ready = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_snapshot_gate_ready_read_index',
+        `Region ${regionId} passed ReadIndex plus apply`,
+        'The learner applied the returned index, so the requested MVCC snapshot can proceed.',
+        {
+          source: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          target: regionId === 25 ? 'task-scan-2' : 'task-scan-1',
+          regionId,
+          dependsOn: [advanced.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: `region-${regionId}`,
+          deltas: [{
+            kind: 'tiflash_mpp_snapshot_gate',
+            regionId,
+            action: 'ready_read_index',
+          }],
+          metadata: {
+            gateReason: 'read_index_applied',
+            staleRead: false,
+          },
+        },
+      )
+      readIndexReady.set(regionId, ready)
+      presentationFence = ready.id
+    }
+
+    const locksChecked = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_mvcc_lock_checks_complete',
+      'All Region MVCC lock checks completed',
+      'The successful fixture found zero locks. A lock or timeout would take a separate error/retry branch, not return stale rows.',
+      {
+        source: 'tiflash-learners',
+        target: 'tiflash-storage',
+        dependsOn: [
+          ready24.id,
+          readIndexReady.get(25)?.id ?? '',
+          readIndexReady.get(26)?.id ?? '',
+        ],
+        deltas: [24, 25, 26].map((regionId): TraceStateDelta => ({
+          kind: 'tiflash_mpp_snapshot_gate',
+          regionId,
+          action: 'lock_check',
+          lockCount: 0,
+        })),
+        metadata: {
+          regionCount: 3,
+          aggregateLockCount: 0,
+        },
+      },
+    )
+
+    const scansStarted = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_dm_snapshot_scans_started',
+      'Two scan tasks built DeltaMerge snapshot readers',
+      'Each scan task uses the same requested snapshot TSO after all owned Regions pass their independent gates.',
+      {
+        source: 'tiflash-storage',
+        target: 'tiflash-mpp',
+        dependsOn: [locksChecked.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-1',
+            from: 'snapshot_gating',
+            to: 'scanning',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-2',
+            from: 'snapshot_gating',
+            to: 'scanning',
+          },
+        ],
+        metadata: {
+          scanTaskCount: 2,
+          rowValuesRetained: false,
+        },
+      },
+    )
+
+    const validated = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_regions_post_read_validated',
+      'Region epochs and ranges were revalidated',
+      'After storage readers were built, TiFlash verified that Region split, merge, and epoch state had not invalidated their ranges.',
+      {
+        source: 'tiflash-storage',
+        target: 'tiflash-mpp',
+        dependsOn: [scansStarted.id],
+        deltas: [24, 25, 26].map((regionId): TraceStateDelta => ({
+          kind: 'tiflash_mpp_snapshot_gate',
+          regionId,
+          action: 'post_read_validate',
+        })),
+        metadata: {
+          regionCount: 3,
+          validation: 'epoch_and_range',
+        },
+      },
+    )
+
+    const partialAggregated = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_partial_hash_aggregate_complete',
+      'Scan tasks completed partial aggregation',
+      'Only bucketed aggregate block counts are retained; no group keys or result values enter the trace.',
+      {
+        source: 'tiflash-storage',
+        target: 'tiflash-mpp',
+        dependsOn: [validated.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-1',
+            from: 'scanning',
+            to: 'partial_aggregated',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-2',
+            from: 'scanning',
+            to: 'partial_aggregated',
+          },
+        ],
+        metadata: {
+          taskCount: 2,
+          rowsBucket: 'small',
+        },
+      },
+    )
+
+    const exchangeStarted = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_hash_partition_started',
+      'Scan tasks hash-partitioned aggregate blocks',
+      'HashPartition scatters ephemeral aggregate blocks to both final tasks; it is not broadcast and not Raft.',
+      {
+        source: 'fragment-scan',
+        target: 'fragment-final',
+        dependsOn: [partialAggregated.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-1',
+            from: 'partial_aggregated',
+            to: 'exchange_sending',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-2',
+            from: 'partial_aggregated',
+            to: 'exchange_sending',
+          },
+        ],
+        metadata: {
+          exchangeType: 'hash_partition',
+          persistence: 'ephemeral_query_blocks',
+        },
+      },
+    )
+
+    const hashSendEvents: TraceEvent[] = []
+    presentationFence = undefined
+    for (const tunnelId of [
+      'tunnel-hash-1',
+      'tunnel-hash-2',
+      'tunnel-hash-3',
+      'tunnel-hash-4',
+    ] as const) {
+      const tunnel = tiflashMppLab.tunnels.find((candidate) =>
+        candidate.id === tunnelId)
+      if (!tunnel) throw new Error(`Missing ${tunnelId}.`)
+      const sent = addTiFlashMppEvent(
+        'tiflash',
+        'tiflash_hash_exchange_send',
+        `${tunnelId} sent aggregate blocks`,
+        'One bounded packet aggregate represents the ephemeral block flow on this task-to-task tunnel.',
+        {
+          source: tunnel.sourceTaskId,
+          target: tunnel.targetTaskId,
+          dependsOn: [exchangeStarted.id],
+          ...(presentationFence
+            ? { presentationAfter: presentationFence }
+            : {}),
+          branchId: tunnelId,
+          deltas: [{
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId,
+            action: 'send',
+            packetCount: 1,
+            bytesBucket: 'small',
+          }],
+          metadata: {
+            exchangeType: 'hash_partition',
+            locality: tunnel.locality,
+            packetCount: 1,
+          },
+        },
+      )
+      hashSendEvents.push(sent)
+      presentationFence = sent.id
+    }
+
+    const hashReceived = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_hash_exchange_received',
+      'Final tasks received all HashPartition blocks',
+      'Local and remote receivers decoded the same ephemeral packet format before final aggregation.',
+      {
+        source: 'fragment-scan',
+        target: 'fragment-final',
+        dependsOn: hashSendEvents.map((event) => event.id),
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-1',
+            from: 'prepared',
+            to: 'exchange_receiving',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-2',
+            from: 'prepared',
+            to: 'exchange_receiving',
+          },
+          ...([
+            'tunnel-hash-1',
+            'tunnel-hash-2',
+            'tunnel-hash-3',
+            'tunnel-hash-4',
+          ] as const).map((tunnelId): TraceStateDelta => ({
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId,
+            action: 'receive',
+            packetCount: 1,
+            bytesBucket: 'small',
+          })),
+        ],
+        metadata: {
+          tunnelCount: 4,
+          packetCount: 4,
+        },
+      },
+    )
+
+    const finalAggregated = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_final_hash_aggregate_complete',
+      'Final tasks completed the second aggregation stage',
+      'Each final task combined its received partitions without exposing group keys or aggregate values.',
+      {
+        source: 'fragment-final',
+        target: 'fragment-final',
+        dependsOn: [hashReceived.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-1',
+            from: 'exchange_receiving',
+            to: 'final_aggregated',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-2',
+            from: 'exchange_receiving',
+            to: 'final_aggregated',
+          },
+        ],
+        metadata: {
+          taskCount: 2,
+          resultValuesRetained: false,
+        },
+      },
+    )
+
+    const rootSent = addTiFlashMppEvent(
+      'tiflash',
+      'tiflash_root_passthrough_sent',
+      'Two PassThrough streams sent result blocks to TiDB',
+      'Each final task has one root stream to the TiDB virtual task. PassThrough is not broadcast.',
+      {
+        source: 'fragment-final',
+        target: 'tidb-root',
+        dependsOn: [finalAggregated.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-1',
+            from: 'final_aggregated',
+            to: 'root_streaming',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-2',
+            from: 'final_aggregated',
+            to: 'root_streaming',
+          },
+          {
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId: 'tunnel-root-1',
+            action: 'send',
+            packetCount: 1,
+            bytesBucket: 'small',
+          },
+          {
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId: 'tunnel-root-2',
+            action: 'send',
+            packetCount: 1,
+            bytesBucket: 'small',
+          },
+        ],
+        metadata: {
+          exchangeType: 'pass_through',
+          rootStreamCount: 2,
+        },
+      },
+    )
+
+    const gathered = addTiFlashMppEvent(
+      'return',
+      'tiflash_mpp_gather_decoded',
+      'TiDB MPPGather decoded result chunks',
+      'TiDB consumed both root streams and decoded aggregate packets into internal chunks.',
+      {
+        source: 'tidb-root',
+        target: 'tidb-1',
+        dependsOn: [rootSent.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId: 'tunnel-root-1',
+            action: 'receive',
+            packetCount: 1,
+            bytesBucket: 'small',
+          },
+          {
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId: 'tunnel-root-2',
+            action: 'receive',
+            packetCount: 1,
+            bytesBucket: 'small',
+          },
+          {
+            kind: 'tiflash_mpp_result_stage',
+            from: 'idle',
+            to: 'chunks_decoded',
+            rootStreamCount: 2,
+            chunksDecoded: 2,
+            rowsBucket: 'none',
+          },
+        ],
+        metadata: {
+          rootStreamCount: 2,
+          chunksDecoded: 2,
+        },
+      },
+    )
+    const columnsSent = addTiFlashMppEvent(
+      'return',
+      'tiflash_client_columns_sent',
+      'TiDB sent result-column metadata',
+      'The client protocol boundary begins without retaining SQL text or column values in the model snapshot.',
+      {
+        source: 'tidb-1',
+        target: 'client',
+        dependsOn: [gathered.id],
+        deltas: [{
+          kind: 'tiflash_mpp_result_stage',
+          from: 'chunks_decoded',
+          to: 'columns_sent',
+          rootStreamCount: 2,
+          chunksDecoded: 2,
+          rowsBucket: 'none',
+        }],
+        metadata: {
+          columnsSent: true,
+        },
+      },
+    )
+    const rowsStreamed = addTiFlashMppEvent(
+      'return',
+      'tiflash_client_rows_streamed',
+      'TiDB streamed a bounded aggregate row bucket',
+      'Rows may cross the client boundary before every task status report finishes; only a small bucket is retained.',
+      {
+        source: 'tidb-1',
+        target: 'client',
+        dependsOn: [columnsSent.id],
+        deltas: [{
+          kind: 'tiflash_mpp_result_stage',
+          from: 'columns_sent',
+          to: 'rows_streaming',
+          rootStreamCount: 2,
+          chunksDecoded: 2,
+          rowsBucket: 'small',
+        }],
+        metadata: {
+          rowsBucket: 'small',
+          exactValuesRetained: false,
+        },
+      },
+    )
+    const streamsEof = addTiFlashMppEvent(
+      'return',
+      'tiflash_root_streams_eof',
+      'Both root streams reached EOF',
+      'All bounded root packets were consumed. Stream completion is distinct from dispatch acceptance.',
+      {
+        source: 'tidb-root',
+        target: 'tidb-1',
+        dependsOn: [rowsStreamed.id],
+        deltas: [{
+          kind: 'tiflash_mpp_result_stage',
+          from: 'rows_streaming',
+          to: 'streams_eof',
+          rootStreamCount: 2,
+          chunksDecoded: 2,
+          rowsBucket: 'small',
+        }],
+        metadata: {
+          rootStreamCount: 2,
+          eof: true,
+        },
+      },
+    )
+    addTiFlashMppEvent(
+      'return',
+      'tiflash_client_query_complete',
+      'TiDB completed the client response',
+      'The successful baseline ends with zero retries, no fallback, and no stale-read result.',
+      {
+        source: 'tidb-1',
+        target: 'client',
+        dependsOn: [streamsEof.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-1',
+            from: 'exchange_sending',
+            to: 'complete',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-scan-2',
+            from: 'exchange_sending',
+            to: 'complete',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-1',
+            from: 'root_streaming',
+            to: 'complete',
+          },
+          {
+            kind: 'tiflash_mpp_task_stage',
+            taskId: 'task-final-2',
+            from: 'root_streaming',
+            to: 'complete',
+          },
+          {
+            kind: 'tiflash_mpp_result_stage',
+            from: 'streams_eof',
+            to: 'client_complete',
+            rootStreamCount: 2,
+            chunksDecoded: 2,
+            rowsBucket: 'small',
+          },
+        ],
+        metadata: {
+          retryCount: 0,
+          fallbackToTiKV: false,
+          staleRead: false,
+        },
+      },
+    )
+
+    if (builder.events.length > tiflashMppLab.configuration.maxEventNodes) {
+      throw new Error('TiFlash/MPP trace exceeded its renderer event capacity.')
+    }
+    state.metrics.statements++
+    state.metrics.reads++
+    state.tiflash.mppQueries++
+    return recordReceipt(
+      id,
+      'tiflash-mpp',
+      analysis,
+      startTs,
+      null,
+      'succeeded',
       null,
       builder,
       warnings,
@@ -6815,6 +8033,19 @@ export function createTiDBSimulation(
         id,
         analysis,
         regions[0],
+        builder,
+        warnings,
+      )
+    }
+    if (
+      scenarioId === 'tiflash-mpp' &&
+      analysis.readOnly &&
+      analysis.accessPath === 'tiflash_mpp' &&
+      regions.map((region) => region.id).join(',') === '24,25,26'
+    ) {
+      return traceDetailedTiFlashMpp(
+        id,
+        analysis,
         builder,
         warnings,
       )

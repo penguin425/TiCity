@@ -323,22 +323,52 @@ function plan(
         }],
       }]
     }
+    /*
+     * This is a mechanism-shaped teaching plan, not a captured EXPLAIN. Keep
+     * the two MPP fragments explicit: scan + partial aggregation feeds a
+     * HashPartition exchange, then receiver + final aggregation feeds TiDB
+     * through PassThrough root streams.
+     */
     return [{
-      id: 'root-aggregate',
-      operator: 'HashAgg',
+      id: 'root-mpp-gather',
+      operator: 'MPPGather',
       task: 'root',
       accessObject: null,
       children: [{
-        id: 'mpp-exchange',
-        operator: 'ExchangeSender',
+        id: 'mpp-root-passthrough',
+        operator: 'ExchangeSender(PassThrough)',
         task: 'mpp[tiflash]',
         accessObject: null,
         children: [{
-          id: 'tiflash-scan',
-          operator: 'TableFullScan',
+          id: 'mpp-final-aggregate',
+          operator: 'HashAgg(Final)',
           task: 'mpp[tiflash]',
-          accessObject,
-          children: [],
+          accessObject: null,
+          children: [{
+            id: 'mpp-hash-receiver',
+            operator: 'ExchangeReceiver(HashPartition)',
+            task: 'mpp[tiflash]',
+            accessObject: null,
+            children: [{
+              id: 'mpp-hash-sender',
+              operator: 'ExchangeSender(HashPartition)',
+              task: 'mpp[tiflash]',
+              accessObject: null,
+              children: [{
+                id: 'mpp-partial-aggregate',
+                operator: 'HashAgg(Partial)',
+                task: 'mpp[tiflash]',
+                accessObject: null,
+                children: [{
+                  id: 'tiflash-scan',
+                  operator: 'TableFullScan',
+                  task: 'mpp[tiflash]',
+                  accessObject,
+                  children: [],
+                }],
+              }],
+            }],
+          }],
         }],
       }],
     }]

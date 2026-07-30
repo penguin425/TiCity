@@ -53,6 +53,15 @@ export type {
   GcLabVersionDefinition,
 } from './gc-lab'
 export {
+  createTiFlashMppLabState,
+  freezeTiFlashMppLabSnapshot,
+  isTiFlashMppLabDelta,
+  reduceTiFlashMppLabState,
+} from './tiflash-mpp-lab'
+export type {
+  TiFlashMppLabDelta,
+} from './tiflash-mpp-lab'
+export {
   createTiDBSimulation,
   DEFAULT_TIDB_CONTROLS,
 } from './simulation'
@@ -91,6 +100,7 @@ export type {
   TiDBSimulationOptions,
   TiDBTopology,
   TiFlashState,
+  TiFlashMppStoreId,
   TraceDomain,
   TraceEvent,
   TraceEventStatus,
@@ -104,6 +114,18 @@ export type {
   TraceGcVersionSnapshot,
   TraceGcVersionState,
   TraceGcVersionWriteType,
+  TraceTiFlashMppFragmentId,
+  TraceTiFlashMppFragmentSnapshot,
+  TraceTiFlashMppLabSnapshot,
+  TraceTiFlashMppLearnerSnapshot,
+  TraceTiFlashMppPhase,
+  TraceTiFlashMppReadGate,
+  TraceTiFlashMppStoreSnapshot,
+  TraceTiFlashMppTaskId,
+  TraceTiFlashMppTaskSnapshot,
+  TraceTiFlashMppTaskStage,
+  TraceTiFlashMppTunnelId,
+  TraceTiFlashMppTunnelSnapshot,
   TraceApplicationRetrySnapshot,
   TraceDeadlockSnapshot,
   TraceLockLabSnapshot,

@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-6'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-7'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -605,6 +605,183 @@ export interface TraceGcLabSnapshot {
   }>
 }
 
+export type TiFlashMppStoreId = 'tiflash-1' | 'tiflash-2'
+export type TraceTiFlashMppFragmentId = 'fragment-scan' | 'fragment-final'
+export type TraceTiFlashMppTaskId =
+  | 'task-scan-1'
+  | 'task-scan-2'
+  | 'task-final-1'
+  | 'task-final-2'
+export type TraceTiFlashMppTunnelId =
+  | 'tunnel-hash-1'
+  | 'tunnel-hash-2'
+  | 'tunnel-hash-3'
+  | 'tunnel-hash-4'
+  | 'tunnel-root-1'
+  | 'tunnel-root-2'
+
+export type TraceTiFlashMppPhase =
+  | 'replicating'
+  | 'planning'
+  | 'dispatching'
+  | 'snapshot_gating'
+  | 'scanning'
+  | 'exchanging'
+  | 'streaming'
+  | 'complete'
+
+export type TraceTiFlashMppReadGate =
+  | 'unchecked'
+  | 'safe_ts_checked'
+  | 'read_index_requested'
+  | 'read_index_returned'
+  | 'waiting_applied'
+  | 'ready'
+  | 'mvcc_checked'
+  | 'validated'
+
+export type TraceTiFlashMppTaskStage =
+  | 'built'
+  | 'dispatched'
+  | 'prepared'
+  | 'snapshot_gating'
+  | 'scanning'
+  | 'partial_aggregated'
+  | 'exchange_sending'
+  | 'exchange_receiving'
+  | 'final_aggregated'
+  | 'root_streaming'
+  | 'complete'
+
+export interface TraceTiFlashMppStoreSnapshot {
+  storeId: TiFlashMppStoreId
+  /** Regions assigned to this store for the modeled query, not all replicas. */
+  regionIds: readonly number[]
+  scanTaskId: TraceTiFlashMppTaskId
+  finalTaskId: TraceTiFlashMppTaskId
+}
+
+export interface TraceTiFlashMppLearnerSnapshot {
+  regionId: number
+  leaderStoreId: StoreId
+  learnerStoreId: TiFlashMppStoreId
+  role: 'learner'
+  voter: false
+  replicationMode: 'raft_log'
+  leaderCommitIndex: number
+  learnerReceivedIndex: number
+  learnerRaftCommandIndex: number
+  deltaMergeFlushedIndex: number
+  learnerAppliedIndex: number
+  leaderSafeTs: number
+  selfSafeTs: number
+  safeTsLagBucket: 'none' | 'about_2s'
+  requiredReadIndex: number | null
+  readGate: TraceTiFlashMppReadGate
+  gateReason: 'self_safe_ts' | 'read_index_applied' | null
+  readIndexSkipped: boolean | null
+  lockCount: number | null
+  postReadValidated: boolean
+  scheduled: boolean
+}
+
+export interface TraceTiFlashMppFragmentSnapshot {
+  id: TraceTiFlashMppFragmentId
+  kind: 'scan_partial_aggregate' | 'final_aggregate'
+  operatorTokens: readonly string[]
+  taskIds: readonly TraceTiFlashMppTaskId[]
+}
+
+export interface TraceTiFlashMppTaskSnapshot {
+  id: TraceTiFlashMppTaskId
+  fragmentId: TraceTiFlashMppFragmentId
+  storeId: TiFlashMppStoreId
+  regionIds: readonly number[]
+  stage: TraceTiFlashMppTaskStage
+  /** TiDB root is a distinct virtual task; no TiFlash task is the root. */
+  root: boolean
+  feedsTiDBRoot: boolean
+}
+
+export interface TraceTiFlashMppTunnelSnapshot {
+  id: TraceTiFlashMppTunnelId
+  exchangeType: 'hash_partition' | 'pass_through'
+  sourceTaskId: TraceTiFlashMppTaskId
+  targetTaskId: TraceTiFlashMppTaskId | 'tidb-root'
+  locality: 'local' | 'remote' | 'root'
+  persistence: 'ephemeral_query_blocks'
+  status: 'registered' | 'sent' | 'received'
+  packetCount: number
+  bytesBucket: 'none' | 'small'
+}
+
+/**
+ * Model-7 TiFlash learner replication and MPP vertical slice. All identifiers,
+ * counts, timestamps, and indexes are deterministic synthetic teaching data.
+ */
+export interface TraceTiFlashMppLabSnapshot {
+  phase: TraceTiFlashMppPhase
+  pins: Readonly<{
+    tiflash: '6e12ba23c70f358f2ffbee837feac24118a3e988'
+    tiflashProxy: 'b877a976997acb7c552db970c01546b4e82bce18'
+    tidb: 'd13e52ed6e22cc5789bed7c64c861578cd2ed55b'
+    tikv: 'a2c58c94f89cbb410e66d8f85c236308d6fc64f0'
+    pd: 'd190c0e9082de46128b756f93b1291768dda645a'
+    clientGo: '006dfb024c26859f2e3757172296d84ef36ff585'
+  }>
+  configuration: Readonly<{
+    queryToken: 'query-mpp-1'
+    tableToken: 'table-analytics'
+    queryClass: 'grouped_aggregate'
+    representation: 'aggregate_counts_only'
+    optimizerChoice: 'declared_success_fixture'
+    replicaCount: 2
+    learnerProjection?: 'selected_query_replica_per_region'
+    unselectedLearnersModeled?: false
+    provisioningAvailable: true
+    provisioningProgress: 1
+    provisioningMeaning: 'placement_only_not_snapshot_readiness'
+    replicationPlane: 'persistent_region_raft'
+    exchangePlane: 'ephemeral_query_blocks'
+    readFailurePolicy: 'wait_or_error_never_stale'
+    regionDispatchRetry: 'requires_recuttask_reschedule'
+    exchangeRetryBoundary: 'before_first_packet_only'
+    fallbackBoundary: 'configured_timeout_before_client_side_effect_only'
+    staleRead: false
+    initialSnapshotTransferModeled: false
+    failureRetryModeled: false
+    maxEventNodes: 57
+  }>
+  snapshotTs: number | null
+  provisioningObserved: boolean
+  accessPathSelected: boolean
+  stores: readonly TraceTiFlashMppStoreSnapshot[]
+  learners: readonly TraceTiFlashMppLearnerSnapshot[]
+  fragments: readonly TraceTiFlashMppFragmentSnapshot[]
+  tasks: readonly TraceTiFlashMppTaskSnapshot[]
+  tunnels: readonly TraceTiFlashMppTunnelSnapshot[]
+  result: Readonly<{
+    taskId: 'tidb-root'
+    stage:
+      | 'idle'
+      | 'chunks_decoded'
+      | 'columns_sent'
+      | 'rows_streaming'
+      | 'streams_eof'
+      | 'client_complete'
+    rootStreamCount: number
+    chunksDecoded: number
+    columnsSent: boolean
+    rowsBucket: 'none' | 'small'
+    clientComplete: boolean
+  }>
+  retry: Readonly<{
+    retryCount: number
+    fallbackToTiKV: boolean
+    failureCode: null
+  }>
+}
+
 export type TraceLockTransactionStatus =
   | 'active'
   | 'waiting'
@@ -699,6 +876,8 @@ export interface TraceStateSnapshot {
   protocolLab?: TraceProtocolLabSnapshot
   /** Present only for the model-6 GC/Storage vertical slice. */
   gcLab?: TraceGcLabSnapshot
+  /** Present only for the model-7 TiFlash learner and MPP vertical slice. */
+  tiflashMppLab?: TraceTiFlashMppLabSnapshot
 }
 
 export type TraceStateDelta =
@@ -1004,6 +1183,116 @@ export type TraceStateDelta =
     safePoint: number
     filteredVersionIds: readonly string[]
     retainedAnchorIds: readonly string[]
+  }>
+  | Readonly<{
+    kind: 'tiflash_replica_raft_commit'
+    regionId: number
+    index: number
+  }>
+  | Readonly<{
+    kind: 'tiflash_replica_receive'
+    regionId: number
+    index: number
+    replicationMode: 'raft_log'
+  }>
+  | Readonly<{
+    kind: 'tiflash_replica_apply'
+    regionId: number
+    index: number
+  }>
+  | Readonly<{
+    kind: 'tiflash_replica_dm_flush'
+    regionId: number
+    index: number
+    aggregateVersionCount: number
+  }>
+  | Readonly<{
+    kind: 'tiflash_replica_applied_advance'
+    regionId: number
+    from: number
+    to: number
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_query_received'
+    queryToken: 'query-mpp-1'
+    queryClass: 'grouped_aggregate'
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_snapshot_tso'
+    timestamp: number
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_safe_ts_update'
+    regionId: number
+    leaderSafeTs: number
+    selfSafeTs: number
+    lagBucket: TraceTiFlashMppLearnerSnapshot['safeTsLagBucket']
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_provisioning_observed'
+    available: true
+    progress: 1
+    meaning: 'placement_only_not_snapshot_readiness'
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_access_path'
+    selected: true
+    optimizerMode: 'allow_mpp_costed'
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_fragments_build'
+    fragmentCount: 2
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_regions_schedule'
+    regionCount: 3
+    storeCount: 2
+    policy: 'group_regions_by_tiflash_address'
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_tasks_build'
+    taskCount: 4
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_tunnels_build'
+    hashTunnelCount: 4
+    rootTunnelCount: 2
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_task_stage'
+    taskId: TraceTiFlashMppTaskId
+    from: TraceTiFlashMppTaskStage
+    to: TraceTiFlashMppTaskStage
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_snapshot_gate'
+    regionId: number
+    action:
+      | 'check_safe_ts'
+      | 'ready_safe_ts'
+      | 'request_read_index'
+      | 'return_read_index'
+      | 'wait_applied'
+      | 'ready_read_index'
+      | 'lock_check'
+      | 'post_read_validate'
+    requiredReadIndex?: number
+    lockCount?: number
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_tunnel_data'
+    tunnelId: TraceTiFlashMppTunnelId
+    action: 'send' | 'receive'
+    packetCount: number
+    bytesBucket: 'small'
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_result_stage'
+    from: TraceTiFlashMppLabSnapshot['result']['stage']
+    to: TraceTiFlashMppLabSnapshot['result']['stage']
+    rootStreamCount: number
+    chunksDecoded: number
+    rowsBucket: TraceTiFlashMppLabSnapshot['result']['rowsBucket']
   }>
 
 export interface TraceEvent {
