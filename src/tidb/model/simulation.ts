@@ -29,6 +29,12 @@ import {
   reduceProtocolLabState,
 } from './protocol-lab'
 import {
+  createGcLabState,
+  freezeGcLabSnapshot,
+  isGcLabDelta,
+  reduceGcLabState,
+} from './gc-lab'
+import {
   clonePeers,
   createRegions,
   createTopology,
@@ -56,6 +62,7 @@ import type {
   TraceDomain,
   TraceEvent,
   TraceEventStatus,
+  TraceGcLabSnapshot,
   TraceLockLabSnapshot,
   TraceMetadataValue,
   TraceOutcome,
@@ -87,7 +94,7 @@ export const DEFAULT_TIDB_CONTROLS: Readonly<TiDBControls> = Object.freeze({
   commitProtocol: 'auto',
   readPolicy: 'leader',
   regionSplitThresholdMiB: 96,
-  gcLifetimeSeconds: 60,
+  gcLifetimeSeconds: 600,
   networkLatencyMs: 12,
   tiflashLagSeconds: 1.5,
   playbackSpeed: 1,
@@ -181,6 +188,13 @@ function freezeTraceDelta(delta: TraceStateDelta): TraceStateDelta {
       cycleTransactionIds: Object.freeze([...delta.cycleTransactionIds]),
     })
   }
+  if (delta.kind === 'gc_compaction_filter') {
+    return Object.freeze({
+      ...delta,
+      filteredVersionIds: Object.freeze([...delta.filteredVersionIds]),
+      retainedAnchorIds: Object.freeze([...delta.retainedAnchorIds]),
+    })
+  }
   return Object.freeze({ ...delta })
 }
 
@@ -210,6 +224,9 @@ function freezeTraceSnapshot(snapshot: TraceStateSnapshot): TraceStateSnapshot {
       : {}),
     ...(snapshot.protocolLab
       ? { protocolLab: freezeProtocolLabSnapshot(snapshot.protocolLab) }
+      : {}),
+    ...(snapshot.gcLab
+      ? { gcLab: freezeGcLabSnapshot(snapshot.gcLab) }
       : {}),
   })
 }
@@ -5319,6 +5336,1009 @@ export function createTiDBSimulation(
     )
   }
 
+  /**
+   * Model-6 GC/Storage Lab. The two rounds pin the TiDB/TiKV v8.5.0
+   * Compaction Filter profile: the first candidate is capped to the oldest
+   * reported start_ts minus one; after that fixture transaction completes,
+   * the second candidate advances without that bound. Resolve Locks,
+   * Delete Ranges, global safe-point publication, and asynchronous storage
+   * compaction remain separate stages.
+   */
+  function traceDetailedGcStorage(
+    id: string,
+    analysis: SqlAnalysis,
+    builder: TraceBuilder,
+    warnings: string[],
+  ): TraceReceipt {
+    const initialSafePoint = TSO_BASE
+    const blockerStartTs = TSO_BASE + 80_000
+    const blockedCandidate = TSO_BASE + 180_000
+    const blockedSafePoint = blockerStartTs - 1
+    const releasedCandidate = TSO_BASE + 220_000
+    const regionIds = [8, 20] as const
+    const regions = regionIds.map((regionId) => {
+      const region = state.regions.find((candidate) => candidate.id === regionId)
+      if (!region) throw new Error(`GC/Storage Lab requires Region ${regionId}.`)
+      return region
+    })
+    const byRegionId = new Map(regions.map((region) => [region.id, region]))
+    const storeIds = state.topology.tikv.map((store) => store.id) as StoreId[]
+    if (
+      storeIds.length !== 3 ||
+      new Set(storeIds).size !== 3
+    ) {
+      throw new Error('GC/Storage Lab requires exactly three TiKV stores.')
+    }
+
+    state.tso.lastAllocated = Math.max(
+      state.tso.lastAllocated,
+      TSO_BASE + 1_000_000,
+    )
+    let gcLab: TraceGcLabSnapshot = createGcLabState({
+      initialSafePoint,
+      blockerTransactionId: 'txn-gc-blocker',
+      blockerStartTs,
+      storeIds,
+      locks: [
+        {
+          id: 'stale-lock-a',
+          regionId: 8,
+          startTs: TSO_BASE + 30_000,
+          primaryStatus: 'committed',
+        },
+        {
+          id: 'stale-lock-b',
+          regionId: 20,
+          startTs: TSO_BASE + 55_000,
+          primaryStatus: 'rolled_back',
+        },
+      ],
+      deleteRanges: [{
+        id: 'dropped-range-a',
+        dropTs: TSO_BASE + 50_000,
+      }],
+      keyChains: [
+        {
+          id: 'chain-a',
+          regionId: 8,
+          versions: [
+            {
+              id: 'a-v1',
+              commitTs: TSO_BASE + 20_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+            {
+              id: 'a-v2',
+              commitTs: TSO_BASE + 60_000,
+              writeType: 'put',
+              valueStorage: 'write_cf_inline',
+            },
+            {
+              id: 'a-v3',
+              commitTs: TSO_BASE + 110_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+            {
+              id: 'a-v4',
+              commitTs: TSO_BASE + 260_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+          ],
+        },
+        {
+          id: 'chain-b',
+          regionId: 8,
+          versions: [
+            {
+              id: 'b-v1',
+              commitTs: TSO_BASE + 30_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+            {
+              id: 'b-v2',
+              commitTs: TSO_BASE + 70_000,
+              writeType: 'delete',
+              valueStorage: 'write_cf_only',
+            },
+            {
+              id: 'b-v3',
+              commitTs: TSO_BASE + 250_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+          ],
+        },
+        {
+          id: 'chain-c',
+          regionId: 20,
+          versions: [
+            {
+              id: 'c-v1',
+              commitTs: TSO_BASE + 90_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+            {
+              id: 'c-v2',
+              commitTs: TSO_BASE + 150_000,
+              writeType: 'put',
+              valueStorage: 'write_and_default_cf',
+            },
+            {
+              id: 'c-v3',
+              commitTs: TSO_BASE + 280_000,
+              writeType: 'put',
+              valueStorage: 'write_cf_inline',
+            },
+          ],
+        },
+        {
+          id: 'chain-d',
+          regionId: 20,
+          versions: [
+            {
+              id: 'd-v1',
+              commitTs: TSO_BASE + 40_000,
+              writeType: 'rollback',
+              valueStorage: 'write_cf_only',
+            },
+            {
+              id: 'd-v2',
+              commitTs: TSO_BASE + 50_000,
+              writeType: 'put',
+              valueStorage: 'write_cf_inline',
+            },
+          ],
+        },
+      ],
+    })
+
+    function projection(): TraceStateSnapshot {
+      return freezeTraceSnapshot({
+        modelVersion: state.modelVersion,
+        tsoLastAllocated: state.tso.lastAllocated,
+        transaction: null,
+        regions: [],
+        gcLab,
+      })
+    }
+
+    function addGcEvent(
+      kind: string,
+      label: string,
+      detail: string,
+      options: EventOptions = {},
+    ): TraceEvent {
+      const deltas = options.deltas ?? []
+      for (const delta of deltas) {
+        if (isGcLabDelta(delta)) {
+          gcLab = reduceGcLabState(gcLab, delta)
+        }
+      }
+      return builder.add('kv', kind, label, detail, {
+        ...options,
+        snapshot: projection(),
+        deltas,
+      })
+    }
+
+    const roundOneStart = addGcEvent(
+      'gc_round_start',
+      'TiDB GC leader started round 1',
+      'The elected TiDB GC leader begins a deterministic v8.5.0 teaching round; this is not a SQL transaction.',
+      {
+        source: 'gc-worker',
+        target: 'tidb-1',
+        deltas: [{
+          kind: 'gc_phase',
+          round: 1,
+          from: 'idle',
+          to: 'preparing',
+        }],
+        metadata: {
+          round: 1,
+          runIntervalSeconds: 600,
+          gcLeaderLeaseStore: 'mysql.tidb',
+          modelTiming: true,
+        },
+      },
+    )
+    const roundOneCandidate = addGcEvent(
+      'gc_safe_point_candidate',
+      'Lifetime produced a candidate safe point',
+      'The model candidate represents oracle time minus tidb_gc_life_time; numeric TSO spacing is stretched for teaching.',
+      {
+        source: 'tidb-1',
+        target: 'pd-1',
+        dependsOn: [roundOneStart.id],
+        deltas: [{
+          kind: 'gc_safe_point_candidate',
+          round: 1,
+          previous: initialSafePoint,
+          candidate: blockedCandidate,
+        }],
+        metadata: {
+          previousSafePoint: initialSafePoint,
+          candidateSafePoint: blockedCandidate,
+          lifeTimeSeconds: 600,
+          modelTiming: true,
+        },
+      },
+    )
+    const roundOneBound = addGcEvent(
+      'gc_min_start_ts_bound',
+      'Global min start_ts capped the candidate',
+      'Each TiDB reports a bounded minimum start_ts. The oldest active fixture is within max wait, so the allowed value is start_ts - 1.',
+      {
+        status: 'warning',
+        source: 'tidb-2',
+        target: 'gc-worker',
+        dependsOn: [roundOneCandidate.id],
+        transactionId: gcLab.blocker.transactionId,
+        deltas: [{
+          kind: 'gc_safe_point_bound',
+          round: 1,
+          globalMinStartTs: blockerStartTs,
+          activeTransactionBound: blockedSafePoint,
+          serviceSafePoint: blockedSafePoint,
+          blocked: true,
+        }],
+        metadata: {
+          candidateSafePoint: blockedCandidate,
+          globalMinStartTs: blockerStartTs,
+          activeTransactionBound: blockedSafePoint,
+          gcMaxWaitSeconds: 86_400,
+          killsTransaction: false,
+        },
+      },
+    )
+    const roundOneService = addGcEvent(
+      'gc_service_safe_point',
+      'PD service minimum accepted the bound',
+      'The GC worker registers its service safe point. This fixture has no BR, CDC, or other service requesting an older value.',
+      {
+        source: 'gc-worker',
+        target: 'pd-1',
+        dependsOn: [roundOneBound.id],
+        deltas: [{
+          kind: 'gc_phase',
+          round: 1,
+          from: 'preparing',
+          to: 'safe_point_bounded',
+        }],
+        metadata: {
+          requestedSafePoint: blockedSafePoint,
+          minimumServiceSafePoint: blockedSafePoint,
+          externalServiceBlocker: false,
+        },
+      },
+    )
+    const roundOneStage = addGcEvent(
+      'gc_mysql_safe_point_staged',
+      'TiDB staged tikv_gc_safe_point',
+      'Before starting the GC job, TiDB writes the human-readable mysql.tidb status value; it is not PD’s actual global GC point.',
+      {
+        source: 'tidb-1',
+        target: 'gc-worker',
+        dependsOn: [roundOneService.id],
+        deltas: [{
+          kind: 'gc_safe_point_stage',
+          safePoint: blockedSafePoint,
+        }],
+        metadata: {
+          store: 'mysql.tidb',
+          variableName: 'tikv_gc_safe_point',
+          pdGlobalPublished: false,
+        },
+      },
+    )
+    const roundOneResolveStart = addGcEvent(
+      'gc_resolve_locks_start',
+      'Region ScanLock resolution started',
+      'TiDB v8.5.0 scans locks before the bounded safe point across all Regions. The cutaway expands two representative Regions.',
+      {
+        source: 'gc-worker',
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        dependsOn: [roundOneStage.id],
+        deltas: [{
+          kind: 'gc_phase',
+          round: 1,
+          from: 'safe_point_bounded',
+          to: 'resolving_locks',
+        }],
+        metadata: {
+          scanLockImplementation: 'REGION_SCAN_LOCK',
+          scanLockModeVariableUsed: false,
+          physicalScanLockAvailable: false,
+          representativeRegions: 2,
+        },
+      },
+    )
+    const roundOneScanEight = addGcEvent(
+      'gc_resolve_locks_scan',
+      'Region 8 returned an old lock',
+      'The GC leader checks the primary status before resolving the synthetic lock; no key bytes are retained.',
+      {
+        source: 'gc-worker',
+        target: byRegionId.get(8)?.leaderStoreId,
+        regionId: 8,
+        dependsOn: [roundOneResolveStart.id],
+        branchId: 'resolve-region-8',
+        deltas: [{
+          kind: 'gc_resolve_lock_scan',
+          regionId: 8,
+        }],
+        metadata: { locksFound: 1, safePoint: blockedSafePoint },
+      },
+    )
+    const roundOneResolveCommit = addGcEvent(
+      'gc_resolve_lock_commit',
+      'Committed primary resolved lock A',
+      'The primary status is committed, so the representative old secondary is resolved as committed.',
+      {
+        source: byRegionId.get(8)?.leaderStoreId,
+        target: 'gc-worker',
+        regionId: 8,
+        dependsOn: [roundOneScanEight.id],
+        branchId: 'resolve-region-8',
+        deltas: [{
+          kind: 'gc_resolve_lock',
+          lockId: 'stale-lock-a',
+          action: 'commit',
+        }],
+        metadata: {
+          lockId: 'stale-lock-a',
+          primaryStatus: 'committed',
+          normalTiKvWriteCommand: true,
+          resolveLockRaftDetailModeled: false,
+        },
+      },
+    )
+    const roundOneScanTwenty = addGcEvent(
+      'gc_resolve_locks_scan',
+      'Region 20 returned an old lock',
+      'A second representative Region is scanned independently through the pinned Region ScanLock implementation.',
+      {
+        source: 'gc-worker',
+        target: byRegionId.get(20)?.leaderStoreId,
+        regionId: 20,
+        dependsOn: [roundOneResolveStart.id],
+        presentationAfter: roundOneResolveCommit.id,
+        branchId: 'resolve-region-20',
+        deltas: [{
+          kind: 'gc_resolve_lock_scan',
+          regionId: 20,
+        }],
+        metadata: { locksFound: 1, safePoint: blockedSafePoint },
+      },
+    )
+    const roundOneResolveRollback = addGcEvent(
+      'gc_resolve_lock_rollback',
+      'Rolled-back primary resolved lock B',
+      'The primary status is rolled back, so the representative old secondary lock is rolled back.',
+      {
+        source: byRegionId.get(20)?.leaderStoreId,
+        target: 'gc-worker',
+        regionId: 20,
+        dependsOn: [roundOneScanTwenty.id],
+        branchId: 'resolve-region-20',
+        deltas: [{
+          kind: 'gc_resolve_lock',
+          lockId: 'stale-lock-b',
+          action: 'rollback',
+        }],
+        metadata: {
+          lockId: 'stale-lock-b',
+          primaryStatus: 'rolled_back',
+          normalTiKvWriteCommand: true,
+          resolveLockRaftDetailModeled: false,
+        },
+      },
+    )
+    const roundOneCache = addGcEvent(
+      'gc_visibility_safe_point_saved',
+      'Saved safe point became visible to TiDB caches',
+      'After Resolve Locks, TiDB saves the safe point and observes the implementation cache barrier before range deletion.',
+      {
+        source: 'gc-worker',
+        target: 'pd-1',
+        dependsOn: [roundOneResolveCommit.id, roundOneResolveRollback.id],
+        deltas: [
+          {
+            kind: 'gc_phase',
+            round: 1,
+            from: 'resolving_locks',
+            to: 'caching_safe_point',
+          },
+          {
+            kind: 'gc_visibility_safe_point_save',
+            safePoint: blockedSafePoint,
+          },
+        ],
+        metadata: {
+          savedSafePoint: blockedSafePoint,
+          implementationCacheBarrierSeconds: 100,
+          liveTimingGuarantee: false,
+        },
+      },
+    )
+    const roundOneDeleteStart = addGcEvent(
+      'gc_delete_ranges_start',
+      'Delete Ranges found one eligible DDL range',
+      'A synthetic dropped range with drop_ts below the safe point becomes eligible; this is separate from per-key MVCC filtering.',
+      {
+        source: 'gc-worker',
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        dependsOn: [roundOneCache.id],
+        deltas: [
+          {
+            kind: 'gc_phase',
+            round: 1,
+            from: 'caching_safe_point',
+            to: 'deleting_ranges',
+          },
+          {
+            kind: 'gc_delete_range',
+            rangeId: 'dropped-range-a',
+            action: 'mark_eligible',
+          },
+        ],
+        metadata: {
+          rangeId: 'dropped-range-a',
+          actualKeyRangeRetained: false,
+          eligibleRanges: 1,
+        },
+      },
+    )
+    let deleteRangePresentationAfter: string | undefined
+    const roundOneDeleteStores = storeIds.map((storeId) => {
+      const event = addGcEvent(
+        'gc_delete_range_store',
+        `${storeId} received UnsafeDestroyRange`,
+        'The pinned classic raftstore-v1 fixture sends the synthetic whole-range request to every relevant store and bypasses Region Raft.',
+        {
+          source: 'gc-worker',
+          target: storeId,
+          dependsOn: [roundOneDeleteStart.id],
+          ...(deleteRangePresentationAfter
+            ? { presentationAfter: deleteRangePresentationAfter }
+            : {}),
+          branchId: `delete-range-${storeId}`,
+          metadata: {
+            rangeId: 'dropped-range-a',
+            raftstoreMode: 'v1_classic',
+            request: 'UnsafeDestroyRange',
+            bypassesRaft: true,
+            actualKeyRangeRetained: false,
+          },
+        },
+      )
+      deleteRangePresentationAfter = event.id
+      return event
+    })
+    const roundOneDeleteComplete = addGcEvent(
+      'gc_delete_range_complete',
+      'All relevant stores completed the range deletion',
+      'The classic raftstore-v1 fan-out joins after direct RocksDB range deletion; TiCity never retains the destroyed key boundaries.',
+      {
+        source: 'gc-worker',
+        target: 'gc-worker',
+        dependsOn: roundOneDeleteStores.map((event) => event.id),
+        deltas: [{
+          kind: 'gc_delete_range',
+          rangeId: 'dropped-range-a',
+          action: 'delete',
+        }],
+        metadata: {
+          rangeId: 'dropped-range-a',
+          physicalRangeDelete: true,
+          raftstoreMode: 'v1_classic',
+          storeFanout: 3,
+          bypassesRaft: true,
+        },
+      },
+    )
+    const roundOnePublish = addGcEvent(
+      'gc_global_safe_point_publish',
+      'TiDB published the global safe point to PD',
+      'Distributed Do GC ends on the coordinator path here. TiKV detects the greater value and storage cleanup continues asynchronously.',
+      {
+        source: 'gc-worker',
+        target: 'pd-1',
+        dependsOn: [roundOneDeleteComplete.id],
+        deltas: [
+          {
+            kind: 'gc_phase',
+            round: 1,
+            from: 'deleting_ranges',
+            to: 'publishing_safe_point',
+          },
+          {
+            kind: 'gc_safe_point_publish',
+            safePoint: blockedSafePoint,
+          },
+        ],
+        metadata: {
+          safePoint: blockedSafePoint,
+          distributedGc: true,
+          coordinatorCompleteAfterPublish: true,
+        },
+      },
+    )
+
+    function storeDetectionEvents(
+      round: 1 | 2,
+      safePoint: number,
+      parent: TraceEvent,
+      previousPresentation: TraceEvent | null,
+    ): readonly TraceEvent[] {
+      let presentationAfter = previousPresentation?.id
+      return storeIds.map((storeId, index) => {
+        const event = addGcEvent(
+          'gc_store_safe_point_detected',
+          `${storeId} detected the greater safe point`,
+          'The local TiKV GC manager observes PD. With the v8.5.0 default Compaction Filter enabled, it does not schedule the legacy per-Region Do GC loop.',
+          {
+            source: 'pd-1',
+            target: storeId,
+            dependsOn: [parent.id],
+            ...(presentationAfter ? { presentationAfter } : {}),
+            path: 'background',
+            branchId: `round-${round}-${storeId}`,
+            deltas: [
+              ...(index === 0
+                ? [{
+                  kind: 'gc_phase' as const,
+                  round,
+                  from: 'publishing_safe_point' as const,
+                  to: 'tikv_observing' as const,
+                }]
+                : []),
+              {
+                kind: 'gc_store_safe_point' as const,
+                storeId,
+                safePoint,
+              },
+            ],
+            metadata: {
+              storeId,
+              safePoint,
+              compactionFilterEnabled: true,
+              legacyRegionGcScheduled: false,
+            },
+          },
+        )
+        presentationAfter = event.id
+        return event
+      })
+    }
+
+    function compactionEvents(
+      round: 1 | 2,
+      safePoint: number,
+      detections: readonly TraceEvent[],
+      filteredVersionIds: readonly string[],
+      retainedAnchorIds: readonly string[],
+      finishPhase: 'between_rounds' | 'complete',
+    ): TraceEvent {
+      const started = addGcEvent(
+        'gc_compaction_filter_start',
+        'RocksDB bottommost compaction opened GC filters',
+        'All three stores are shown as active, while the version board counts one logical chain projection rather than multiplying replica copies.',
+        {
+          source: storeIds[0],
+          target: 'gc-worker',
+          dependsOn: detections.map((event) => event.id),
+          path: 'background',
+          deltas: [
+            {
+              kind: 'gc_phase',
+              round,
+              from: 'tikv_observing',
+              to: 'compacting',
+            },
+            ...storeIds.map((storeId) => ({
+              kind: 'gc_compaction_state' as const,
+              storeId,
+              from: 'eligible' as const,
+              to: 'running' as const,
+            })),
+          ],
+          metadata: {
+            compactionLevel: 'bottommost_model_fixture',
+            stores: 3,
+            versionCountsMultipliedByReplicas: false,
+            liveCompactionTimingGuarantee: false,
+          },
+        },
+      )
+      const filtered = addGcEvent(
+        'gc_compaction_filter_apply',
+        'Compaction Filter removed obsolete MVCC records',
+        'Rollback/Lock records are discarded, a last Put at or below the safe point is retained as the snapshot anchor, and a last Delete can remove the whole old chain.',
+        {
+          source: storeIds[0],
+          target: 'gc-worker',
+          dependsOn: [started.id],
+          path: 'background',
+          deltas: [{
+            kind: 'gc_compaction_filter',
+            safePoint,
+            filteredVersionIds,
+            retainedAnchorIds,
+          }],
+          metadata: {
+            filteredVersionsThisRound: filteredVersionIds.length,
+            retainedAnchors: retainedAnchorIds.length,
+            safePointInclusiveInPinnedSource: true,
+            logicalProjectionOnly: true,
+          },
+        },
+      )
+      const storageComplete = addGcEvent(
+        'gc_compaction_filter_complete',
+        'All representative store filters completed',
+        'The filtered SST output and corresponding long-value deletions make this physical storage step distinct from safe-point publication.',
+        {
+          source: storeIds[0],
+          target: 'gc-worker',
+          dependsOn: [filtered.id],
+          path: 'background',
+          deltas: storeIds.map((storeId) => ({
+            kind: 'gc_compaction_state' as const,
+            storeId,
+            from: 'running' as const,
+            to: 'complete' as const,
+          })),
+          metadata: {
+            totalFilteredVersions: gcLab.storage.filteredVersionCount,
+            compactionRaftEntriesCreated: 0,
+            foregroundSqlBlocked: false,
+          },
+        },
+      )
+      return addGcEvent(
+        round === 1 ? 'gc_round_complete' : 'gc_storage_lab_complete',
+        round === 1
+          ? 'Round 1 completed behind the blocker'
+          : 'GC/Storage Lab completed',
+        round === 1
+          ? 'The safe point advanced only to start_ts - 1. The active fixture still protects its required snapshot.'
+          : 'The second safe point is published and both representative storage rounds have completed. Compaction filtering itself creates no Raft entry.',
+        {
+          source: 'gc-worker',
+          target: 'tidb-1',
+          dependsOn: [storageComplete.id],
+          path: 'background',
+          deltas: [{
+            kind: 'gc_phase',
+            round,
+            from: 'compacting',
+            to: finishPhase,
+          }],
+          metadata: {
+            round,
+            safePoint,
+            filteredVersions: gcLab.storage.filteredVersionCount,
+            retainedAnchors: gcLab.storage.retainedAnchorCount,
+            compactionRaftEntriesCreated: 0,
+          },
+        },
+      )
+    }
+
+    const roundOneDetections = storeDetectionEvents(
+      1,
+      blockedSafePoint,
+      roundOnePublish,
+      null,
+    )
+    const roundOneComplete = compactionEvents(
+      1,
+      blockedSafePoint,
+      roundOneDetections,
+      ['a-v1', 'b-v1', 'b-v2', 'd-v1'],
+      ['a-v2', 'd-v2'],
+      'between_rounds',
+    )
+    const blockerComplete = addGcEvent(
+      'gc_blocker_complete',
+      'The teaching blocker completed',
+      'This is an explicit fixture boundary. Its transaction commit protocol is deliberately not replayed inside the GC mechanism slice.',
+      {
+        source: 'tidb-2',
+        target: 'gc-worker',
+        dependsOn: [roundOneComplete.id],
+        transactionId: gcLab.blocker.transactionId,
+        deltas: [{
+          kind: 'gc_blocker_state',
+          from: 'active',
+          to: 'completed',
+        }],
+        metadata: {
+          transactionId: gcLab.blocker.transactionId,
+          transactionProtocolReplayed: false,
+          killedByGcMaxWait: false,
+        },
+      },
+    )
+    const roundTwoStart = addGcEvent(
+      'gc_round_start',
+      'TiDB GC leader started round 2',
+      'A later deterministic run starts after the blocker completes; previous immutable snapshots remain unchanged.',
+      {
+        source: 'gc-worker',
+        target: 'tidb-1',
+        dependsOn: [blockerComplete.id],
+        deltas: [{
+          kind: 'gc_phase',
+          round: 2,
+          from: 'between_rounds',
+          to: 'preparing',
+        }],
+        metadata: {
+          round: 2,
+          priorPublishedSafePoint: blockedSafePoint,
+        },
+      },
+    )
+    const roundTwoCandidate = addGcEvent(
+      'gc_safe_point_candidate',
+      'Lifetime produced the next candidate',
+      'The candidate is greater than the first published safe point and remains a synthetic model timestamp.',
+      {
+        source: 'tidb-1',
+        target: 'pd-1',
+        dependsOn: [roundTwoStart.id],
+        deltas: [{
+          kind: 'gc_safe_point_candidate',
+          round: 2,
+          previous: blockedSafePoint,
+          candidate: releasedCandidate,
+        }],
+        metadata: {
+          previousSafePoint: blockedSafePoint,
+          candidateSafePoint: releasedCandidate,
+          lifeTimeSeconds: 600,
+        },
+      },
+    )
+    const roundTwoBound = addGcEvent(
+      'gc_min_start_ts_clear',
+      'No active transaction capped the candidate',
+      'No reported active start_ts is older than the candidate in this fixture, and no external service requests an earlier point.',
+      {
+        source: 'tidb-2',
+        target: 'gc-worker',
+        dependsOn: [roundTwoCandidate.id],
+        deltas: [{
+          kind: 'gc_safe_point_bound',
+          round: 2,
+          globalMinStartTs: null,
+          activeTransactionBound: null,
+          serviceSafePoint: releasedCandidate,
+          blocked: false,
+        }],
+        metadata: {
+          candidateSafePoint: releasedCandidate,
+          activeTransactionBlocker: false,
+          externalServiceBlocker: false,
+        },
+      },
+    )
+    const roundTwoService = addGcEvent(
+      'gc_service_safe_point',
+      'PD service minimum accepted the candidate',
+      'With no lower service constraint in this fixed fixture, the candidate becomes the round safe point.',
+      {
+        source: 'gc-worker',
+        target: 'pd-1',
+        dependsOn: [roundTwoBound.id],
+        deltas: [{
+          kind: 'gc_phase',
+          round: 2,
+          from: 'preparing',
+          to: 'safe_point_bounded',
+        }],
+        metadata: {
+          requestedSafePoint: releasedCandidate,
+          minimumServiceSafePoint: releasedCandidate,
+        },
+      },
+    )
+    const roundTwoStage = addGcEvent(
+      'gc_mysql_safe_point_staged',
+      'TiDB staged the later tikv_gc_safe_point',
+      'The mysql.tidb status value advances before round 2 starts; PD global publication still happens only after the coordinator stages.',
+      {
+        source: 'tidb-1',
+        target: 'gc-worker',
+        dependsOn: [roundTwoService.id],
+        deltas: [{
+          kind: 'gc_safe_point_stage',
+          safePoint: releasedCandidate,
+        }],
+        metadata: {
+          store: 'mysql.tidb',
+          variableName: 'tikv_gc_safe_point',
+          pdGlobalPublished: false,
+        },
+      },
+    )
+    const roundTwoResolveStart = addGcEvent(
+      'gc_resolve_locks_start',
+      'Region ScanLock resolution started round 2',
+      'The same two representative Regions are scanned; the prior round left no unresolved fixture locks.',
+      {
+        source: 'gc-worker',
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        dependsOn: [roundTwoStage.id],
+        deltas: [{
+          kind: 'gc_phase',
+          round: 2,
+          from: 'safe_point_bounded',
+          to: 'resolving_locks',
+        }],
+        metadata: {
+          scanLockImplementation: 'REGION_SCAN_LOCK',
+          scanLockModeVariableUsed: false,
+          physicalScanLockAvailable: false,
+          unresolvedFixtureLocks: 0,
+        },
+      },
+    )
+    const roundTwoScanEight = addGcEvent(
+      'gc_resolve_locks_scan',
+      'Region 8 scan found no old fixture locks',
+      'Resolve Locks remains a prerequisite even when this representative Region has nothing left to resolve.',
+      {
+        source: 'gc-worker',
+        target: byRegionId.get(8)?.leaderStoreId,
+        regionId: 8,
+        dependsOn: [roundTwoResolveStart.id],
+        branchId: 'round-2-resolve-region-8',
+        deltas: [{
+          kind: 'gc_resolve_lock_scan',
+          regionId: 8,
+        }],
+        metadata: { locksFound: 0, safePoint: releasedCandidate },
+      },
+    )
+    const roundTwoScanTwenty = addGcEvent(
+      'gc_resolve_locks_scan',
+      'Region 20 scan found no old fixture locks',
+      'The second representative Region also returns an empty old-lock set.',
+      {
+        source: 'gc-worker',
+        target: byRegionId.get(20)?.leaderStoreId,
+        regionId: 20,
+        dependsOn: [roundTwoResolveStart.id],
+        presentationAfter: roundTwoScanEight.id,
+        branchId: 'round-2-resolve-region-20',
+        deltas: [{
+          kind: 'gc_resolve_lock_scan',
+          regionId: 20,
+        }],
+        metadata: { locksFound: 0, safePoint: releasedCandidate },
+      },
+    )
+    const roundTwoCache = addGcEvent(
+      'gc_visibility_safe_point_saved',
+      'The later safe point became cache-visible',
+      'TiDB saves the accepted value after Resolve Locks and crosses the cache barrier before Delete Ranges.',
+      {
+        source: 'gc-worker',
+        target: 'pd-1',
+        dependsOn: [roundTwoScanEight.id, roundTwoScanTwenty.id],
+        deltas: [
+          {
+            kind: 'gc_phase',
+            round: 2,
+            from: 'resolving_locks',
+            to: 'caching_safe_point',
+          },
+          {
+            kind: 'gc_visibility_safe_point_save',
+            safePoint: releasedCandidate,
+          },
+        ],
+        metadata: {
+          savedSafePoint: releasedCandidate,
+          implementationCacheBarrierSeconds: 100,
+          liveTimingGuarantee: false,
+        },
+      },
+    )
+    const roundTwoDelete = addGcEvent(
+      'gc_delete_ranges_empty',
+      'Delete Ranges had no pending fixture task',
+      'The first round already completed the synthetic DDL range; no per-key GC work is folded into this stage.',
+      {
+        source: 'gc-worker',
+        target: regions[0].leaderStoreId,
+        dependsOn: [roundTwoCache.id],
+        deltas: [{
+          kind: 'gc_phase',
+          round: 2,
+          from: 'caching_safe_point',
+          to: 'deleting_ranges',
+        }],
+        metadata: {
+          eligibleRanges: 0,
+          mvccFilteringPerformed: false,
+        },
+      },
+    )
+    const roundTwoPublish = addGcEvent(
+      'gc_global_safe_point_publish',
+      'TiDB published the later global safe point',
+      'PD accepts the monotonic value; the coordinator can finish while TiKV storage work proceeds asynchronously.',
+      {
+        source: 'gc-worker',
+        target: 'pd-1',
+        dependsOn: [roundTwoDelete.id],
+        deltas: [
+          {
+            kind: 'gc_phase',
+            round: 2,
+            from: 'deleting_ranges',
+            to: 'publishing_safe_point',
+          },
+          {
+            kind: 'gc_safe_point_publish',
+            safePoint: releasedCandidate,
+          },
+        ],
+        metadata: {
+          safePoint: releasedCandidate,
+          distributedGc: true,
+        },
+      },
+    )
+    const roundTwoDetections = storeDetectionEvents(
+      2,
+      releasedCandidate,
+      roundTwoPublish,
+      null,
+    )
+    compactionEvents(
+      2,
+      releasedCandidate,
+      roundTwoDetections,
+      ['a-v2', 'c-v1'],
+      ['a-v3', 'c-v2', 'd-v2'],
+      'complete',
+    )
+
+    state.gc.safePoint = gcLab.safePoint.published
+    state.gc.blockedByStartTs = null
+    state.gc.obsoleteVersions = 0
+    state.gc.collectedVersions = gcLab.storage.filteredVersionCount
+    state.gc.backlog = 0
+    state.metrics.gcRuns += 2
+    warnings.push(
+      'GC/Storage Lab uses synthetic TSO spacing, aggregate logical chains, and a bottommost-compaction fixture; it is not a live timing or disk-usage measurement.',
+    )
+    return recordReceipt(
+      id,
+      'gc-safe-point',
+      analysis,
+      null,
+      null,
+      'succeeded',
+      null,
+      builder,
+      warnings,
+    )
+  }
+
   function traceWrite(
     id: string,
     request: TraceRequest,
@@ -5802,6 +6822,14 @@ export function createTiDBSimulation(
     if (analysis.readOnly) {
       return traceRead(id, analysis, scenarioId, regions, builder, warnings)
     }
+    if (scenarioId === 'gc-safe-point') {
+      return traceDetailedGcStorage(
+        id,
+        analysis,
+        builder,
+        warnings,
+      )
+    }
     if (scenarioId === 'commit-protocols') {
       return traceDetailedCommitProtocols(
         id,
@@ -5861,7 +6889,7 @@ export function createTiDBSimulation(
         qps: [0, 5_000],
         writeRatio: [0, 1],
         regionSplitThresholdMiB: [8, 512],
-        gcLifetimeSeconds: [1, 86_400],
+        gcLifetimeSeconds: [600, 31_536_000],
         networkLatencyMs: [0, 5_000],
         tiflashLagSeconds: [0, 3_600],
         playbackSpeed: [0.1, 20],
@@ -5901,23 +6929,6 @@ export function createTiDBSimulation(
         hot.sizeMiB = state.controls.regionSplitThresholdMiB + 8
         hot.hotScore = 100
       }
-    } else if (id === 'gc-safe-point') {
-      const oldStart = allocateTs()
-      const blocker: TransactionState = {
-        id: `txn-${++transactionCounter}`,
-        mode: 'pessimistic',
-        protocol: '2pc',
-        startTs: oldStart,
-        commitTs: null,
-        regionIds: [8],
-        primaryRegionId: 8,
-        phase: 'active',
-        conflict: false,
-      }
-      state.transactions.push(blocker)
-      state.gc.obsoleteVersions = 1_000
-      state.gc.backlog = 1_000
-      advanceGc()
     }
 
     const analysis = analyzeSql(scenario.sql)
