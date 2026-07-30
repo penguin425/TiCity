@@ -268,6 +268,7 @@ interface DiagnoseCopy {
     available: string
     waiting: string
     lag: string
+    regionGatesWaiting: string
   }
   charts: {
     nodes: string
@@ -276,6 +277,7 @@ interface DiagnoseCopy {
     transactions: string
     gc: string
     tiflash: string
+    tiflashRegionGates: string
   }
 }
 
@@ -313,6 +315,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       available: '利用可能',
       waiting: '追従待ち',
       lag: 'lag',
+      regionGatesWaiting: 'Region gate待機',
     },
     charts: {
       nodes: 'モデル内ノードの状態分布',
@@ -321,6 +324,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       transactions: 'transaction状態',
       gc: 'GC version数の比較',
       tiflash: 'TiFlash複製進捗',
+      tiflashRegionGates: 'Region別TiFlash snapshot gateのreadiness',
     },
   },
   en: {
@@ -356,6 +360,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       available: 'Available',
       waiting: 'Catching up',
       lag: 'lag',
+      regionGatesWaiting: 'Region gates waiting',
     },
     charts: {
       nodes: 'Modeled node status distribution',
@@ -364,6 +369,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       transactions: 'Transaction states',
       gc: 'GC version count comparison',
       tiflash: 'TiFlash replication progress',
+      tiflashRegionGates: 'Per-Region TiFlash snapshot-gate readiness',
     },
   },
 }
@@ -1647,6 +1653,7 @@ function tiflashMppTunnelRows(
       exchangeType: value(tunnel.exchangeType),
       sourceTask: value(tunnel.sourceTaskId),
       targetTask: value(tunnel.targetTaskId),
+      locality: value(tunnel.locality),
       state: value(tunnel.status),
       packetCount: value(tunnel.packetCount),
       bytesBucket: value(tunnel.bytesBucket),
@@ -1884,6 +1891,41 @@ function gcRows(state: Record<string, unknown>): DiagnosticRow[] {
 }
 
 function tiflashRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const lab = tiflashMppLabState(state)
+  if (Object.keys(lab).length > 0) {
+    const configuration = record(lab.configuration)
+    const learners = array(lab.learners).map(record)
+    const readyGateStates = new Set([
+      'ready',
+      'mvcc_checked',
+      'validated',
+    ])
+    const readyRegions = learners.filter((learner) =>
+      readyGateStates.has(value(learner.readGate))).length
+    const totalRegions = learners.length
+    const waitingRegions = totalRegions - readyRegions
+    const provisioningAvailable =
+      booleanValue(value(configuration.provisioningAvailable)) === true
+    const readReady =
+      provisioningAvailable &&
+      totalRegions > 0 &&
+      waitingRegions === 0
+    return [{
+      readReady: value(readReady),
+      readyRegions: value(readyRegions),
+      totalRegions: value(totalRegions),
+      waitingRegions: value(waitingRegions),
+      progress: value(
+        totalRegions > 0 ? readyRegions / totalRegions : 0,
+      ),
+      readinessSource: 'per_region_snapshot_gates',
+      lagUnit: 'waiting_region_gate_count_not_seconds',
+      provisioningAvailable: value(provisioningAvailable),
+      provisioningProgress: value(configuration.provisioningProgress),
+      provisioningMeaning: value(configuration.provisioningMeaning),
+    }]
+  }
+
   const tiflash = record(state.tiflash)
   if (Object.keys(tiflash).length === 0) return []
   return [{
@@ -2064,9 +2106,13 @@ function rowTone(section: DiagnoseSection, row: DiagnosticRow): SummaryTone {
     if (hasValue(row.blockedBy)) return 'critical'
     return (numberValue(row.backlog) ?? 0) > 0 ? 'attention' : 'healthy'
   }
-  const available = booleanValue(row.available)
-  if (available === false) return 'attention'
-  return (numberValue(row.lagSeconds) ?? 0) > 0 ? 'attention' : available === true ? 'healthy' : 'neutral'
+  if (section === 'tiflash') {
+    const available = booleanValue(row.readReady ?? row.available)
+    const lag = numberValue(row.waitingRegions ?? row.lagSeconds) ?? 0
+    if (available === false || lag > 0) return 'attention'
+    return available === true ? 'healthy' : 'neutral'
+  }
+  return 'neutral'
 }
 
 function projectionTone(projection: DiagnosticProjection): SummaryTone {
@@ -2158,8 +2204,20 @@ function createDiagnosticSummary(
     numberValue(gcRow?.collectedVersions) ?? 0,
   ]
 
-  const tiflashAvailable = booleanValue(tiflashRow?.available)
-  const tiflashLag = numberValue(tiflashRow?.lagSeconds) ?? 0
+  const tiflashUsesRegionGates =
+    tiflashRow?.readinessSource === 'per_region_snapshot_gates'
+  const tiflashAvailable = booleanValue(
+    tiflashUsesRegionGates
+      ? tiflashRow?.readReady
+      : tiflashRow?.available,
+  )
+  const tiflashLag = numberValue(
+    tiflashUsesRegionGates
+      ? tiflashRow?.waitingRegions
+      : tiflashRow?.lagSeconds,
+  ) ?? 0
+  const tiflashReadyRegions = numberValue(tiflashRow?.readyRegions) ?? 0
+  const tiflashTotalRegions = numberValue(tiflashRow?.totalRegions) ?? 0
   const explicitProgress = numberValue(tiflashRow?.progress)
   const resolvedTs = numberValue(tiflashRow?.resolvedTs)
   const targetTs = numberValue(tiflashRow?.targetTs)
@@ -2238,14 +2296,20 @@ function createDiagnosticSummary(
       id: 'tiflash',
       label: copy.metrics.tiflash,
       value: tiflashRow
-        ? tiflashAvailable === true
-          ? copy.detail.available
-          : copy.detail.waiting
+        ? tiflashUsesRegionGates
+          ? `${tiflashReadyRegions}/${tiflashTotalRegions}`
+          : tiflashAvailable === true
+            ? copy.detail.available
+            : copy.detail.waiting
         : '—',
-      detail: `${tiflashLag} ${copy.detail.lag}`,
+      detail: tiflashUsesRegionGates
+        ? `${tiflashLag} ${copy.detail.regionGatesWaiting}`
+        : `${tiflashLag} ${copy.detail.lag}`,
       tone: tiflashTone,
       chart: [chartDatum(progress, tiflashTone)],
-      chartLabel: copy.charts.tiflash,
+      chartLabel: tiflashUsesRegionGates
+        ? copy.charts.tiflashRegionGates
+        : copy.charts.tiflash,
       meter: true,
     },
   ]
@@ -2426,7 +2490,7 @@ function cellTone(
     if (health === 'degraded') return 'attention'
     return health === 'healthy' ? 'healthy' : 'neutral'
   }
-  if (column === 'available') {
+  if (column === 'available' || column === 'readReady') {
     const available = booleanValue(raw)
     return available === true ? 'healthy' : available === false ? 'attention' : 'neutral'
   }
@@ -2438,7 +2502,12 @@ function cellTone(
     const score = numberValue(raw) ?? 0
     return score > 0 ? 'attention' : 'neutral'
   }
-  if (column === 'backlog' || column === 'lagSeconds' || column === 'pendingVersions') {
+  if (
+    column === 'backlog' ||
+    column === 'lagSeconds' ||
+    column === 'pendingVersions' ||
+    column === 'waitingRegions'
+  ) {
     return (numberValue(raw) ?? 0) > 0 ? 'attention' : 'neutral'
   }
   if (column === 'blockedBy') return hasValue(raw) ? 'critical' : 'neutral'

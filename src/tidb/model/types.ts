@@ -1222,7 +1222,7 @@ export type TraceStateDelta =
     timestamp: number
   }>
   | Readonly<{
-    kind: 'tiflash_mpp_safe_ts_update'
+    kind: 'tiflash_mpp_safe_ts_observed'
     regionId: number
     leaderSafeTs: number
     selfSafeTs: number

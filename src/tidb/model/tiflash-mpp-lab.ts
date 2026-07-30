@@ -30,7 +30,7 @@ export type TiFlashMppLabDelta = Extract<
       | 'tiflash_replica_applied_advance'
       | 'tiflash_mpp_query_received'
       | 'tiflash_mpp_snapshot_tso'
-      | 'tiflash_mpp_safe_ts_update'
+      | 'tiflash_mpp_safe_ts_observed'
       | 'tiflash_mpp_provisioning_observed'
       | 'tiflash_mpp_access_path'
       | 'tiflash_mpp_fragments_build'
@@ -588,7 +588,15 @@ export function freezeTiFlashMppLabSnapshot(
   })
 }
 
-export function createTiFlashMppLabState(): TraceTiFlashMppLabSnapshot {
+export function createTiFlashMppLabState(
+  preexistingLeaderSafeTs = 1_000_000_001,
+): TraceTiFlashMppLabSnapshot {
+  invariant(
+    Number.isSafeInteger(preexistingLeaderSafeTs) &&
+      preexistingLeaderSafeTs > 2_001,
+    'pre-existing leader safe-ts must be a positive safe integer',
+  )
+  const laggingSelfSafeTs = preexistingLeaderSafeTs - 2_001
   const snapshot = freezeTiFlashMppLabSnapshot({
     phase: 'replicating',
     pins: PINNED_COMMITS,
@@ -609,9 +617,11 @@ export function createTiFlashMppLabState(): TraceTiFlashMppLabSnapshot {
       learnerRaftCommandIndex: definition.baselineIndex,
       deltaMergeFlushedIndex: definition.baselineIndex,
       learnerAppliedIndex: definition.baselineIndex,
-      leaderSafeTs: 999_998_000,
-      selfSafeTs: 999_998_000,
-      safeTsLagBucket: 'none',
+      leaderSafeTs: preexistingLeaderSafeTs,
+      selfSafeTs: definition.regionId === 24
+        ? preexistingLeaderSafeTs
+        : laggingSelfSafeTs,
+      safeTsLagBucket: definition.regionId === 24 ? 'none' : 'about_2s',
       requiredReadIndex: null,
       readGate: 'unchecked',
       gateReason: null,
@@ -724,31 +734,19 @@ export function reduceTiFlashMppLabState(
   } else if (delta.kind === 'tiflash_mpp_snapshot_tso') {
     invariant(snapshotTs === null && delta.timestamp > 0, 'snapshot TSO may be allocated once')
     snapshotTs = delta.timestamp
-  } else if (delta.kind === 'tiflash_mpp_safe_ts_update') {
+  } else if (delta.kind === 'tiflash_mpp_safe_ts_observed') {
     const learner = learnerByRegion(state, delta.regionId)
     invariant(
-      delta.leaderSafeTs >= learner.leaderSafeTs &&
-        delta.selfSafeTs >= learner.selfSafeTs &&
-        delta.selfSafeTs <= delta.leaderSafeTs,
-      'safe-ts updates must be monotonic and ordered',
+      delta.leaderSafeTs === learner.leaderSafeTs &&
+        delta.selfSafeTs === learner.selfSafeTs,
+      'safe-ts observation cannot mutate the pre-existing read state',
     )
     invariant(
-      delta.lagBucket ===
-        (delta.selfSafeTs === delta.leaderSafeTs ? 'none' : 'about_2s'),
+      delta.lagBucket === learner.safeTsLagBucket &&
+        delta.lagBucket ===
+          (delta.selfSafeTs === delta.leaderSafeTs ? 'none' : 'about_2s'),
       'safe-ts lag bucket disagrees with timestamps',
     )
-    if (delta.selfSafeTs > learner.selfSafeTs) {
-      invariant(
-        learner.learnerAppliedIndex === learner.leaderCommitIndex,
-        'self safe-ts cannot advance before its associated data is applied',
-      )
-    }
-    learners = replaceLearner(learners, delta.regionId, (candidate) => ({
-      ...candidate,
-      leaderSafeTs: delta.leaderSafeTs,
-      selfSafeTs: delta.selfSafeTs,
-      safeTsLagBucket: delta.lagBucket,
-    }))
   } else if (delta.kind === 'tiflash_mpp_provisioning_observed') {
     invariant(
       !provisioningObserved &&

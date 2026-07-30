@@ -154,9 +154,10 @@ function detailedSnapshot(): TraceTiFlashMppLabSnapshot {
         readGate: 'waiting_applied',
       }),
       learner(24, 'tiflash-1', {
-        requiredReadIndex: 130,
+        requiredReadIndex: null,
         readGate: 'ready',
-        gateReason: 'read_index_applied',
+        gateReason: 'self_safe_ts',
+        readIndexSkipped: true,
       }),
       learner(25, 'tiflash-2', {
         requiredReadIndex: null,
@@ -285,7 +286,7 @@ describe('TiFlash MPP Lab model-to-world projection', () => {
         regionId: 24,
         storeSlot: 0,
         gateState: 'ready',
-        gateReason: 'applied_index_ready',
+        gateReason: 'self_safe_ts',
       },
       {
         regionId: 25,
