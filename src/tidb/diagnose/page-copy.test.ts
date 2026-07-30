@@ -89,6 +89,22 @@ describe('Diagnose page copy', () => {
     }
   })
 
+  it('localizes every model-7 TiFlash/MPP event without changing English', () => {
+    const events = createTiDBSimulation({ seed: 425 })
+      .runScenario('tiflash-mpp')
+      .events
+    expect(events).toHaveLength(56)
+    for (const candidate of events) {
+      expect(diagnoseEventName('en', candidate)).toBe(candidate.label)
+      expect(diagnoseEventName('ja', candidate)).not.toBe(candidate.label)
+    }
+    const applied = events.find((candidate) =>
+      candidate.id === 'trace-1-event-37')
+    expect(applied?.kind).toBe('tiflash_learner_applied_advance')
+    expect(applied && diagnoseEventName('ja', applied))
+      .toBe('Region 26 learnerのapplied indexが前進')
+  })
+
   it('marks snapshotless event options and explains the cursor rule visibly', () => {
     const cursor: DiagnoseCursor = {
       event,

@@ -1164,4 +1164,105 @@ describe('TiCity Machine replay', () => {
     expect(slot.getAttribute('aria-hidden')).toBe('true')
     expect(slot.children).toHaveLength(0)
   })
+
+  it('renders the exact model-7 TiFlash learner and MPP topology at event 37', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('tiflash-mpp')
+    const event = receipt.events.find((candidate) =>
+      candidate.id === 'trace-1-event-37')
+    if (!event?.snapshot?.tiflashMppLab) {
+      throw new Error('Expected the Region 26 applied-index snapshot.')
+    }
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt,
+      initialEventId: event.id,
+    })
+
+    const lab = root.querySelector('[data-tiflash-mpp-machine-state="true"]')
+    expect(lab?.getAttribute('data-tiflash-mpp-event-id')).toBe(event.id)
+    expect(lab?.getAttribute('data-tiflash-mpp-model')).toBe('model-7')
+    expect(root.querySelectorAll('[data-tiflash-learner-region]')).toHaveLength(3)
+    expect(root.querySelectorAll('[data-mpp-fragment]')).toHaveLength(2)
+    expect(root.querySelectorAll('[data-mpp-task]')).toHaveLength(4)
+    expect(root.querySelectorAll('[data-mpp-tunnel]')).toHaveLength(6)
+    expect(root.querySelectorAll('[data-mpp-persistent="false"]')).toHaveLength(6)
+    expect(root.querySelectorAll('[data-tiflash-learner-voter="false"]'))
+      .toHaveLength(3)
+    expect(root.querySelector(
+      '[data-tiflash-learner-region="26"][data-applied-index="261"]',
+    )).not.toBeNull()
+    expect(root.querySelector(
+      '[data-tiflash-learner-region="26"][data-tiflash-read-gate="waiting_applied"]',
+    )).not.toBeNull()
+    expect(root.querySelector(
+      '[data-tiflash-mpp-semantic-graph="fragment-task"]',
+    )?.getAttribute('data-causal-dag-replaced')).toBe('false')
+    expect(root.querySelector(
+      '[data-provisioning-means-read-ready="false"]',
+    )).not.toBeNull()
+    expect(root.querySelector('[data-mpp-root-task="tidb-root"]')
+      ?.getAttribute('data-mpp-retry-count')).toBe('0')
+    expect(root.querySelector('[data-mpp-root-task="tidb-root"]')
+      ?.getAttribute('data-mpp-fallback')).toBe('false')
+    expect(lab?.textContent).not.toMatch(
+      /SELECT\s|GROUP BY|SQL_DIGEST|inventory|customer/i,
+    )
+  })
+
+  it('clears the TiFlash/MPP slot when replay leaves an event-owned snapshot', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('tiflash-mpp')
+    const detailed = receipt.events.find((candidate) =>
+      candidate.id === 'trace-1-event-37')
+    if (!detailed) throw new Error('Expected a detailed TiFlash event.')
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      initialIndex: 0,
+      receipt: {
+        id: 'tiflash-slot-lifecycle',
+        events: [
+          {
+            id: 'plain-event',
+            atMs: 0,
+            durationMs: 1,
+            domain: 'sql',
+            kind: 'plain',
+            label: 'Plain event',
+            detail: '',
+          },
+          {
+            ...detailed,
+            id: 'tiflash-event',
+          },
+        ],
+      },
+    })
+
+    const slot = root.querySelector(
+      '.tidb-machine__tiflash-slot',
+    ) as unknown as HTMLElement
+    expect(slot.hidden).toBe(true)
+    expect(root.querySelector('[data-event-id="plain-event"]')
+      ?.getAttribute('data-event-has-tiflash-mpp-snapshot')).toBe('false')
+    expect(root.querySelector('[data-event-id="tiflash-event"]')
+      ?.getAttribute('data-event-has-tiflash-mpp-snapshot')).toBe('true')
+
+    root.querySelector('[data-event-id="tiflash-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(slot.hidden).toBe(false)
+    expect(slot.querySelector('[data-tiflash-mpp-machine-state="true"]'))
+      .not.toBeNull()
+
+    root.querySelector('[data-event-id="plain-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(slot.hidden).toBe(true)
+    expect(slot.children).toHaveLength(0)
+  })
 })

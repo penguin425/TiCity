@@ -32,7 +32,7 @@ export const MACHINE_PAGE_COPY: Readonly<Record<Locale, MachinePageCopy>> = {
       'hotspot-split': 'hotspot、split、rebalance',
       'tikv-failover': 'TiKV障害とleader election',
       'gc-safe-point': '長時間transactionとGC safe point',
-      'tiflash-mpp': 'TiFlash catch-upとMPP',
+      'tiflash-mpp': 'TiFlash learner複製とMPP Exchange',
     },
   },
   en: {
@@ -46,7 +46,7 @@ export const MACHINE_PAGE_COPY: Readonly<Record<Locale, MachinePageCopy>> = {
       'hotspot-split': 'Hotspot, split, and rebalance',
       'tikv-failover': 'TiKV failure and leader election',
       'gc-safe-point': 'Long transaction and GC safe point',
-      'tiflash-mpp': 'TiFlash catch-up and MPP',
+      'tiflash-mpp': 'TiFlash learner replication and MPP Exchange',
     },
   },
 }

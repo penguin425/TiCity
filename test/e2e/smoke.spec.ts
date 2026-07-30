@@ -9,6 +9,10 @@ const pages = [
   { path: '/diagnose/', title: /Diagnose · TiCity/ },
 ] as const
 
+const TIFLASH_MPP_SCENARIO = 'tiflash-mpp'
+const TIFLASH_MPP_TRANSITION_EVENT = 'trace-1-event-37'
+const TIFLASH_MPP_FINAL_EVENT = 'trace-1-event-56'
+
 async function expectNoSeriousAccessibilityViolations(page: Page) {
   const result = await new AxeBuilder({ page }).analyze()
   const violations = result.violations.filter(({ impact }) =>
@@ -1009,6 +1013,547 @@ test('GC/Storage Lab Diagnose preserves the exact Compaction Filter snapshot', a
     'en',
   )
   await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('TiFlash/MPP Lab keeps the exact learner-apply cursor responsive and loops one immutable receipt', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(
+    `/?lang=en&scenario=${TIFLASH_MPP_SCENARIO}` +
+    `&event=${TIFLASH_MPP_TRANSITION_EVENT}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', {
+    timeout: 15_000,
+  })
+
+  const layout = page.locator('.tidb-layout')
+  const lab = page.locator('[data-tiflash-mpp-lab]')
+  const dock = page.locator('[data-trace-dock]')
+  await expect(layout).toHaveAttribute('data-active-lab', 'tiflash-mpp')
+  await expect(layout).toHaveAttribute('data-inspect', 'open')
+  await expect(lab).toBeVisible()
+  await expect(lab).toHaveAttribute('tabindex', '0')
+  await expect(lab).toHaveAttribute(
+    'data-tiflash-mpp-phase',
+    'snapshot_gating',
+  )
+  await expect(lab).toHaveAttribute(
+    'data-result-representation',
+    'aggregate_counts_only',
+  )
+  await expect(lab).toHaveAttribute('data-result-rows-projected', 'false')
+  await lab.focus()
+  await expect(lab).toBeFocused()
+
+  const storeMetric = lab.locator(
+    '.tidb-tiflash-mpp-lab__provisioning ' +
+    '.tidb-tiflash-mpp-lab__metric',
+  ).filter({ hasText: 'TiFlash stores' })
+  await expect(storeMetric.locator('dd')).toHaveText('2')
+  await expect(lab.locator('[data-region-id]')).toHaveCount(3)
+  await expect(lab.locator(
+    '.tidb-tiflash-mpp-lab__fragment[data-fragment-id]',
+  )).toHaveCount(2)
+  await expect(lab.locator('[data-task-id]')).toHaveCount(4)
+  await expect(lab.locator('[data-tunnel-id]')).toHaveCount(6)
+
+  const region26 = lab.locator(
+    '[data-region-id="26"][data-read-gate="waiting_applied"]',
+  )
+  await expect(region26).toHaveAttribute('data-gate-reason', 'none')
+  await expect(region26).toContainText('261')
+  await expect(region26).toContainText(
+    'Applied index reached required ReadIndex',
+  )
+
+  const planes = lab.locator('.tidb-tiflash-mpp-lab__planes')
+  await expect(planes).toContainText('persistent_region_raft')
+  await expect(planes).toContainText('ephemeral_query_blocks')
+  await expect(planes).toContainText(
+    'Persistent Region Raft replication and per-query ephemeral MPP block exchange are separate paths.',
+  )
+
+  await expect(page.locator('[data-transaction-lab]')).toBeHidden()
+  await expect(page.locator('[data-lock-lab]')).toBeHidden()
+  await expect(page.locator('[data-raft-lab]')).toBeHidden()
+  await expect(page.locator('[data-protocol-lab]')).toBeHidden()
+  await expect(page.locator('[data-gc-storage-lab]')).toBeHidden()
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  await expect(dock).toHaveAttribute('data-event-index', '36')
+  await expect(dock).toHaveAttribute('data-event-count', '56')
+  await expect(dock).toHaveAttribute('data-looping', 'true')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  await expect.poll(async () =>
+    page.evaluate(() => {
+      const city = window.TICITY.world?.shell.city
+      if (!city) return null
+      return {
+        tiflashVisible: city.tiflashMppLab.object.visible,
+        transactionVisible: city.transactionLab.object.visible,
+        lockVisible: city.lockLab.object.visible,
+        raftVisible: city.raftLab.object.visible,
+        protocolVisible: city.protocolLab.object.visible,
+        gcVisible: city.gcStorageLab.object.visible,
+        capacities: {
+          stores: city.tiflashMppLab.debug.resources.storeCapacity,
+          learners: city.tiflashMppLab.debug.resources.learnerCapacity,
+          tasks: city.tiflashMppLab.debug.resources.taskCapacity,
+          tunnels: city.tiflashMppLab.debug.resources.tunnelCapacity,
+        },
+      }
+    })).toEqual({
+      tiflashVisible: true,
+      transactionVisible: false,
+      lockVisible: false,
+      raftVisible: false,
+      protocolVisible: false,
+      gcVisible: false,
+      capacities: {
+        stores: 2,
+        learners: 3,
+        tasks: 4,
+        tunnels: 6,
+      },
+    })
+
+  expect(new URL(page.url()).searchParams.get('scenario'))
+    .toBe(TIFLASH_MPP_SCENARIO)
+  expect(new URL(page.url()).searchParams.get('event'))
+    .toBe(TIFLASH_MPP_TRANSITION_EVENT)
+  await expectTraceLink(
+    page,
+    '.tidb-topbar [data-nav="machine"]',
+    TIFLASH_MPP_SCENARIO,
+    TIFLASH_MPP_TRANSITION_EVENT,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-topbar [data-nav="diagnose"]',
+    TIFLASH_MPP_SCENARIO,
+    TIFLASH_MPP_TRANSITION_EVENT,
+    'en',
+  )
+
+  await expect(lab.locator('.tidb-tiflash-mpp-lab__privacy')).toContainText(
+    'SQL text, literals, real or encoded keys, values, rows, and result rows are neither retained nor projected.',
+  )
+  const receiptPrivacy = await page.evaluate(() => {
+    const receipt = window.TICITY.trace
+    if (!receipt) throw new Error('Expected the TiFlash/MPP receipt.')
+    const serialized = JSON.stringify(receipt.events)
+    const forbiddenPayloadFields: string[] = []
+    const visit = (value: unknown, path = 'events'): void => {
+      if (!value || typeof value !== 'object') return
+      for (const [key, nested] of Object.entries(value)) {
+        const nextPath = `${path}.${key}`
+        if (
+          /^(?:sql|sqlText|statement|literal|address|host|key|encodedKey|value|row|resultRow|resultRows)$/i
+            .test(key)
+        ) {
+          forbiddenPayloadFields.push(nextPath)
+        }
+        visit(nested, nextPath)
+      }
+    }
+    visit(receipt.events)
+    const retainedValues = receipt.events.flatMap((event) => {
+      const metadata = event.metadata ?? {}
+      return [
+        metadata.rowValuesRetained,
+        metadata.resultValuesRetained,
+        metadata.exactValuesRetained,
+      ].filter((value) => value !== undefined)
+    })
+    return {
+      forbiddenPayloadFields,
+      networkAddress:
+        /(?:\d{1,3}\.){3}\d{1,3}:\d+|https?:\/\//i.test(serialized),
+      retainedValues,
+    }
+  })
+  expect(receiptPrivacy).toEqual({
+    forbiddenPayloadFields: [],
+    networkAddress: false,
+    retainedValues: [false, false, false],
+  })
+
+  const [labBox, dockBox] = await Promise.all([
+    lab.boundingBox(),
+    dock.boundingBox(),
+  ])
+  expect(labBox).not.toBeNull()
+  expect(dockBox).not.toBeNull()
+  if (!labBox || !dockBox) {
+    throw new Error('TiFlash/MPP Lab overlays have no layout box')
+  }
+  expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true)
+  await expectNoSeriousAccessibilityViolations(page)
+
+  const loop = await page.evaluate(() => {
+    const receipt = window.TICITY.trace
+    const world = window.TICITY.world
+    if (!receipt || !world) {
+      throw new Error('Expected an active TiFlash/MPP receipt and world.')
+    }
+    const serializedBefore = JSON.stringify(receipt)
+    const finalBefore = receipt.events.at(-1)?.snapshot?.tiflashMppLab
+    world.shell.stop()
+    const flows = world.shell.flows
+    flows.replay()
+    flows.update(flows.playback.durationMs / 1_000 + 1)
+    const holding = {
+      phase: flows.playback.phase,
+      atEnd: flows.playback.atEnd,
+      iteration: flows.playback.iteration,
+    }
+    flows.update(3)
+    const finalAfter = window.TICITY.trace?.events.at(-1)
+      ?.snapshot?.tiflashMppLab
+    return {
+      holding,
+      looped: {
+        phase: flows.playback.phase,
+        atEnd: flows.playback.atEnd,
+        iteration: flows.playback.iteration,
+        currentIndex: flows.playback.currentIndex,
+      },
+      sameReceiptReference: window.TICITY.trace === receipt,
+      sameReceiptValue: JSON.stringify(window.TICITY.trace) === serializedBefore,
+      sameFinalSnapshotReference: finalAfter === finalBefore,
+      receiptFrozen:
+        Object.isFrozen(receipt.events) &&
+        Object.isFrozen(finalBefore) &&
+        Object.isFrozen(finalBefore?.learners),
+      finalState: {
+        phase: finalAfter?.phase,
+        appliedIndexes: finalAfter?.learners.map((learner) =>
+          learner.learnerAppliedIndex),
+        clientComplete: finalAfter?.result.clientComplete,
+      },
+    }
+  })
+  expect(loop.holding).toEqual({
+    phase: 'holding',
+    atEnd: true,
+    iteration: 1,
+  })
+  expect(loop.looped).toEqual({
+    phase: 'playing',
+    atEnd: false,
+    iteration: 2,
+    currentIndex: 0,
+  })
+  expect(loop.sameReceiptReference).toBe(true)
+  expect(loop.sameReceiptValue).toBe(true)
+  expect(loop.sameFinalSnapshotReference).toBe(true)
+  expect(loop.receiptFrozen).toBe(true)
+  expect(loop.finalState).toEqual({
+    phase: 'complete',
+    appliedIndexes: [241, 251, 261],
+    clientComplete: true,
+  })
+  await expect(dock).toHaveAttribute('data-iteration', '2')
+})
+
+test('TiFlash/MPP Machine separates the causal DAG from the fragment-task graph', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(
+    `/machine/?lang=en&scenario=${TIFLASH_MPP_SCENARIO}` +
+    `&event=${TIFLASH_MPP_TRANSITION_EVENT}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  expect(new URL(page.url()).searchParams.get('event'))
+    .toBe(TIFLASH_MPP_TRANSITION_EVENT)
+
+  const current = page.locator('[data-event-index][aria-current="step"]')
+  await expect(current).toHaveAttribute('data-event-index', '36')
+  await expect(current).toHaveAttribute('data-event-domain', 'tiflash')
+  await expect(current).toHaveAttribute(
+    'data-event-kind',
+    'tiflash_learner_applied_advance',
+  )
+  await expect(current).toHaveAttribute(
+    'data-event-has-tiflash-mpp-snapshot',
+    'true',
+  )
+
+  const causal = page.locator('[data-graph-kind="causal-dag"]')
+  const state = page.locator('[data-tiflash-mpp-machine-state="true"]')
+  const semantic = state.locator(
+    '[data-tiflash-mpp-semantic-graph="fragment-task"]',
+  )
+  await expect(causal).toBeVisible()
+  await expect(state).toHaveAttribute(
+    'data-tiflash-mpp-event-id',
+    TIFLASH_MPP_TRANSITION_EVENT,
+  )
+  await expect(state).toHaveAttribute(
+    'data-tiflash-mpp-event-kind',
+    'tiflash_learner_applied_advance',
+  )
+  await expect(state).toHaveAttribute(
+    'data-tiflash-mpp-phase',
+    'snapshot_gating',
+  )
+  await expect(state).toHaveAttribute('data-tiflash-mpp-model', 'model-7')
+  await expect(semantic).toBeVisible()
+  await expect(semantic).toHaveAttribute('tabindex', '0')
+  await expect(semantic).toHaveAttribute(
+    'data-causal-dag-replaced',
+    'false',
+  )
+  await expect(semantic).toHaveAttribute('data-fragment-count', '2')
+  await expect(semantic).toHaveAttribute('data-task-count', '4')
+  await expect(semantic).toHaveAttribute('data-tunnel-count', '6')
+  await semantic.focus()
+  await expect(semantic).toBeFocused()
+  await expect(causal.locator('[data-tiflash-mpp-semantic-graph]'))
+    .toHaveCount(0)
+
+  const replication = state.locator(
+    '[data-tiflash-plane="persistent_region_raft"]',
+  )
+  await expect(replication).toBeVisible()
+  await expect(replication).toHaveAttribute(
+    'data-initial-snapshot-modeled',
+    'false',
+  )
+  await expect(replication.locator('[data-tiflash-learner-region]'))
+    .toHaveCount(3)
+  await expect(replication.locator(
+    '[data-tiflash-learner-region="26"]' +
+    '[data-tiflash-read-gate="waiting_applied"]' +
+    '[data-applied-index="261"]' +
+    '[data-required-read-index="261"]',
+  )).toHaveCount(1)
+  await expect(semantic.locator('[data-mpp-fragment]')).toHaveCount(2)
+  await expect(semantic.locator('[data-mpp-task]')).toHaveCount(4)
+  await expect(semantic.locator(
+    '[data-mpp-tunnel][data-mpp-persistent="false"]',
+  )).toHaveCount(6)
+  await expect(state.locator('.tidb-machine__tiflash-boundary')).toContainText(
+    'MPP Exchange carries ephemeral query blocks and never changes Raft or MVCC state.',
+  )
+  await expect(state.locator('.tidb-machine__tiflash-boundary')).toContainText(
+    'no raw SQL, address, real key/value, group value, result row, session ID, or production TSO is retained.',
+  )
+
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="city"]',
+    TIFLASH_MPP_SCENARIO,
+    TIFLASH_MPP_TRANSITION_EVENT,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="diagnose"]',
+    TIFLASH_MPP_SCENARIO,
+    TIFLASH_MPP_TRANSITION_EVENT,
+    'en',
+  )
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true)
+  await expectNoSeriousAccessibilityViolations(page)
+
+  await page.goto(
+    `/machine/?lang=en&scenario=${TIFLASH_MPP_SCENARIO}` +
+    `&event=${TIFLASH_MPP_FINAL_EVENT}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  const finalCurrent = page.locator(
+    '[data-event-index][aria-current="step"]',
+  )
+  await expect(finalCurrent).toHaveAttribute('data-event-index', '55')
+  await expect(finalCurrent).toHaveAttribute(
+    'data-event-kind',
+    'tiflash_client_query_complete',
+  )
+  const finalState = page.locator(
+    '[data-tiflash-mpp-machine-state="true"]',
+  )
+  await expect(finalState).toHaveAttribute('data-tiflash-mpp-phase', 'complete')
+  await expect(finalState.locator(
+    '[data-mpp-task][data-mpp-task-stage="complete"]',
+  )).toHaveCount(4)
+  await expect(finalState.locator(
+    '[data-mpp-tunnel][data-mpp-tunnel-state="received"]',
+  )).toHaveCount(6)
+  await expect(finalState.locator('.tidb-machine__tiflash-root'))
+    .toHaveAttribute('data-mpp-result-stage', 'client_complete')
+  await expect(finalState.locator('.tidb-machine__tiflash-root'))
+    .toHaveAttribute('data-mpp-client-complete', 'true')
+  await expect(finalState.locator('.tidb-machine__tiflash-root'))
+    .toHaveAttribute('data-mpp-retry-count', '0')
+  await expect(finalState.locator('.tidb-machine__tiflash-root'))
+    .toHaveAttribute('data-mpp-fallback', 'false')
+})
+
+test('TiFlash/MPP Diagnose preserves exact rows, final completion, and invalid-event fallback', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(
+    `/diagnose/?lang=en&scenario=${TIFLASH_MPP_SCENARIO}` +
+    `&event=${TIFLASH_MPP_TRANSITION_EVENT}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(TIFLASH_MPP_TRANSITION_EVENT)
+  await expect(page.locator('.tidb-diagnose')).toHaveAttribute(
+    'data-active-lab',
+    'tiflash-mpp',
+  )
+
+  const replication = page.locator(
+    '[data-table-section="tiflash-replication"]',
+  )
+  const gates = page.locator(
+    '[data-table-section="tiflash-read-gates"]',
+  )
+  const tasks = page.locator(
+    '[data-table-section="tiflash-mpp-tasks"]',
+  )
+  const tunnels = page.locator(
+    '[data-table-section="tiflash-mpp-tunnels"]',
+  )
+  const root = page.locator(
+    '[data-table-section="tiflash-mpp-root"]',
+  )
+  await expect(replication.locator('tbody tr')).toHaveCount(3)
+  await expect(gates.locator('tbody tr')).toHaveCount(3)
+  await expect(tasks.locator('tbody tr')).toHaveCount(4)
+  await expect(tunnels.locator('tbody tr')).toHaveCount(6)
+  await expect(root.locator('tbody tr')).toHaveCount(1)
+
+  const region26Replication = replication.locator('tbody tr').nth(2)
+  await expect(region26Replication.locator(
+    '[data-column="learnerAppliedIndex"]',
+  )).toHaveText('261')
+  await expect(region26Replication.locator(
+    '[data-column="replicationPlane"]',
+  )).toHaveText('persistent_region_raft')
+  await expect(region26Replication.locator(
+    '[data-column="exchangeMutation"]',
+  )).toHaveText('false')
+  const region26Gate = gates.locator('tbody tr').nth(2)
+  await expect(region26Gate.locator('[data-column="gateState"]'))
+    .toHaveText('waiting_applied')
+  await expect(region26Gate.locator(
+    '[data-column="requiredReadIndex"]',
+  )).toHaveText('261')
+  await expect(region26Gate.locator(
+    '[data-column="learnerAppliedIndex"]',
+  )).toHaveText('261')
+  await expect(tunnels.locator('[data-column="exchangePlane"]'))
+    .toHaveText([
+      'ephemeral_query_blocks',
+      'ephemeral_query_blocks',
+      'ephemeral_query_blocks',
+      'ephemeral_query_blocks',
+      'ephemeral_query_blocks',
+      'ephemeral_query_blocks',
+    ])
+  await expect(tunnels.locator('[data-column="raftOrMvccMutation"]'))
+    .toHaveText(['false', 'false', 'false', 'false', 'false', 'false'])
+  await expect(root.locator('[data-column="phase"]'))
+    .toContainText('snapshot_gating')
+  await expect(root.locator('[data-column="resultStage"]'))
+    .toHaveText('idle')
+  await expect(root.locator('[data-column="clientComplete"]'))
+    .toHaveText('false')
+
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="machine"]',
+    TIFLASH_MPP_SCENARIO,
+    TIFLASH_MPP_TRANSITION_EVENT,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="city"]',
+    TIFLASH_MPP_SCENARIO,
+    TIFLASH_MPP_TRANSITION_EVENT,
+    'en',
+  )
+  expect(new URL(page.url()).searchParams.get('event'))
+    .toBe(TIFLASH_MPP_TRANSITION_EVENT)
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true)
+  await expectNoSeriousAccessibilityViolations(page)
+
+  await page.goto(
+    `/diagnose/?lang=en&scenario=${TIFLASH_MPP_SCENARIO}` +
+    `&event=${TIFLASH_MPP_FINAL_EVENT}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(TIFLASH_MPP_FINAL_EVENT)
+  const finalTasks = page.locator(
+    '[data-table-section="tiflash-mpp-tasks"]',
+  )
+  const finalTunnels = page.locator(
+    '[data-table-section="tiflash-mpp-tunnels"]',
+  )
+  const finalRoot = page.locator(
+    '[data-table-section="tiflash-mpp-root"]',
+  )
+  await expect(finalTasks.locator('[data-column="stage"]'))
+    .toHaveText(['complete', 'complete', 'complete', 'complete'])
+  await expect(finalTunnels.locator('[data-column="state"]'))
+    .toHaveText([
+      'received',
+      'received',
+      'received',
+      'received',
+      'received',
+      'received',
+    ])
+  await expect(finalRoot.locator('[data-column="phase"]'))
+    .toContainText('complete')
+  await expect(finalRoot.locator('[data-column="resultStage"]'))
+    .toHaveText('client_complete')
+  await expect(finalRoot.locator('[data-column="rootStreams"]'))
+    .toHaveText('2')
+  await expect(finalRoot.locator('[data-column="clientComplete"]'))
+    .toHaveText('true')
+  await expect(finalRoot.locator('[data-column="retryCount"]'))
+    .toHaveText('0')
+  await expect(finalRoot.locator('[data-column="fallbackToTiKV"]'))
+    .toHaveText('false')
+
+  const invalidEvent = 'trace-1-event-999'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=${TIFLASH_MPP_SCENARIO}` +
+    `&event=${invalidEvent}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue('')
+  await expect(page.locator('.tidb-diagnose-cursor-note'))
+    .toHaveAttribute('data-cursor-resolution', 'final')
+  await expect(page.locator(
+    '[data-table-section="tiflash-mpp-root"] ' +
+    '[data-column="clientComplete"]',
+  )).toHaveText('true')
+  expect(new URL(page.url()).searchParams.get('event')).toBe(invalidEvent)
 })
 
 test('desktop controls start collapsed and toggle the panel accessibly', async ({ page }) => {

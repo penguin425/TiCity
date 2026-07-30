@@ -442,7 +442,12 @@ export const DIAGNOSE_CSS = `
 .tidb-diagnose__panel[data-diagnose-section="gc-resolve-locks"],
 .tidb-diagnose__panel[data-diagnose-section="gc-delete-ranges"],
 .tidb-diagnose__panel[data-diagnose-section="gc-store-compaction"],
-.tidb-diagnose__panel[data-diagnose-section="gc-mvcc-chains"] {
+.tidb-diagnose__panel[data-diagnose-section="gc-mvcc-chains"],
+.tidb-diagnose__panel[data-diagnose-section="tiflash-replication"],
+.tidb-diagnose__panel[data-diagnose-section="tiflash-read-gates"],
+.tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-tasks"],
+.tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-tunnels"],
+.tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-root"] {
   display: none;
 }
 
@@ -562,6 +567,60 @@ export const DIAGNOSE_CSS = `
 .tidb-diagnose[data-active-lab="gc-storage"]
   .tidb-diagnose__panel[data-diagnose-section="gc-mvcc-chains"] {
   grid-area: gc-mvcc-chains;
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"] .tidb-diagnose__grid {
+  grid-template-areas:
+    "tiflash-replication tiflash-replication"
+    "tiflash-read-gates tiflash-read-gates"
+    "tiflash-mpp-tasks tiflash-mpp-tasks"
+    "tiflash-mpp-tunnels tiflash-mpp-tunnels"
+    "tiflash-mpp-root tiflash-mpp-root"
+    "cluster transactions"
+    "cluster lock-waits"
+    "cluster application-retry"
+    "deadlocks deadlocks"
+    "hot gc"
+    "tiflash tiflash"
+    "regions regions";
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-replication"],
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-read-gates"],
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-tasks"],
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-tunnels"],
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-root"] {
+  display: block;
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-replication"] {
+  grid-area: tiflash-replication;
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-read-gates"] {
+  grid-area: tiflash-read-gates;
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-tasks"] {
+  grid-area: tiflash-mpp-tasks;
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-tunnels"] {
+  grid-area: tiflash-mpp-tunnels;
+}
+
+.tidb-diagnose[data-active-lab="tiflash-mpp"]
+  .tidb-diagnose__panel[data-diagnose-section="tiflash-mpp-root"] {
+  grid-area: tiflash-mpp-root;
 }
 
 .tidb-diagnose__panel-head {
@@ -1047,6 +1106,24 @@ export const DIAGNOSE_CSS = `
       "gc-delete-ranges"
       "gc-store-compaction"
       "gc-mvcc-chains"
+      "cluster"
+      "transactions"
+      "lock-waits"
+      "deadlocks"
+      "application-retry"
+      "hot"
+      "gc"
+      "tiflash"
+      "regions";
+  }
+
+  .tidb-diagnose[data-active-lab="tiflash-mpp"] .tidb-diagnose__grid {
+    grid-template-areas:
+      "tiflash-replication"
+      "tiflash-read-gates"
+      "tiflash-mpp-tasks"
+      "tiflash-mpp-tunnels"
+      "tiflash-mpp-root"
       "cluster"
       "transactions"
       "lock-waits"

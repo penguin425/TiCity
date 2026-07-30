@@ -54,6 +54,9 @@ function projectionAtEvent(
       ? {}
       : { protocolLab: snapshot.protocolLab }),
     ...(snapshot.gcLab === undefined ? {} : { gcLab: snapshot.gcLab }),
+    ...(snapshot.tiflashMppLab === undefined
+      ? {}
+      : { tiflashMppLab: snapshot.tiflashMppLab }),
     regions: finalState.regions.map((region) => {
       const detail = detailedRegions.get(region.id)
       if (!detail) return region

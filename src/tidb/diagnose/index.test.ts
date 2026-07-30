@@ -900,6 +900,90 @@ describe('TiDB diagnostic projections', () => {
     expect(tiflash.ja.guidance).toContain('古い結果ではなく')
   })
 
+  it('projects the exact model-7 TiFlash learner, gate, task, tunnel, and root state', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('tiflash-mpp')
+    const event = receipt.events.find((candidate) =>
+      candidate.id === 'trace-1-event-37')
+    if (!event?.snapshot?.tiflashMppLab) {
+      throw new Error('Expected the Region 26 applied-index snapshot.')
+    }
+    const projections = projectDiagnostics(event.snapshot)
+
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-replication')?.rows).toHaveLength(3)
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-read-gates')?.rows).toHaveLength(3)
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-mpp-tasks')?.rows).toHaveLength(4)
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-mpp-tunnels')?.rows).toHaveLength(6)
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-mpp-root')?.rows).toHaveLength(1)
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-replication')?.rows).toContainEqual(
+      expect.objectContaining({
+        region: '26',
+        role: 'learner',
+        voter: 'false',
+        learnerAppliedIndex: '261',
+        replicationPlane: 'persistent_region_raft',
+        exchangeMutation: 'false',
+      }),
+    )
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-read-gates')?.rows).toContainEqual(
+      expect.objectContaining({
+        region: '26',
+        gateState: 'waiting_applied',
+        requiredReadIndex: '261',
+        learnerAppliedIndex: '261',
+        staleRead: 'false',
+        readinessBoundary: 'per_region_not_node_global_resolved_ts',
+      }),
+    )
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-mpp-root')?.rows[0]).toMatchObject({
+      rootTask: 'tidb-root',
+      retryCount: '0',
+      fallbackToTiKV: 'false',
+      provisioningBoundary:
+        'AVAILABLE_and_PROGRESS_do_not_guarantee_snapshot_readiness',
+    })
+
+    const dom = installTestDom()
+    const root = dom.mount('tiflash-diagnose')
+    mountDiagnose(root as unknown as HTMLElement, {
+      locale: 'en',
+      snapshot: event.snapshot,
+    })
+    expect(root.dataset.activeLab).toBe('tiflash-mpp')
+    expect(root.querySelectorAll(
+      '[data-privacy-boundary="synthetic-aggregate-only"]',
+    )).toHaveLength(5)
+    expect(root.querySelectorAll(
+      '[data-table-section="tiflash-replication"] tbody tr',
+    )).toHaveLength(3)
+    expect(root.querySelectorAll(
+      '[data-table-section="tiflash-read-gates"] tbody tr',
+    )).toHaveLength(3)
+    expect(root.querySelectorAll(
+      '[data-table-section="tiflash-mpp-tasks"] tbody tr',
+    )).toHaveLength(4)
+    expect(root.querySelectorAll(
+      '[data-table-section="tiflash-mpp-tunnels"] tbody tr',
+    )).toHaveLength(6)
+    expect(root.querySelectorAll(
+      '[data-table-section="tiflash-mpp-root"] tbody tr',
+    )).toHaveLength(1)
+    const detailedText = root.querySelectorAll(
+      '[data-privacy-boundary="synthetic-aggregate-only"]',
+    ).map((panel) => panel.textContent).join(' ')
+    expect(detailedText).not.toMatch(
+      /SELECT\s|GROUP BY|SQL_DIGEST|inventory|customer/i,
+    )
+  })
+
   it('labels every rendered diagnostic value as simulated', () => {
     const dom = installTestDom()
     const root = dom.mount('diagnose')
