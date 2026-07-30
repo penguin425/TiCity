@@ -86,6 +86,30 @@
 - Explicit boundaries for a read with no user-data entry, no application
   retry, no client-visible transient error, and no live timing guarantee
 
+## v0.7
+
+- A model-5 Protocol Lab that expands 1PC, Async Commit, and regular 2PC into
+  one deterministic 74-event immutable comparison receipt
+- Three independent representative optimistic transaction fixtures that
+  compare protocol shape, not executions of the displayed SQL or latency
+- Explicit feature eligibility, no runtime fallback, and pinned 256-key,
+  4,096-byte, and two-second implementation-profile defaults labeled as
+  non-stable, non-prescriptive values
+- Exact timestamp provenance across PD `start_ts`/`latest_ts`, TiCity request
+  bounds, TiKV `one_pc_commit_ts` and per-Region `min_commit_ts`, and regular
+  2PC's post-prewrite PD `commit_ts`
+- One-Region `TryOnePc` Prewrite, two-Region Async Commit prewrite and
+  background resolution, and regular 2PC prewrite/primary/background-secondary
+  paths with explicit client-response boundaries
+- Nine independent per-Region Raft mutation chains, each showing propose,
+  two-voter persistence, 2-of-3 commit, apply, and conceptual MVCC state
+  without conflating transaction commit optimization with consensus
+- Exact-event City, Machine, and Diagnose projections over the same snapshot,
+  with fixed-capacity, bilingual, accessible, privacy-preserving, and
+  immutable-loop presentation
+- Four mechanism-level scenarios in total, with the remaining five scenarios
+  explicitly retained as compact teaching traces
+
 ## Deliberately outside the current offline model
 
 - Connecting to or changing a live TiDB cluster

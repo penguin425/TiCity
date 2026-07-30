@@ -16,7 +16,7 @@ Live site: <https://penguin425.github.io/TiCity/>
 ![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.6.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
+> TiCity v0.7.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
 > execute SQL or return real data or invented result rows. A single SQL
 > statement entered by the user is classified entirely in the browser, and
 > only a modeled route and explanation are generated.
@@ -40,6 +40,18 @@ Live site: <https://penguin425.github.io/TiCity/>
 - Three voter peers with explicit role, health, term, vote, log, commit, and
   apply state; separate Pre-Vote and Vote phases both reach 2-of-3 before the
   new leader's current-term no-op is persisted, committed, and applied
+- A Protocol Lab that expands 1PC, Async Commit, and regular 2PC into one
+  74-event immutable comparison receipt
+- Three independent representative optimistic transactions, with declared
+  fixture eligibility outcomes and timestamp provenance; the lanes compare
+  protocol shape and are not executions of the displayed SQL or a latency
+  benchmark
+- A one-Region 1PC Prewrite carrying `TryOnePc`, two-Region Async Commit
+  prewrites, and a regular 2PC primary/secondary path, with every TiKV mutation
+  crossing its own Region's independent 2-of-3 Raft chain
+- Client-response boundaries that leave no 1PC cleanup, both Async Commit
+  Regions for background commit-record resolution, and the regular 2PC
+  secondary for background commit
 - A causal event graph with immutable post-event snapshots, explicit
   fork/join dependencies, a client-response boundary, and background
   secondary cleanup
@@ -62,9 +74,9 @@ The application has three views:
 
 | URL | Purpose |
 |---|---|
-| [`…/TiCity/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/?scenario=tikv-failover&event=trace-1-event-16) | 3D City and the scenario-selected detailed Lab at an exact event |
-| [`…/machine/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/machine/?scenario=tikv-failover&event=trace-1-event-16) | Causal event DAG plus separate Lock wait-for or Raft Pre-Vote/Vote semantic graph |
-| [`…/diagnose/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/diagnose/?scenario=tikv-failover&event=trace-1-event-16) | Exact-event transaction, Raft election, MVCC, lock-wait, deadlock, and retry diagnostics |
+| [`…/TiCity/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/?scenario=commit-protocols&event=trace-1-event-32) | 3D City and the scenario-selected detailed Lab at the Async Commit client-response boundary |
+| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | Causal event DAG plus the selected Lab's separate protocol, lock, or election semantics |
+| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | Exact-event transaction, protocol, Raft, MVCC, lock-wait, deadlock, and retry diagnostics |
 
 Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
 through the same immutable receipt; looping reuses that receipt and never
@@ -98,6 +110,41 @@ retry, and no transient error becomes client-visible in this trace. The
 surviving follower applies the no-op as background work after the response.
 
 ![TiCity Raft Failure Lab during the 2-of-3 election and recovery](docs/raft-lab.png)
+
+Open the Protocol Lab directly with the
+[`commit-protocols` scenario](https://penguin425.github.io/TiCity/?scenario=commit-protocols).
+Its 74-event receipt contains three independent representative optimistic
+transactions, not three runs of the workbench SQL and not a latency race:
+
+Each lane's declared fixture profile and protocol outcome is intentionally
+visible from comparison start. It describes the fixed path that the receipt
+will exercise, not progress already completed at the current cursor. Lane
+stage, timestamps, Region Raft/MVCC, client response, and background cleanup
+are temporal state from the selected exact event.
+
+- **1PC:** PD supplies `start_ts` and, for the modeled default linear
+  consistency, `latest_ts`. TiCity derives representative request bounds, then
+  sends one Prewrite with `TryOnePc=true` to one Region. After that Region's
+  Raft apply, TiKV returns `one_pc_commit_ts`; there is no normal Commit RPC,
+  durable lock-CF intermediate, or background cleanup in this lane.
+- **Async Commit:** PD supplies `start_ts` and `latest_ts`. Two Region
+  prewrites independently reach Raft apply and return `min_commit_ts`; the
+  modeled `commit_ts` is their maximum, not a PD commit-timestamp allocation.
+  The client is acknowledged after both prewrites, while commit-record
+  resolution for both Regions continues in the background.
+- **Regular 2PC:** PD supplies `start_ts`; after both Region prewrites join, PD
+  supplies `commit_ts`. Primary commit and its Region Raft apply gate the
+  client response, while secondary commit and lock cleanup continue in the
+  background.
+
+Both optional features are enabled in these fixtures. The Async Commit
+eligibility checks are pinned to the target client implementation defaults of
+256 keys and 4,096 total key bytes. They are implementation defaults captured
+for this model, not a public stable TiDB contract or tuning advice. The
+regular-2PC fixture deliberately uses 257 aggregate mutations; all fixtures
+retain only aggregate counts and synthetic identifiers.
+
+![TiCity Protocol Lab comparing 1PC, Async Commit, and regular 2PC](docs/protocol-lab.png)
 
 ## Representative scenarios
 
@@ -160,18 +207,31 @@ src/tidb/
   separately from the model's deterministic 13-tick elapsed value and
   candidate policy. PD is observer/routing-only, and the retry remains inside
   TiDB as the same logical Region request with no application retry.
+- In the model-5 Protocol Lab, 1PC, Async Commit, and regular 2PC are three
+  independent representative fixtures. Their event durations and sequential
+  display order are not a latency comparison. `start_ts` and `latest_ts` come
+  from modeled PD TSO calls, the 1PC timestamp comes from the TiKV result, the
+  Async Commit timestamp is the maximum TiKV-returned `min_commit_ts`, and the
+  regular 2PC timestamp comes from PD after prewrite.
+- Protocol Lab keeps transaction commit coordination separate from nine
+  per-Region Raft mutation chains. Each chain independently shows propose,
+  two-voter persistence, 2-of-3 commit, and apply before its conceptual MVCC
+  state changes.
 - The initial 36 Regions are representative educational values. Additional
   Regions created by splits appear in the 2D diagnostics, while the 3D City
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
 
-Detailed mechanism-level projections currently apply to three scenarios. The
+Detailed mechanism-level projections currently apply to four scenarios. The
 cross-Region transaction expands transaction 2PC, per-Region Raft, and
 conceptual MVCC. Lock Lab expands leader-memory lock contention and hands off
 its commit path instead of duplicating that pipeline. Raft Failure Lab expands
 one Region's election, current-term leader no-op, PD observation and routing,
-and TiDB-internal request recovery. The other six scenarios remain compact
-teaching traces and do not yet claim the same mechanism depth.
+and TiDB-internal request recovery. Protocol Lab expands eligibility,
+timestamp authority, one-Region 1PC, two-Region Async Commit, and regular 2PC,
+including their client/background boundaries and independent Region Raft
+chains. The other five scenarios remain compact teaching traces and do not yet
+claim the same mechanism depth.
 
 The `window.TICITY` object in the browser console exposes the model, playback,
 scenarios, and latest immutable trace for inspection and control.

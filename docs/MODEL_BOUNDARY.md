@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity model-4 targets **TiDB v8.5 LTS**. This document records which visible
+TiCity model-5 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
 which capabilities are not implemented. TiCity is a deterministic educational
 model, not a TiDB emulator or a live-cluster observation tool.
@@ -18,7 +18,12 @@ model, not a TiDB emulator or a live-cluster observation tool.
 | A pessimistic deadlock is a cycle of transactions waiting for one another; a non-retryable deadlock terminates one transaction and returns Error 1213 | Lock Lab detects a two-edge cycle, rolls back its visibly labeled deterministic model victim, removes that victim's locks and edges, and wakes the survivor | [Pessimistic transactions](https://docs.pingcap.com/tidb/v8.5/pessimistic-transaction), [deadlock troubleshooting](https://docs.pingcap.com/tidb/v8.5/troubleshoot-lock-conflicts) |
 | TiKV uses a cluster-wide deadlock-detector leader and consults PD to locate it | The detector is shown on the TiKV side; PD participates only in detector-leader lookup and never becomes the detector | [TiKV v8.5 detector implementation](https://github.com/tikv/tikv/blob/v8.5.0/src/server/lock_manager/deadlock.rs#L611-L723) |
 | Optimistic distributed transactions use 2PC | Prewrite precedes commit; a modeled conflict moves the transaction to `rolled_back` without claiming a per-key lock inventory | [Optimistic transaction model](https://docs.pingcap.com/tidb/v8.5/optimistic-transaction) |
-| 1PC and Async Commit are transaction optimizations | They alter transaction events but never change Region Raft quorum. Async Commit returns after successful prewrite and shows commit-record resolution as background work; it has no normal Get-commit-ts/Commit phase on the client path | [Latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
+| `tidb_enable_1pc` and `tidb_enable_async_commit` make the optimizations available; TiDB still chooses the suitable commit mode | Both switches are on in Protocol Lab's three isolated fixtures, while each lane records its explicit eligibility decision and has no runtime fallback | [TiDB v8.5 system variables](https://docs.pingcap.com/tidb/v8.5/system-variables/#tidb_enable_1pc), [pinned client eligibility logic](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L1504-L1583) |
+| Default linear consistency obtains a latest TSO for 1PC and Async Commit; causal consistency is a separate opt-in transaction mode | All three Protocol Lab fixtures are explicitly linearizable. The 1PC and Async lanes obtain modeled `latest_ts` from PD before prewrite; Protocol Lab does not model the causal-consistency path | [Transactions](https://docs.pingcap.com/tidb/v8.5/transaction-overview/#causal-consistency-transactions), [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
+| 1PC is attempted in a Prewrite request and can return a TiKV-calculated one-phase commit timestamp without a normal Commit phase | The one-Region lane sends `TryOnePc`, crosses that Region's Raft quorum/apply once, records the TiKV-returned `one_pc_commit_ts`, and has no durable lock-CF intermediate or background commit cleanup | [pinned Prewrite flags](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/prewrite.go#L177-L203), [pinned client commit paths](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L1707-L1980), [pinned TiKV v8.5 1PC MVCC path](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/storage/txn/commands/prewrite.rs#L949-L988) |
+| Async Commit establishes the commit timestamp from successful prewrites and performs commit-record resolution asynchronously | Both Region prewrites independently cross Raft apply and return `min_commit_ts`; the lane uses their maximum as `commit_ts`, responds to the client, then shows both Region Commit RPC/apply paths as background work | [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown), [pinned client commit paths](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L1707-L1980), [pinned TiKV v8.5 prewrite path](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/storage/txn/commands/prewrite.rs#L565-L798) |
+| Regular 2PC obtains `commit_ts` after prewrite, commits the primary on the client path, and can commit secondaries in the background | The two Region prewrite branches join before modeled PD TSO allocation; primary Raft apply gates the response, and secondary Commit/Raft apply follows on an explicitly background path | [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown), [pinned primary/secondary client path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L998-L1054) |
+| The target client source has Async Commit defaults of 256 keys, 4 KiB total key bytes, and a two-second safe window | Protocol Lab pins 256, 4,096, and two seconds as implementation-profile values. They are not a public stable TiDB contract, benchmark, recommendation, or claim about another patch release | [pinned client defaults](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/config/client.go#L123-L167) |
 | Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
 | TiFlash is an asynchronously replicated Raft learner for HTAP | It never counts toward TiKV voter quorum and has visible catch-up lag | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview) |
 | Raft Engine stores Raft logs by default in this target line | The TiKV inspector names Raft Engine, not the older RaftDB default | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file) |
@@ -48,10 +53,29 @@ is deliberately routed to MPP so the path can be taught. Real TiDB requires a
 table-level replica and lets the cost-based optimizer choose TiKV, TiFlash, or
 both; an aggregate is not automatically a TiFlash query.
 
-The model treats its accepted single-row, primary-key-constrained mutation as
-small enough for Async Commit when that mode is enabled. Real eligibility also
-depends on feature settings, mutation/key size limits, timestamp bounds, and
-other runtime conditions—not simply on the number of Regions.
+Protocol Lab does not derive its three lanes from the SQL visible in the
+workbench. It uses independent, aggregate-only optimistic transaction
+fixtures: two mutations totaling 16 key bytes in one Region for 1PC, two
+mutations totaling 16 key bytes across two Regions for Async Commit, and 257
+mutations totaling 2,056 key bytes across two Regions for regular 2PC. The
+last fixture exceeds the pinned 256-key client default even though it remains
+below the pinned 4,096-byte default. These profiles make the selected path
+deterministic; they are not production sizing examples.
+
+Each lane's `eligibility` snapshot is a declared representative fixture
+profile and outcome, present from `protocol_comparison_start`. It describes the
+path that the immutable receipt is constructed to exercise; it does not mean
+that selection, Prewrite, or an RPC has already happened at the current cursor.
+Lane stage, timestamps, per-Region Raft/MVCC, client response, and background
+cleanup are the temporal post-event state for the selected exact event.
+
+The 256-key, 4,096-byte, and two-second safe-window values are pinned from the
+target client implementation rather than declared as stable public TiDB
+contracts. Real eligibility also depends on feature settings, Region batching,
+timestamp and schema bounds, client/TiKV decisions, runtime errors, and the
+exact version and configuration. Protocol Lab deliberately takes no runtime
+fallback branch and must not be used to infer that Region count alone selects
+Async Commit.
 
 ## Detailed mechanism traces
 
@@ -147,10 +171,77 @@ over that receipt; they do not resend the request, rerun the election, or
 choose a different winner. The snapshots retain no SQL text, literal, key,
 value, or result row and have `MODEL / SIMULATED` provenance.
 
-The other six scenarios retain compact teaching traces in this model revision.
-They use the same causal dependency field but do not yet claim the detailed
-transaction, concurrency-control, or Region-election projection depth of these
-three vertical slices.
+The model-5 `commit-protocols` scenario is a fourth mechanism-level vertical
+slice. Its single immutable 74-event receipt contains three independent,
+representative optimistic global transactions in a fixed teaching order. The
+lanes compare protocol message and state-transition shape; they are not three
+executions of the displayed SQL, a race, a latency benchmark, or a prediction
+of which mode a production transaction will use. Event durations, timestamp
+gaps, and the sequential lane order are deterministic presentation values and
+must not be compared as performance data.
+Independent Region sibling branches retain separate causal dependencies; a
+non-causal fence only serializes their replay presentation and is not a
+latency or benchmark claim.
+
+Both optional commit features are enabled for all three fixtures, consistency
+is fixed to linearizable, and TiKV async-apply-prewrite is fixed off. Each
+fixture receives a distinct synthetic request/transaction ID and its own
+Region set. No Region is shared across lanes. The model deliberately exercises
+successful, preselected paths with no runtime fallback:
+
+- The **1PC** fixture has two aggregate mutations in one Region. PD supplies
+  `start_ts` and `latest_ts`; TiCity records `latest_ts + 1` as a representative
+  request floor and records a separate representative `max_commit_ts` model
+  bound. TiDB sends one Prewrite carrying `TryOnePc=true`. One Region Raft
+  propose/persist-quorum/commit/apply chain atomically projects the non-short
+  value into default CF and the commit record into write CF. TiKV returns
+  `one_pc_commit_ts`, which is the lane's commit timestamp. There is no normal
+  Commit RPC, durable lock-CF intermediate, or post-response cleanup.
+- The **Async Commit** fixture has two aggregate mutations in two Regions.
+  Region batching rejects 1PC before a `TryOnePc` RPC. PD supplies `start_ts`
+  and `latest_ts`; TiCity again records representative request and maximum
+  timestamp bounds. The two Prewrite branches run independently, and each
+  reaches its own Region Raft apply before TiKV returns that Region's
+  `min_commit_ts`. The maximum returned value becomes `commit_ts`; PD does not
+  allocate a separate commit timestamp on this path. Both prewrite locks still
+  exist at the client-response event. Two background Commit branches then
+  independently cross Region Raft and replace the locks with write-CF commit
+  records.
+- The **regular 2PC** fixture has 257 aggregate mutations in two Regions.
+  Region batching rejects 1PC, and the 257 count rejects Async Commit at the
+  pinned 256-key client precheck; this is preselection, not a failed TiKV
+  optimization attempt. Both regular Prewrite branches independently cross
+  Region Raft and join. PD then supplies `commit_ts`. The primary Commit and
+  its Region Raft apply gate the client response, while the secondary still
+  has a prewrite lock. A background secondary Commit/Raft/apply path then
+  removes that lock and writes its commit record.
+
+Timestamp authority is therefore explicit: all three `start_ts` values and the
+1PC/Async `latest_ts` values come from modeled PD TSO calls; the request floor
+and maximum bound are labeled TiCity model projections; the 1PC commit
+timestamp comes from TiKV's one-phase result; the Async Commit timestamp is the
+maximum of the two TiKV-returned `min_commit_ts` values; and regular 2PC
+`commit_ts` comes from PD only after all prewrites. None is a wall-clock
+measurement or a value observed from a cluster.
+
+Transaction protocol and Region consensus remain separate layers. Protocol Lab
+contains nine TiKV mutation operations. Every operation has its own four-step
+Region chain—Raft propose, persistence by two distinct voters, 2-of-3 commit,
+and leader apply—before conceptual MVCC state changes. Selecting 1PC or Async
+Commit never weakens or replaces a Region's Raft quorum.
+
+Every Protocol Lab event publishes a deeply frozen post-event snapshot and
+typed deltas. City, Machine, and Diagnose read that exact selected snapshot;
+exact-event navigation and looping never rerun a fixture. The receipt retains
+only aggregate mutation/key-byte counts, opaque synthetic IDs, Region/Store
+identifiers, and modeled timestamps. It contains no SQL text, literal, real
+key, secondary-key list, value, result row, digest, packet, or live-cluster
+observation.
+
+The other five scenarios retain compact teaching traces in this model
+revision. They use the same causal dependency field but do not yet claim the
+detailed transaction, concurrency-control, Region-election, or commit-protocol
+projection depth of these four vertical slices.
 
 ## SQL boundary
 
@@ -166,4 +257,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.6.x.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.7.x.
