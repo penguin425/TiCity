@@ -3,7 +3,16 @@
 import { describe, expect, it } from 'vitest'
 
 import { installTestDom } from '../../../test/dom'
-import { MACHINE_CSS, MACHINE_LANES, mountMachine } from './index'
+import { createTiDBSimulation } from '../model'
+import type { TraceStateSnapshot } from '../model/types'
+import { MACHINE_PAGE_COPY, MACHINE_SCENARIOS, resolveMachineScenario } from './catalog'
+import {
+  adaptTraceReceipt,
+  MACHINE_CSS,
+  MACHINE_LANES,
+  mountMachine,
+  resolveMachineEventIndex,
+} from './index'
 
 describe('TiCity Machine replay', () => {
   it('draws TSO, transaction, Raft, KV, and TiFlash as separate lanes', () => {
@@ -178,5 +187,184 @@ describe('TiCity Machine replay', () => {
     expect(selected?.getAttribute('aria-current')).toBe('step')
     expect((globalThis.document as unknown as { activeElement: unknown }).activeElement).toBe(selected)
     expect(root.textContent).toContain('現在のイベント')
+  })
+
+  it('uses keyed bilingual scenario labels and includes the Lock Lab route', () => {
+    expect(MACHINE_SCENARIOS).toContain('lock-deadlock')
+    expect(resolveMachineScenario('?scenario=lock-deadlock')).toBe('lock-deadlock')
+    expect(resolveMachineScenario('?scenario=unknown')).toBe('cross-region-transaction')
+
+    for (const locale of ['ja', 'en'] as const) {
+      for (const scenario of MACHINE_SCENARIOS) {
+        expect(MACHINE_PAGE_COPY[locale].names[scenario].length).toBeGreaterThan(0)
+      }
+    }
+    expect(MACHINE_PAGE_COPY.en.names['lock-deadlock']).toContain('deadlock')
+    expect(MACHINE_PAGE_COPY.ja.names['lock-deadlock']).toContain('デッドロック')
+  })
+
+  it('preserves canonical parallel order and resolves an event cursor after adaptation', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const snapshot = Object.freeze({
+      modelVersion: 'test-model',
+      tsoLastAllocated: 1,
+      transaction: null,
+      regions: Object.freeze([]),
+    }) satisfies TraceStateSnapshot
+    const source = {
+      id: 'parallel',
+      events: [
+        {
+          id: 'root',
+          atMs: 0,
+          durationMs: 1,
+          domain: 'txn2pc',
+          kind: 'root',
+          label: 'root',
+          detail: '',
+          dependsOn: [],
+        },
+        {
+          id: 'z-parallel',
+          atMs: 2,
+          durationMs: 1,
+          domain: 'kv',
+          kind: 'parallel_lock',
+          label: 'Z branch',
+          detail: '',
+          dependsOn: ['root'],
+          branchId: 'client-z',
+          snapshot,
+        },
+        {
+          id: 'a-parallel',
+          atMs: 2,
+          durationMs: 1,
+          domain: 'kv',
+          kind: 'parallel_lock',
+          label: 'A branch',
+          detail: '',
+          dependsOn: ['root'],
+          branchId: 'client-a',
+        },
+      ],
+    }
+    const adapted = adaptTraceReceipt(source)
+
+    expect(adapted.events.map((event) => event.id)).toEqual([
+      'root',
+      'z-parallel',
+      'a-parallel',
+    ])
+    expect(adapted.events[1]?.kind).toBe('parallel_lock')
+    expect(adapted.events[1]?.branchId).toBe('client-z')
+    expect(adapted.events[1]?.snapshot).toBe(snapshot)
+    expect(resolveMachineEventIndex(adapted, 'z-parallel')).toBe(1)
+
+    let selectedId = ''
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt: source,
+      initialEventId: 'z-parallel',
+      onSeek(event) {
+        selectedId = event?.id ?? ''
+      },
+    })
+
+    expect(selectedId).toBe('z-parallel')
+    expect(root.querySelector('[data-event-id="z-parallel"]')?.getAttribute('aria-current'))
+      .toBe('step')
+    const detail = root.querySelector('.tidb-machine__detail')
+    expect(detail?.getAttribute('data-current-event-id')).toBe('z-parallel')
+    expect(detail?.getAttribute('data-current-event-kind')).toBe('parallel_lock')
+    expect(detail?.getAttribute('data-current-event-branch')).toBe('client-z')
+  })
+
+  it('keeps the acyclic causal DAG separate from a visibly cyclic waiter-to-holder graph', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 }).runScenario('lock-deadlock')
+    const cycleEvent = receipt.events.find((event) => event.kind === 'deadlock_detected')
+    expect(cycleEvent).toBeDefined()
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt,
+      initialEventId: cycleEvent?.id,
+    })
+
+    expect(root.querySelector('[data-graph-kind="causal-dag"]')).not.toBeNull()
+    expect(root.querySelector('[data-graph-kind="wait-for"]')).not.toBeNull()
+    expect(root.querySelector('[data-wait-for-graph="semantic"]')?.getAttribute('tabindex'))
+      .toBe('0')
+    const waitEdges = root.querySelectorAll('path[data-wait-for-edge]')
+    expect(waitEdges).toHaveLength(2)
+    const waitPairs = waitEdges.map((edge) =>
+      `${edge.dataset.waitForFrom}->${edge.dataset.waitForTo}`)
+    expect(waitPairs.some((pair) => {
+      const [from, to] = pair.split('->')
+      return waitPairs.includes(`${to}->${from}`)
+    })).toBe(true)
+    expect(waitEdges.every((edge) => edge.dataset.direction === 'waiter-to-holder')).toBe(true)
+
+    const causalEdges = root.querySelectorAll('[data-causal-from]')
+    const causalChildren = new Map<string, string[]>()
+    for (const edge of causalEdges) {
+      const from = edge.dataset.causalFrom
+      const to = edge.dataset.causalTo
+      if (!from || !to) continue
+      causalChildren.set(from, [...(causalChildren.get(from) ?? []), to])
+    }
+    const visiting = new Set<string>()
+    const visited = new Set<string>()
+    const hasCycle = (node: string): boolean => {
+      if (visiting.has(node)) return true
+      if (visited.has(node)) return false
+      visiting.add(node)
+      for (const child of causalChildren.get(node) ?? []) {
+        if (hasCycle(child)) return true
+      }
+      visiting.delete(node)
+      visited.add(node)
+      return false
+    }
+    expect([...causalChildren.keys()].some(hasCycle)).toBe(false)
+  })
+
+  it('separates detector, MODEL POLICY victim, non-retryability, and application retry without leaking SQL literals', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 }).runScenario('lock-deadlock')
+    const retryEvent = receipt.events.find((event) => event.kind === 'application_retry_begin')
+    expect(retryEvent?.snapshot?.lockLab?.applicationRetry?.status).toBe('started')
+    expect(JSON.stringify(retryEvent?.snapshot)).not.toContain('LOCK-LAB-425')
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt,
+      initialEventId: retryEvent?.id,
+    })
+
+    expect(root.querySelector('[data-lock-detector="tikv-3"]')?.dataset.detectorScope)
+      .toBe('cluster_wide')
+    expect(root.querySelector('[data-selection-policy="model-policy"]')).not.toBeNull()
+    expect(root.querySelector('[data-retryable="false"]')).not.toBeNull()
+    expect(root.querySelector('[data-application-retry="started"]')?.dataset.retrySource)
+      .toBe('application')
+    expect(root.textContent).toContain('MODEL POLICY')
+    expect(root.textContent).toContain('RETRYABLE=false')
+    expect(root.textContent).toContain('Application, not an internal TiDB retry')
+    const retryTransactionId =
+      retryEvent?.snapshot?.lockLab?.applicationRetry?.newTransactionId
+    expect(retryTransactionId).not.toBeNull()
+    expect(root.querySelector(
+      `[data-lock-transaction="${retryTransactionId}"] .tidb-machine__wait-node-client`,
+    )?.textContent).toBe('client-b′')
+    expect(root.querySelector(
+      `[data-lock-transaction-summary="${retryTransactionId}"] span`,
+    )?.textContent).toBe('client-b′')
+    expect(root.textContent).not.toContain('LOCK-LAB-425')
+    expect(root.textContent).not.toContain('stock - 1')
   })
 })

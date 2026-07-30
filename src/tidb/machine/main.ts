@@ -3,57 +3,14 @@
 import '../app.css'
 
 import { createTiDBSimulation } from '../model'
-import type { ScenarioId } from '../model/types'
 import { createNavigation, createWordmark, prepareDocument } from '../page-shell'
 import { resolveLocale } from '../ui/catalog'
+import {
+  MACHINE_PAGE_COPY,
+  MACHINE_SCENARIOS,
+  resolveMachineScenario,
+} from './catalog'
 import { mountMachine } from './index'
-
-const SCENARIOS: readonly ScenarioId[] = [
-  'point-read',
-  'cross-region-transaction',
-  'optimistic-conflict',
-  'commit-protocols',
-  'hotspot-split',
-  'tikv-failover',
-  'gc-safe-point',
-  'tiflash-mpp',
-]
-
-const labels = {
-  ja: {
-    scenario: '再生するシナリオ',
-    names: [
-      'Point Readとルーティング',
-      '複数Regionの悲観トランザクション',
-      '楽観トランザクションの競合',
-      '1PC／Async Commit／2PC',
-      'hotspot、split、rebalance',
-      'TiKV障害とleader election',
-      '長時間transactionとGC safe point',
-      'TiFlash catch-upとMPP',
-    ],
-  },
-  en: {
-    scenario: 'Scenario to replay',
-    names: [
-      'Point read and routing',
-      'Cross-Region pessimistic transaction',
-      'Optimistic transaction conflict',
-      '1PC / Async Commit / 2PC',
-      'Hotspot, split, and rebalance',
-      'TiKV failure and leader election',
-      'Long transaction and GC safe point',
-      'TiFlash catch-up and MPP',
-    ],
-  },
-} as const
-
-function selectedScenario(): ScenarioId {
-  const value = new URLSearchParams(location.search).get('scenario')
-  return SCENARIOS.includes(value as ScenarioId)
-    ? value as ScenarioId
-    : 'cross-region-transaction'
-}
 
 function boot(): void {
   const root = document.querySelector<HTMLElement>('#machine-app')
@@ -62,12 +19,10 @@ function boot(): void {
   const locale = resolveLocale()
   prepareDocument(locale)
   const simulation = createTiDBSimulation({ seed: 425 })
-  const scenario = selectedScenario()
+  const scenario = resolveMachineScenario(location.search)
   const receipt = simulation.runScenario(scenario)
   const requestedEvent = new URLSearchParams(location.search).get('event')
-  const initialEventIndex = requestedEvent === null
-    ? 0
-    : Math.max(0, receipt.events.findIndex((event) => event.id === requestedEvent))
+  const copy = MACHINE_PAGE_COPY[locale]
 
   root.className = 'tidb-page'
   const top = document.createElement('div')
@@ -78,13 +33,13 @@ function boot(): void {
   const controls = document.createElement('div')
   controls.className = 'tidb-page-controls'
   const label = document.createElement('label')
-  label.textContent = labels[locale].scenario
+  label.textContent = copy.scenario
   const select = document.createElement('select')
-  select.setAttribute('aria-label', labels[locale].scenario)
-  for (const [index, id] of SCENARIOS.entries()) {
+  select.setAttribute('aria-label', copy.scenario)
+  for (const id of MACHINE_SCENARIOS) {
     const option = document.createElement('option')
     option.value = id
-    option.textContent = labels[locale].names[index]
+    option.textContent = copy.names[id]
     option.selected = id === scenario
     select.append(option)
   }
@@ -103,7 +58,7 @@ function boot(): void {
   mountMachine(content, {
     locale,
     receipt,
-    initialIndex: initialEventIndex,
+    initialEventId: requestedEvent ?? undefined,
     stepIntervalMs: 650,
     onSeek(event) {
       const url = new URL(location.href)

@@ -144,6 +144,100 @@ test('Machine and Diagnose share the same detailed event cursor through the URL'
   await expect(regionTable).toContainText('leader_memory')
 })
 
+test('Lock Lab exact cursor stays exclusive, readable, and operable on mobile', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const eventId = 'trace-1-event-9'
+  await page.goto(
+    `/?lang=en&scenario=lock-deadlock&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+
+  const layout = page.locator('.tidb-layout')
+  const lockLab = page.locator('[data-lock-lab]')
+  const transactionLab = page.locator('[data-transaction-lab]')
+  const dock = page.locator('[data-trace-dock]')
+  await expect(layout).toHaveAttribute('data-active-lab', 'lock')
+  await expect(layout).toHaveAttribute('data-inspect', 'open')
+  await expect(lockLab).toBeVisible()
+  await expect(lockLab).toHaveAttribute('tabindex', '0')
+  await expect(lockLab).toContainText('Not returned yet')
+  await expect(transactionLab).toBeHidden()
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  await expect(dock).toHaveAttribute('data-event-index', '8')
+  await expect(dock).toHaveAttribute('data-event-count', '25')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  const [labBox, dockBox] = await Promise.all([
+    lockLab.boundingBox(),
+    dock.boundingBox(),
+  ])
+  expect(labBox).not.toBeNull()
+  expect(dockBox).not.toBeNull()
+  if (!labBox || !dockBox) throw new Error('Lock Lab overlays have no layout box')
+  expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
+
+  const machineHref = await page.locator(
+    '.tidb-topbar [data-nav="machine"]',
+  ).getAttribute('href')
+  expect(machineHref).toContain('scenario=lock-deadlock')
+  expect(machineHref).toContain(`event=${eventId}`)
+  expect(machineHref).toContain('lang=en')
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Lock Lab Machine and Diagnose preserve graph and Error 1213 event time', async ({
+  page,
+}) => {
+  const detectedEventId = 'trace-1-event-9'
+  await page.goto(
+    `/machine/?lang=en&scenario=lock-deadlock&event=${detectedEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('[data-graph-kind="causal-dag"]')).toBeVisible()
+  const waitGraph = page.locator('[data-wait-for-graph="semantic"]')
+  await expect(waitGraph).toBeVisible()
+  await expect(waitGraph).toHaveAttribute('tabindex', '0')
+  await expect(waitGraph.locator('path[data-wait-for-edge]')).toHaveCount(2)
+  await expect(page.locator('.skip-link')).toHaveText('Skip to main content')
+
+  await page.goto(
+    `/diagnose/?lang=en&scenario=lock-deadlock&event=${detectedEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(detectedEventId)
+  const deadlocks = page.locator('[data-diagnose-section="deadlocks"]')
+  await expect(deadlocks).toContainText('Not returned yet')
+  await expect(deadlocks).not.toContainText('Error 1213')
+  await expect(page.locator('.tidb-diagnose__summary'))
+    .toHaveAttribute('data-tone', 'critical')
+  await expect(page.locator('[data-summary-metric="transactions"]'))
+    .toContainText('2 active · 2 lock waits')
+
+  const errorEventId = 'trace-1-event-13'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=lock-deadlock&event=${errorEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(errorEventId)
+  await expect(page.locator('[data-diagnose-section="deadlocks"]'))
+    .toContainText('Error 1213')
+
+  await page.goto('/diagnose/?lang=en&scenario=lock-deadlock')
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('[data-summary-metric="transactions"]'))
+    .toContainText('0 active · 0 lock waits')
+  await expect(page.locator('.tidb-diagnose__summary'))
+    .not.toHaveAttribute('data-tone', 'critical')
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
 test('desktop controls start collapsed and toggle the panel accessibly', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')

@@ -3,6 +3,23 @@
 import { installStyle } from '../ui/dom'
 
 export const DIAGNOSE_CSS = `
+.tidb-diagnose-controls {
+  flex-wrap: wrap;
+}
+
+.tidb-diagnose-cursor-note {
+  width: 100%;
+  margin: -0.25rem 0 0;
+  color: var(--city-muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.tidb-diagnose-cursor-note[data-cursor-resolution="previous"],
+.tidb-diagnose-cursor-note[data-cursor-resolution="scenario-start"] {
+  color: var(--city-text);
+}
+
 .tidb-diagnose {
   --diag-healthy: #52d3a4;
   --diag-attention: #ffd166;
@@ -372,9 +389,11 @@ export const DIAGNOSE_CSS = `
   grid-template-columns: minmax(22rem, 0.85fr) minmax(0, 1.15fr);
   grid-template-areas:
     "cluster transactions"
-    "cluster hot"
-    "cluster gc"
-    "cluster tiflash"
+    "cluster lock-waits"
+    "cluster application-retry"
+    "deadlocks deadlocks"
+    "hot gc"
+    "tiflash tiflash"
     "regions regions";
   align-items: stretch;
   gap: 12px;
@@ -410,6 +429,9 @@ export const DIAGNOSE_CSS = `
 
 .tidb-diagnose__panel[data-diagnose-section="cluster"] { grid-area: cluster; }
 .tidb-diagnose__panel[data-diagnose-section="transactions"] { grid-area: transactions; }
+.tidb-diagnose__panel[data-diagnose-section="lock-waits"] { grid-area: lock-waits; }
+.tidb-diagnose__panel[data-diagnose-section="deadlocks"] { grid-area: deadlocks; }
+.tidb-diagnose__panel[data-diagnose-section="application-retry"] { grid-area: application-retry; }
 .tidb-diagnose__panel[data-diagnose-section="hot-regions"] { grid-area: hot; }
 .tidb-diagnose__panel[data-diagnose-section="regions"] { grid-area: regions; }
 .tidb-diagnose__panel[data-diagnose-section="gc"] { grid-area: gc; }
@@ -505,6 +527,14 @@ export const DIAGNOSE_CSS = `
   white-space: nowrap;
 }
 
+.tidb-diagnose__panel[data-diagnose-section="deadlocks"]
+  .tidb-diagnose__table td[data-column="selectionPolicy"],
+.tidb-diagnose__panel[data-diagnose-section="deadlocks"]
+  .tidb-diagnose__table td[data-column="lockWaitTimeout"] {
+  min-width: 13rem;
+  white-space: normal;
+}
+
 .tidb-diagnose__table tbody tr {
   transition: background-color 120ms ease;
 }
@@ -556,7 +586,7 @@ export const DIAGNOSE_CSS = `
   color: var(--diag-neutral);
   font-size: 9px;
   font-weight: 720;
-  text-transform: lowercase;
+  text-transform: none;
 }
 
 .tidb-diagnose__state[data-tone="healthy"] { color: var(--diag-healthy); }
@@ -807,6 +837,9 @@ export const DIAGNOSE_CSS = `
     grid-template-areas:
       "cluster"
       "transactions"
+      "lock-waits"
+      "deadlocks"
+      "application-retry"
       "hot"
       "gc"
       "tiflash"

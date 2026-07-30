@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { TraceDomain, TraceEvent, TraceReceipt } from '../model/types'
+import type {
+  TraceDomain,
+  TraceEvent,
+  TraceLockLabSnapshot,
+  TraceReceipt,
+  TraceStateSnapshot,
+} from '../model/types'
 import { CATALOG, resolveLocale, type Locale } from '../ui/catalog'
 import { element, svgElement } from '../ui/dom'
 import { createModelBadge } from '../ui/legal'
 import { installCityUiStyles } from '../ui/styles'
 import { installMachineStyles } from './styles'
 
+export {
+  MACHINE_PAGE_COPY,
+  MACHINE_SCENARIOS,
+  resolveMachineScenario,
+} from './catalog'
 export { MACHINE_CSS, installMachineStyles } from './styles'
 
 export const MACHINE_LANES = ['sql', 'tso', 'txn2pc', 'raft', 'kv', 'tiflash'] as const
@@ -17,6 +28,8 @@ export interface MachineEvent {
   atMs: number
   durationMs: number
   domain: MachineLane
+  /** Canonical model event kind, retained independently from its visible label. */
+  kind?: string
   label: string
   detail: string
   source?: string
@@ -27,6 +40,11 @@ export interface MachineEvent {
   /** False marks work that continues after the client critical path. */
   criticalPath?: boolean
   regionId?: number
+  transactionId?: string
+  /** Stable parallel-branch identity from the canonical receipt. */
+  branchId?: string
+  /** The exact immutable post-event model projection; never reconstructed here. */
+  snapshot?: TraceStateSnapshot
 }
 
 export interface MachineReceipt {
@@ -39,6 +57,8 @@ export interface MachineOptions {
   locale?: Locale
   search?: string
   initialIndex?: number
+  /** Preferred cursor contract. Resolved after receipt adaptation. */
+  initialEventId?: string
   stepIntervalMs?: number
   autoplay?: boolean
   adaptReceipt?: (receipt: unknown) => MachineReceipt
@@ -85,6 +105,32 @@ const MACHINE_COPY = {
     duration: '継続時間',
     route: '経路',
     current: '現在のイベント',
+    eventKind: 'イベント種別',
+    branch: '並列ブランチ',
+    lockEyebrow: 'LOCK LAB / SEMANTIC STATE',
+    lockTitle: 'ロック待機とデッドロック',
+    waitGraph: 'Wait-for グラフ',
+    waitDirection: '矢印は待機者 → 現在の保持者です。上の因果 DAG とは別の意味グラフです。',
+    noWaitEdges: '現在の wait-for edge はありません。',
+    resource: '合成リソース',
+    waiter: '待機者',
+    holder: '保持者',
+    detector: 'デッドロック検出器',
+    detectorScope: 'クラスタ全体',
+    detectorLeader: '検出器 leader',
+    deadlock: 'デッドロック判定',
+    noDeadlock: 'この時点ではデッドロックは検出されていません。',
+    cycle: '循環',
+    victim: 'victim',
+    pending: '未選択',
+    modelPolicy: 'MODEL POLICY：循環を閉じた待機者を決定論的に選択',
+    retryableFalse: 'RETRYABLE=false（このトランザクション全体を終了）',
+    applicationRetry: 'アプリケーション再試行',
+    noApplicationRetry: 'アプリケーション再試行はまだ予定されていません。',
+    retrySource: 'TiDB 内部再試行ではなくアプリケーション',
+    retryOf: '再試行元',
+    newTransaction: '新しい transaction',
+    fixedBackoff: '固定 teaching backoff',
     empty: '—',
   },
   en: {
@@ -98,6 +144,32 @@ const MACHINE_COPY = {
     duration: 'Duration',
     route: 'Route',
     current: 'Current event',
+    eventKind: 'Event kind',
+    branch: 'Parallel branch',
+    lockEyebrow: 'LOCK LAB / SEMANTIC STATE',
+    lockTitle: 'Lock waits and deadlock',
+    waitGraph: 'Wait-for graph',
+    waitDirection: 'Arrows run waiter → current holder. This semantic graph is separate from the causal DAG above.',
+    noWaitEdges: 'There are no active wait-for edges at this event.',
+    resource: 'Synthetic resource',
+    waiter: 'Waiter',
+    holder: 'Holder',
+    detector: 'Deadlock detector',
+    detectorScope: 'Cluster-wide',
+    detectorLeader: 'Detector leader',
+    deadlock: 'Deadlock decision',
+    noDeadlock: 'No deadlock has been detected at this event.',
+    cycle: 'Cycle',
+    victim: 'Victim',
+    pending: 'Pending',
+    modelPolicy: 'MODEL POLICY: deterministically select the cycle-closing waiter',
+    retryableFalse: 'RETRYABLE=false (end this whole transaction)',
+    applicationRetry: 'Application retry',
+    noApplicationRetry: 'No application retry has been scheduled yet.',
+    retrySource: 'Application, not an internal TiDB retry',
+    retryOf: 'Retry of',
+    newTransaction: 'New transaction',
+    fixedBackoff: 'Fixed teaching backoff',
     empty: '—',
   },
 } as const
@@ -129,6 +201,12 @@ function asStringArray(value: unknown): readonly string[] | undefined {
   const strings = value.filter((entry): entry is string =>
     typeof entry === 'string' && entry.length > 0)
   return strings.length > 0 ? strings : undefined
+}
+
+function asTraceSnapshot(value: unknown): TraceStateSnapshot | undefined {
+  return value && typeof value === 'object'
+    ? value as TraceStateSnapshot
+    : undefined
 }
 
 function machineDomain(value: unknown): MachineLane | null {
@@ -164,6 +242,12 @@ function shortLabel(label: string, maxLength = 32): string {
   return label.length > maxLength ? `${label.slice(0, maxLength - 1)}…` : label
 }
 
+function lockAttemptLabel(clientId: string, attempt: number): string {
+  if (attempt <= 1) return clientId
+  if (attempt <= 4) return `${clientId}${'′'.repeat(attempt - 1)}`
+  return `${clientId} (${attempt})`
+}
+
 function appendSvgText(
   parent: SVGElement,
   className: string,
@@ -183,6 +267,379 @@ function appendSvgText(
   return node
 }
 
+const LOCK_TRANSACTION_STATUS_COPY = {
+  ja: {
+    active: '実行中',
+    waiting: '待機中',
+    victim: 'victim',
+    rolled_back: 'ロールバック済み',
+    commit_handoff: 'commit modelへ引き渡し',
+    completed: '完了',
+  },
+  en: {
+    active: 'Active',
+    waiting: 'Waiting',
+    victim: 'Victim',
+    rolled_back: 'Rolled back',
+    commit_handoff: 'Commit-model handoff',
+    completed: 'Completed',
+  },
+} as const
+
+const DEADLOCK_RESOLUTION_COPY = {
+  ja: {
+    detected: '循環を検出',
+    rolling_back: 'victimをロールバック中',
+    resolved: '解消済み（履歴を保持）',
+  },
+  en: {
+    detected: 'Cycle detected',
+    rolling_back: 'Rolling back victim',
+    resolved: 'Resolved (history retained)',
+  },
+} as const
+
+const APPLICATION_RETRY_STATUS_COPY = {
+  ja: {
+    backoff: 'backoff中',
+    started: '新しいtransactionを開始',
+    completed: '再試行完了',
+  },
+  en: {
+    backoff: 'In backoff',
+    started: 'New transaction started',
+    completed: 'Retry completed',
+  },
+} as const
+
+function renderWaitForDiagram(
+  lockLab: TraceLockLabSnapshot,
+  locale: Locale,
+): HTMLDivElement {
+  const copy = MACHINE_COPY[locale]
+  const wrapper = element('div', {
+    className: 'tidb-machine__wait-graph',
+    attrs: {
+      role: 'group',
+      'aria-label': `${copy.waitGraph}. ${copy.waitDirection}`,
+      'data-wait-for-graph': 'semantic',
+      'data-edge-count': String(lockLab.waitForEdges.length),
+      tabindex: '0',
+    },
+  })
+  const graphHead = element('div', { className: 'tidb-machine__lock-card-head' },
+    element('h3', { text: copy.waitGraph }),
+    element('span', {
+      className: 'tidb-machine__graph-contract',
+      text: 'WAITER → HOLDER',
+    }),
+  )
+  const direction = element('p', {
+    className: 'tidb-machine__graph-direction',
+    text: copy.waitDirection,
+  })
+
+  const width = 620
+  const height = 170
+  const centerY = 82
+  const transactions = lockLab.transactions
+  const positionByTransactionId = new Map<string, number>()
+  const diagram = svgElement('svg', {
+    class: 'tidb-machine__wait-svg',
+    viewBox: `0 0 ${width} ${height}`,
+    'aria-hidden': 'true',
+    'data-graph-kind': 'wait-for',
+  })
+  const defs = svgElement('defs')
+  const marker = svgElement('marker', {
+    id: 'tidb-machine-wait-arrow',
+    viewBox: '0 0 10 10',
+    refX: '8',
+    refY: '5',
+    markerWidth: '7',
+    markerHeight: '7',
+    orient: 'auto-start-reverse',
+  })
+  marker.append(svgElement('path', {
+    class: 'tidb-machine__wait-arrow',
+    d: 'M 0 0 L 10 5 L 0 10 z',
+  }))
+  defs.append(marker)
+  diagram.append(defs)
+
+  transactions.forEach((transaction, index) => {
+    const x = transactions.length === 1
+      ? width / 2
+      : 76 + index * ((width - 152) / Math.max(1, transactions.length - 1))
+    positionByTransactionId.set(transaction.transactionId, x)
+  })
+
+  for (const [index, edge] of lockLab.waitForEdges.entries()) {
+    const waiterX = positionByTransactionId.get(edge.waiterTransactionId)
+    const holderX = positionByTransactionId.get(edge.holderTransactionId)
+    if (waiterX === undefined || holderX === undefined) continue
+    const directionSign = holderX >= waiterX ? 1 : -1
+    const startX = waiterX + directionSign * 54
+    const endX = holderX - directionSign * 54
+    const midX = (startX + endX) / 2
+    const hasReverse = lockLab.waitForEdges.some((candidate) =>
+      candidate.waiterTransactionId === edge.holderTransactionId &&
+      candidate.holderTransactionId === edge.waiterTransactionId)
+    const controlY = hasReverse
+      ? directionSign > 0 ? 19 : 145
+      : 42 + (index % 2) * 80
+    diagram.append(svgElement('path', {
+      class: 'tidb-machine__wait-edge',
+      d: `M ${startX} ${centerY} Q ${midX} ${controlY} ${endX} ${centerY}`,
+      'data-wait-for-edge': edge.id,
+      'data-wait-for-from': edge.waiterTransactionId,
+      'data-wait-for-to': edge.holderTransactionId,
+      'data-resource-id': edge.resourceId,
+      'data-direction': 'waiter-to-holder',
+      'marker-end': 'url(#tidb-machine-wait-arrow)',
+    }))
+    appendSvgText(
+      diagram,
+      'tidb-machine__wait-resource',
+      edge.resourceId,
+      midX,
+      controlY < centerY ? controlY + 14 : controlY - 8,
+      { 'text-anchor': 'middle' },
+    )
+  }
+
+  for (const transaction of transactions) {
+    const x = positionByTransactionId.get(transaction.transactionId)
+    if (x === undefined) continue
+    const clientLabel = lockAttemptLabel(
+      transaction.clientId,
+      transaction.attempt,
+    )
+    const node = svgElement('g', {
+      class: `tidb-machine__wait-node is-${transaction.status}`,
+      'data-lock-transaction': transaction.transactionId,
+      'data-lock-client': transaction.clientId,
+      'data-lock-status': transaction.status,
+    })
+    node.append(svgElement('rect', {
+      class: 'tidb-machine__wait-node-box',
+      x: String(x - 54),
+      y: String(centerY - 24),
+      width: '108',
+      height: '48',
+      rx: '10',
+    }))
+    appendSvgText(
+      node,
+      'tidb-machine__wait-node-client',
+      clientLabel,
+      x,
+      centerY - 3,
+      { 'text-anchor': 'middle' },
+    )
+    appendSvgText(
+      node,
+      'tidb-machine__wait-node-id',
+      shortLabel(transaction.transactionId, 18),
+      x,
+      centerY + 13,
+      { 'text-anchor': 'middle' },
+    )
+    diagram.append(node)
+  }
+
+  const edgeList = element('ul', {
+    className: 'tidb-machine__wait-list',
+    attrs: { 'aria-label': copy.waitGraph },
+  })
+  for (const edge of lockLab.waitForEdges) {
+    edgeList.append(element('li', {
+      attrs: {
+        'data-wait-for-edge': edge.id,
+        'data-wait-for-from': edge.waiterTransactionId,
+        'data-wait-for-to': edge.holderTransactionId,
+        'data-resource-id': edge.resourceId,
+        'data-direction': 'waiter-to-holder',
+      },
+    },
+    element('span', { text: `${copy.waiter}: ${edge.waiterTransactionId}` }),
+    element('strong', { text: '→' }),
+    element('span', { text: `${copy.holder}: ${edge.holderTransactionId}` }),
+    element('small', { text: `${copy.resource}: ${edge.resourceId}` }),
+    ))
+  }
+  if (lockLab.waitForEdges.length === 0) {
+    edgeList.append(element('li', {
+      className: 'tidb-machine__lock-empty',
+      text: copy.noWaitEdges,
+      attrs: { 'data-wait-for-empty': 'true' },
+    }))
+  }
+
+  wrapper.append(graphHead, direction, diagram, edgeList)
+  return wrapper
+}
+
+function renderLockState(
+  event: MachineEvent,
+  locale: Locale,
+): HTMLElement | null {
+  const lockLab = event.snapshot?.lockLab
+  if (!lockLab) return null
+  const copy = MACHINE_COPY[locale]
+  const detector = element('section', {
+    className: 'tidb-machine__lock-card',
+    attrs: {
+      'data-lock-detector': lockLab.detectorLeaderStoreId,
+      'data-detector-scope': lockLab.detectorScope,
+    },
+  },
+  element('h3', { text: copy.detector }),
+  element('strong', { text: copy.detectorScope }),
+  element('p', {
+    text: `${copy.detectorLeader}: ${lockLab.detectorLeaderStoreId}`,
+  }),
+  )
+
+  const deadlock = lockLab.deadlock
+  const deadlockCard = element('section', {
+    className: 'tidb-machine__lock-card',
+    attrs: {
+      'data-deadlock-state': deadlock?.resolution ?? 'none',
+      'data-deadlock-victim': deadlock?.victimTransactionId ?? '',
+      'data-deadlock-retryable': deadlock ? String(deadlock.retryable) : 'not-applicable',
+    },
+  },
+  element('h3', { text: copy.deadlock }),
+  )
+  if (deadlock) {
+    deadlockCard.append(
+      element('strong', {
+        text: DEADLOCK_RESOLUTION_COPY[locale][deadlock.resolution],
+      }),
+      element('p', {
+        className: 'tidb-machine__deadlock-cycle',
+        text: `${copy.cycle}: ${deadlock.cycleTransactionIds.join(' → ')}`,
+      }),
+      element('p', {
+        text: `${copy.victim}: ${deadlock.victimTransactionId ?? copy.pending}`,
+      }),
+      element('p', {
+        className: 'tidb-machine__model-policy',
+        text: copy.modelPolicy,
+        attrs: {
+          'data-selection-policy': 'model-policy',
+          'data-policy-contract': deadlock.selectionPolicy,
+        },
+      }),
+      element('p', {
+        className: 'tidb-machine__retryable-false',
+        text: copy.retryableFalse,
+        attrs: { 'data-retryable': 'false' },
+      }),
+    )
+  } else {
+    deadlockCard.append(element('p', {
+      className: 'tidb-machine__lock-empty',
+      text: copy.noDeadlock,
+    }))
+  }
+
+  const retry = lockLab.applicationRetry
+  const retryCard = element('section', {
+    className: 'tidb-machine__lock-card',
+    attrs: {
+      'data-application-retry': retry?.status ?? 'none',
+      'data-retry-source': retry?.source ?? 'none',
+    },
+  },
+  element('h3', { text: copy.applicationRetry }),
+  )
+  if (retry) {
+    retryCard.append(
+      element('strong', {
+        text: APPLICATION_RETRY_STATUS_COPY[locale][retry.status],
+      }),
+      element('p', { text: copy.retrySource }),
+      element('p', { text: `${copy.retryOf}: ${retry.retryOfTransactionId}` }),
+      element('p', {
+        text: `${copy.newTransaction}: ${retry.newTransactionId ?? copy.pending}`,
+      }),
+      element('p', {
+        text: `${copy.fixedBackoff}: ${retry.fixedBackoffMs} ms`,
+      }),
+    )
+  } else {
+    retryCard.append(element('p', {
+      className: 'tidb-machine__lock-empty',
+      text: copy.noApplicationRetry,
+    }))
+  }
+
+  const transactionLegend = element('ul', {
+    className: 'tidb-machine__lock-transactions',
+    attrs: {
+      'aria-label': locale === 'ja'
+        ? 'Lock Lab transactionの状態'
+        : 'Lock Lab transaction states',
+    },
+  })
+  for (const transaction of lockLab.transactions) {
+    const clientLabel = lockAttemptLabel(
+      transaction.clientId,
+      transaction.attempt,
+    )
+    transactionLegend.append(element('li', {
+      attrs: {
+        'data-lock-transaction-summary': transaction.transactionId,
+        'data-lock-status': transaction.status,
+        'data-lock-attempt': String(transaction.attempt),
+      },
+    },
+    element('span', { text: clientLabel }),
+    element('code', { text: transaction.transactionId }),
+    element('strong', {
+      text: LOCK_TRANSACTION_STATUS_COPY[locale][transaction.status],
+    }),
+    ))
+  }
+
+  return element('section', {
+    className: 'tidb-machine__lock-state',
+    attrs: {
+      'aria-labelledby': 'tidb-machine-lock-title',
+      'data-lock-lab-state': 'true',
+      'data-lock-event-id': event.id,
+      'data-lock-event-kind': event.kind ?? '',
+      'data-lock-event-branch': event.branchId ?? '',
+    },
+  },
+  element('header', { className: 'tidb-machine__lock-head' },
+    element('div', {},
+      element('p', {
+        className: 'tidb-machine__lock-eyebrow',
+        text: copy.lockEyebrow,
+      }),
+      element('h2', {
+        text: copy.lockTitle,
+        attrs: { id: 'tidb-machine-lock-title' },
+      }),
+    ),
+    element('span', {
+      className: 'tidb-machine__lock-snapshot',
+      text: `SNAPSHOT · ${event.id}`,
+    }),
+  ),
+  renderWaitForDiagram(lockLab, locale),
+  transactionLegend,
+  element('div', { className: 'tidb-machine__lock-grid' },
+    detector,
+    deadlockCard,
+    retryCard,
+  ),
+  )
+}
+
 export function adaptTraceReceipt(source: unknown): MachineReceipt {
   const receipt = record(source)
   const rawEvents = Array.isArray(receipt.events) ? receipt.events : []
@@ -196,6 +653,7 @@ export function adaptTraceReceipt(source: unknown): MachineReceipt {
       atMs: asNumber(raw.atMs, asNumber(raw.at, index)),
       durationMs: asNumber(raw.durationMs, asNumber(raw.duration, 0)),
       domain,
+      kind: asString(raw.kind) || undefined,
       label: asString(raw.label, asString(raw.kind, domain)),
       detail: asString(raw.detail),
       source: asString(raw.source) || undefined,
@@ -212,10 +670,30 @@ export function adaptTraceReceipt(source: unknown): MachineReceipt {
       regionId: typeof raw.regionId === 'number' && Number.isInteger(raw.regionId)
         ? raw.regionId
         : undefined,
+      transactionId: asString(raw.transactionId) || undefined,
+      branchId: asString(raw.branchId) || undefined,
+      snapshot: asTraceSnapshot(raw.snapshot),
     })
   }
-  events.sort((a, b) => a.atMs - b.atMs || a.id.localeCompare(b.id))
+  /*
+   * Canonical receipt order is also snapshot order. Parallel branches can
+   * share or revisit model-time positions, so sorting here would detach a URL
+   * cursor from the immutable post-event projection that it names.
+   */
   return { id: asString(receipt.id, 'trace'), events }
+}
+
+export function resolveMachineEventIndex(
+  receipt: MachineReceipt,
+  eventId: string | undefined,
+  fallbackIndex = 0,
+): number {
+  if (receipt.events.length === 0) return -1
+  if (eventId) {
+    const requestedIndex = receipt.events.findIndex((event) => event.id === eventId)
+    if (requestedIndex >= 0) return requestedIndex
+  }
+  return Math.max(0, Math.min(receipt.events.length - 1, fallbackIndex))
 }
 
 function renderTimeline(
@@ -389,6 +867,7 @@ function renderTimeline(
   const causalLayer = svgElement('g', {
     class: 'tidb-machine__causal-layer',
     'aria-hidden': 'true',
+    'data-graph-kind': 'causal-dag',
   })
   const layoutById = new Map(layouts.map((layout) => [layout.event.id, layout]))
   for (let index = 0; index < layouts.length; index += 1) {
@@ -469,8 +948,13 @@ function renderTimeline(
       role: 'button',
       'aria-label': accessibleName,
       'aria-current': state === 'current' ? 'step' : 'false',
+      'data-event-id': event.id,
       'data-event-index': String(index),
       'data-event-domain': event.domain,
+      'data-event-kind': event.kind ?? '',
+      'data-event-branch': event.branchId ?? '',
+      'data-event-transaction': event.transactionId ?? '',
+      'data-event-has-lock-snapshot': event.snapshot?.lockLab ? 'true' : 'false',
       'data-event-status': status,
       'data-event-state': state,
     })
@@ -556,11 +1040,15 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
   installCityUiStyles(root.ownerDocument ?? document)
   installMachineStyles(root.ownerDocument ?? document)
 
-  let current = total === 0
-    ? -1
-    : Math.max(0, Math.min(total - 1, options.initialIndex ?? 0))
+  let current = resolveMachineEventIndex(
+    receipt,
+    options.initialEventId,
+    options.initialIndex ?? 0,
+  )
   let timer: ReturnType<typeof setInterval> | null = null
   const frame = element('div', { className: 'tidb-machine__frame' })
+  const hasLockSnapshots = receipt.events.some((event) => Boolean(event.snapshot?.lockLab))
+  const lockSlot = element('div', { className: 'tidb-machine__lock-slot' })
   const detail = element('section', {
     className: 'tidb-machine__detail',
     attrs: { 'aria-live': 'polite', 'aria-atomic': 'true' },
@@ -661,6 +1149,39 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
       const status = machineStatus(event.status)
       detail.setAttribute('data-current-domain', event.domain)
       detail.setAttribute('data-current-status', status)
+      detail.setAttribute('data-current-event-id', event.id)
+      detail.setAttribute('data-current-event-kind', event.kind ?? '')
+      detail.setAttribute('data-current-event-branch', event.branchId ?? '')
+      const eventMeta = element('dl', { className: 'tidb-machine__detail-meta' },
+        element('div', {},
+          element('dt', { text: copy.modelTime }),
+          element('dd', { text: formatModelTime(event.atMs) }),
+        ),
+        element('div', {},
+          element('dt', { text: copy.activeLayer }),
+          element('dd', { text: LANE_LABELS[locale][event.domain] }),
+        ),
+        element('div', {},
+          element('dt', { text: copy.duration }),
+          element('dd', { text: formatModelTime(Math.max(0, event.durationMs)) }),
+        ),
+      )
+      if (event.kind) {
+        eventMeta.append(element('div', {
+          attrs: { 'data-detail-event-kind': event.kind },
+        },
+        element('dt', { text: copy.eventKind }),
+        element('dd', { text: event.kind }),
+        ))
+      }
+      if (event.branchId) {
+        eventMeta.append(element('div', {
+          attrs: { 'data-detail-event-branch': event.branchId },
+        },
+        element('dt', { text: copy.branch }),
+        element('dd', { text: event.branchId }),
+        ))
+      }
       const detailNodes: Node[] = [
         element('div', { className: 'tidb-machine__detail-head' },
           element('p', {
@@ -673,20 +1194,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
           }),
         ),
         element('h2', { text: event.label }),
-        element('dl', { className: 'tidb-machine__detail-meta' },
-          element('div', {},
-            element('dt', { text: copy.modelTime }),
-            element('dd', { text: formatModelTime(event.atMs) }),
-          ),
-          element('div', {},
-            element('dt', { text: copy.activeLayer }),
-            element('dd', { text: LANE_LABELS[locale][event.domain] }),
-          ),
-          element('div', {},
-            element('dt', { text: copy.duration }),
-            element('dd', { text: formatModelTime(Math.max(0, event.durationMs)) }),
-          ),
-        ),
+        eventMeta,
       ]
       if (event.detail) {
         detailNodes.push(element('p', { className: 'tidb-machine__detail-copy', text: event.detail }))
@@ -701,7 +1209,17 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     } else {
       detail.removeAttribute('data-current-domain')
       detail.removeAttribute('data-current-status')
+      detail.removeAttribute('data-current-event-id')
+      detail.removeAttribute('data-current-event-kind')
+      detail.removeAttribute('data-current-event-branch')
       detail.replaceChildren(element('p', { className: 'tidb-machine__empty', text: CATALOG[locale].emptyTrace }))
+    }
+    if (hasLockSnapshots) {
+      const lockState = event ? renderLockState(event, locale) : null
+      lockSlot.hidden = lockState === null
+      lockSlot.setAttribute('aria-hidden', lockState === null ? 'true' : 'false')
+      if (lockState) lockSlot.replaceChildren(lockState)
+      else lockSlot.replaceChildren()
     }
     options.onSeek?.(event, current)
 
@@ -766,6 +1284,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     overview,
     transport,
     frame,
+    ...(hasLockSnapshots ? [lockSlot] : []),
     detail,
     element('p', { className: 'tidb-machine__note', text: CATALOG[locale].simulatedTiming }),
   )

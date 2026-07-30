@@ -12,12 +12,25 @@ export { DIAGNOSE_CSS, installDiagnoseStyles } from './styles'
 export const DIAGNOSE_SECTIONS = [
   'cluster',
   'transactions',
+  'lock-waits',
+  'deadlocks',
+  'application-retry',
   'hot-regions',
   'regions',
   'gc',
   'tiflash',
 ] as const
 export type DiagnoseSection = (typeof DIAGNOSE_SECTIONS)[number]
+
+export const DIAGNOSE_SUMMARY_SECTIONS = [
+  'cluster',
+  'regions',
+  'hot-regions',
+  'transactions',
+  'gc',
+  'tiflash',
+] as const satisfies readonly DiagnoseSection[]
+type DiagnoseSummarySection = (typeof DIAGNOSE_SUMMARY_SECTIONS)[number]
 
 export type DiagnosticRow = Readonly<Record<string, string>>
 
@@ -135,6 +148,9 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
   ja: {
     cluster: 'Cluster topology',
     transactions: 'Transactions / locks',
+    'lock-waits': '現在のロック待機',
+    deadlocks: 'デッドロック履歴',
+    'application-retry': 'アプリケーション再試行',
     'hot-regions': 'Hot Regions',
     regions: 'Regions / stores',
     gc: 'MVCC / GC',
@@ -143,6 +159,9 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
   en: {
     cluster: 'Cluster topology',
     transactions: 'Transactions / locks',
+    'lock-waits': 'Active lock waits',
+    deadlocks: 'Deadlock history',
+    'application-retry': 'Application retry',
     'hot-regions': 'Hot Regions',
     regions: 'Regions / stores',
     gc: 'MVCC / GC',
@@ -158,6 +177,7 @@ interface DiagnoseCopy {
   summaryStatus: Record<Exclude<SummaryTone, 'neutral'>, string>
   row: string
   rows: string
+  table: string
   sqlCheck: string
   metrics: {
     nodes: string
@@ -173,6 +193,7 @@ interface DiagnoseCopy {
     healthy: string
     active: string
     conflicts: string
+    lockWaits: string
     peak: string
     safePoint: string
     blocked: string
@@ -201,6 +222,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
     },
     row: '行',
     rows: '行',
+    table: 'テーブル',
     sqlCheck: '実クラスタ確認SQLを表示',
     metrics: {
       nodes: 'ノード稼働',
@@ -216,6 +238,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       healthy: '健全',
       active: '進行中',
       conflicts: '競合',
+      lockWaits: 'ロック待機',
       peak: '最大スコア',
       safePoint: 'safe point',
       blocked: 'ブロック中',
@@ -242,6 +265,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
     },
     row: 'row',
     rows: 'rows',
+    table: 'table',
     sqlCheck: 'Show real-cluster check SQL',
     metrics: {
       nodes: 'Node availability',
@@ -257,6 +281,7 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       healthy: 'healthy',
       active: 'active',
       conflicts: 'conflicts',
+      lockWaits: 'lock waits',
       peak: 'peak score',
       safePoint: 'safe point',
       blocked: 'blocked',
@@ -273,6 +298,114 @@ const DIAGNOSE_COPY: Record<Locale, DiagnoseCopy> = {
       tiflash: 'TiFlash replication progress',
     },
   },
+}
+
+const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
+  ja: {
+    client: 'client',
+    attempt: '試行',
+    phase: '状態',
+    startTs: 'start_ts',
+    commitTs: 'commit_ts',
+    retryOf: '再試行元',
+    heldResources: '保持resource',
+    waitingFor: '待機resource',
+    edge: 'edge',
+    waiter: '待機transaction',
+    holder: '保持transaction',
+    direction: '向き',
+    resource: 'resource',
+    region: 'Region',
+    queuePosition: 'queue位置',
+    detectorScope: 'detector範囲',
+    detectorLeader: 'detector leader',
+    cycle: 'cycle',
+    victim: 'victim',
+    selectionPolicy: '選択policy',
+    internalRetryable: 'TiDB内部retry可否',
+    clientError: 'client返却error',
+    lockWaitTimeout: 'lock待機timeout',
+    resolution: '解決状態',
+    source: '再試行元',
+    fixedBackoffMs: '固定backoff (ms)',
+    newTransaction: '新transaction',
+    newStartTs: '新start_ts',
+    boundary: '再試行境界',
+  },
+  en: {
+    client: 'client',
+    attempt: 'attempt',
+    phase: 'state',
+    startTs: 'start_ts',
+    commitTs: 'commit_ts',
+    retryOf: 'retry of',
+    heldResources: 'held resources',
+    waitingFor: 'waiting for',
+    edge: 'edge',
+    waiter: 'waiting transaction',
+    holder: 'holding transaction',
+    direction: 'direction',
+    resource: 'resource',
+    region: 'Region',
+    queuePosition: 'queue position',
+    detectorScope: 'detector scope',
+    detectorLeader: 'detector leader',
+    cycle: 'cycle',
+    victim: 'victim',
+    selectionPolicy: 'selection policy',
+    internalRetryable: 'TiDB internal retryable',
+    clientError: 'client error returned',
+    lockWaitTimeout: 'lock-wait timeout',
+    resolution: 'resolution',
+    source: 'retry source',
+    fixedBackoffMs: 'fixed backoff (ms)',
+    newTransaction: 'new transaction',
+    newStartTs: 'new start_ts',
+    boundary: 'retry boundary',
+  },
+}
+
+const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
+  ja: {
+    'direction:waiter → holder': '待機transaction → 保持transaction',
+    'selectionPolicy:MODEL POLICY: cycle-closing waiter': 'MODEL POLICY：cycleを閉じた待機transaction',
+    'lockWaitTimeout:Error 1205 separate / not modeled': 'Error 1205（別経路／未モデル化）',
+    'detectorScope:cluster_wide': 'クラスタ全体',
+    'boundary:whole transaction': 'transaction全体',
+    'source:application': 'アプリケーション',
+    'resolution:detected': '検出',
+    'resolution:rolling_back': 'rollback中',
+    'resolution:resolved': '解決済み',
+    'status:backoff': 'backoff中',
+    'status:started': '開始済み',
+    'status:completed': '完了',
+    'phase:active': '実行中',
+    'phase:waiting': '待機中',
+    'phase:victim': 'victim',
+    'phase:rolled_back': 'rollback済み',
+    'phase:commit_handoff': 'commit modelへ引き渡し',
+    'phase:completed': '完了',
+    'internalRetryable:false': 'false（TiDB内部retryなし）',
+    'clientError:not_returned_yet': '未返却',
+  },
+  en: {
+    'detectorScope:cluster_wide': 'cluster-wide',
+    'resolution:rolling_back': 'rolling back',
+    'internalRetryable:false': 'false (no TiDB internal retry)',
+    'clientError:not_returned_yet': 'Not returned yet',
+  },
+}
+
+function localizedColumnTitle(locale: Locale, column: string): string {
+  return COLUMN_TITLES[locale][column] ?? column
+}
+
+function localizedCellValue(
+  locale: Locale,
+  column: string,
+  raw: string,
+): string {
+  return CELL_VALUE_COPY[locale][`${column}:${raw}`] ?? raw
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -316,7 +449,29 @@ function clusterRows(state: Record<string, unknown>): DiagnosticRow[] {
   })
 }
 
+function lockLabState(state: Record<string, unknown>): Record<string, unknown> {
+  return record(state.lockLab)
+}
+
 function transactionRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const lockLab = lockLabState(state)
+  const lockTransactions = array(lockLab.transactions)
+  if (lockTransactions.length > 0) {
+    return lockTransactions.map((entry) => {
+      const transaction = record(entry)
+      return {
+        id: value(transaction.transactionId),
+        client: value(transaction.clientId),
+        attempt: value(transaction.attempt),
+        phase: value(transaction.status),
+        startTs: value(transaction.startTs),
+        commitTs: value(transaction.commitTs),
+        retryOf: value(transaction.retryOfTransactionId),
+        heldResources: value(transaction.heldResourceIds),
+        waitingFor: value(transaction.waitingForResourceId),
+      }
+    })
+  }
   const listed = array(state.transactions)
   const transactions = listed.length > 0
     ? listed
@@ -338,6 +493,74 @@ function transactionRows(state: Record<string, unknown>): DiagnosticRow[] {
       conflict: value(transaction.conflict),
     }
   })
+}
+
+function lockWaitRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const lockLab = lockLabState(state)
+  const resources = array(lockLab.resources).map(record)
+  const detectorLeader = value(lockLab.detectorLeaderStoreId)
+  return array(lockLab.waitForEdges).map((entry) => {
+    const edge = record(entry)
+    const resource = resources.find((candidate) => candidate.id === edge.resourceId)
+    const queuePosition = resource
+      ? array(resource.waiterTransactionIds).findIndex((id) =>
+          id === edge.waiterTransactionId)
+      : -1
+    return {
+      edge: value(edge.id),
+      waiter: value(edge.waiterTransactionId),
+      holder: value(edge.holderTransactionId),
+      direction: 'waiter → holder',
+      resource: value(edge.resourceId),
+      region: value(edge.regionId),
+      queuePosition: queuePosition < 0 ? '—' : String(queuePosition + 1),
+      detectorScope: value(lockLab.detectorScope),
+      detectorLeader,
+    }
+  })
+}
+
+function deadlockRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const lockLab = lockLabState(state)
+  const deadlock = record(lockLab.deadlock)
+  if (Object.keys(deadlock).length === 0) return []
+  const clientErrorCode = deadlock.clientErrorCode
+  return [{
+    id: value(deadlock.id),
+    cycle: value(deadlock.cycleTransactionIds),
+    victim: value(deadlock.victimTransactionId),
+    selectionPolicy: deadlock.selectionPolicy === 'cycle_closing_waiter_model_policy'
+      ? 'MODEL POLICY: cycle-closing waiter'
+      : value(deadlock.selectionPolicy),
+    internalRetryable: value(deadlock.retryable),
+    clientError: clientErrorCode === 1213
+      ? 'Error 1213'
+      : 'not_returned_yet',
+    lockWaitTimeout: 'Error 1205 separate / not modeled',
+    resolution: value(deadlock.resolution),
+    detectorScope: value(lockLab.detectorScope),
+    detectorLeader: value(lockLab.detectorLeaderStoreId),
+  }]
+}
+
+function applicationRetryRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const lockLab = lockLabState(state)
+  const retry = record(lockLab.applicationRetry)
+  if (Object.keys(retry).length === 0) return []
+  const newTransactionId = retry.newTransactionId
+  const newTransaction = array(lockLab.transactions)
+    .map(record)
+    .find((transaction) => transaction.transactionId === newTransactionId)
+  return [{
+    source: value(retry.source),
+    client: value(retry.clientId),
+    retryOf: value(retry.retryOfTransactionId),
+    status: value(retry.status),
+    fixedBackoffMs: value(retry.fixedBackoffMs),
+    newTransaction: value(newTransactionId),
+    newStartTs: value(newTransaction?.startTs),
+    boundary: 'whole transaction',
+  }]
 }
 
 function regionSource(state: Record<string, unknown>): Record<string, unknown>[] {
@@ -432,6 +655,9 @@ export function projectDiagnostics(snapshot: TiCityState | unknown): DiagnosticP
   const sources: Record<DiagnoseSection, () => DiagnosticRow[]> = {
     cluster: () => clusterRows(state),
     transactions: () => transactionRows(state),
+    'lock-waits': () => lockWaitRows(state),
+    deadlocks: () => deadlockRows(state),
+    'application-retry': () => applicationRetryRows(state),
     'hot-regions': () => hotRegionRows(state),
     regions: () => regionRows(state),
     gc: () => gcRows(state),
@@ -450,7 +676,7 @@ interface ChartDatum {
 }
 
 interface SummaryMetric {
-  id: DiagnoseSection
+  id: DiagnoseSummarySection
   label: string
   value: string
   detail: string
@@ -509,7 +735,19 @@ function rowTone(section: DiagnoseSection, row: DiagnosticRow): SummaryTone {
   if (section === 'transactions') {
     if (booleanValue(row.conflict) === true) return 'attention'
     const phase = row.phase?.toLowerCase()
-    return phase === 'committed' ? 'healthy' : 'neutral'
+    if (phase === 'victim') return 'critical'
+    if (phase === 'rolled_back') return 'attention'
+    if (phase === 'waiting') return 'attention'
+    return phase === 'committed' || phase === 'completed' ? 'healthy' : 'neutral'
+  }
+  if (section === 'lock-waits') {
+    return 'attention'
+  }
+  if (section === 'deadlocks') {
+    return row.resolution?.toLowerCase() === 'resolved' ? 'attention' : 'critical'
+  }
+  if (section === 'application-retry') {
+    return row.status?.toLowerCase() === 'completed' ? 'healthy' : 'attention'
   }
   if (section === 'hot-regions') {
     const score = numberValue(row.hotScore) ?? 0
@@ -554,6 +792,9 @@ function createDiagnosticSummary(
   const regionRows = byId.get('regions')?.rows ?? []
   const hotRows = byId.get('hot-regions')?.rows ?? []
   const transactionRows = byId.get('transactions')?.rows ?? []
+  const lockWaitRows = byId.get('lock-waits')?.rows ?? []
+  const deadlockRows = byId.get('deadlocks')?.rows ?? []
+  const applicationRetryRows = byId.get('application-retry')?.rows ?? []
   const gcRow = byId.get('gc')?.rows[0]
   const tiflashRow = byId.get('tiflash')?.rows[0]
 
@@ -571,11 +812,41 @@ function createDiagnosticSummary(
   const peakHotScore = hotScores.length > 0 ? Math.max(...hotScores) : 0
   const hotTone: SummaryTone = hotRows.length > 0 ? 'attention' : 'healthy'
 
-  const activePhases = new Set(['active', 'prewriting', 'committing'])
+  const activePhases = new Set([
+    'active',
+    'waiting',
+    'prewriting',
+    'committing',
+    'commit_handoff',
+  ])
   const activeTransactions = transactionRows.filter((row) =>
     activePhases.has(row.phase?.toLowerCase() ?? '')).length
-  const conflicts = transactionRows.filter((row) => booleanValue(row.conflict) === true).length
-  const transactionTone: SummaryTone = conflicts > 0 ? 'attention' : 'healthy'
+  const isLockLab = lockWaitRows.length > 0 ||
+    deadlockRows.length > 0 ||
+    applicationRetryRows.length > 0 ||
+    transactionRows.some((row) => row.client !== undefined && row.attempt !== undefined)
+  const currentLockConflictIds = new Set(
+    lockWaitRows
+      .map((row) => row.waiter)
+      .filter((id): id is string => hasValue(id)),
+  )
+  for (const row of transactionRows) {
+    if (row.phase?.toLowerCase() === 'victim' && hasValue(row.id)) {
+      currentLockConflictIds.add(row.id)
+    }
+  }
+  const conflicts = isLockLab
+    ? currentLockConflictIds.size
+    : transactionRows.filter((row) => booleanValue(row.conflict) === true).length
+  const transactionRowsTone = transactionRows
+    .map((row) => rowTone('transactions', row))
+    .reduce(strongerTone, 'healthy' as SummaryTone)
+  const lockDiagnosticTone = [
+    ...lockWaitRows.map((row) => rowTone('lock-waits', row)),
+    ...deadlockRows.map((row) => rowTone('deadlocks', row)),
+    ...applicationRetryRows.map((row) => rowTone('application-retry', row)),
+  ].reduce(strongerTone, 'neutral' as SummaryTone)
+  const transactionTone = strongerTone(transactionRowsTone, lockDiagnosticTone)
 
   const backlog = numberValue(gcRow?.backlog) ?? 0
   const gcBlocked = hasValue(gcRow?.blockedBy)
@@ -638,11 +909,11 @@ function createDiagnosticSummary(
       value: String(transactionRows.length),
       detail: detailPair(
         `${activeTransactions} ${copy.detail.active}`,
-        `${conflicts} ${copy.detail.conflicts}`,
+        `${conflicts} ${isLockLab ? copy.detail.lockWaits : copy.detail.conflicts}`,
       ),
       tone: transactionTone,
       chart: transactionRows.map((row) => chartDatum(
-        booleanValue(row.conflict) === true
+        currentLockConflictIds.has(row.id) || booleanValue(row.conflict) === true
           ? 1
           : activePhases.has(row.phase?.toLowerCase() ?? '')
             ? 0.72
@@ -680,6 +951,9 @@ function createDiagnosticSummary(
 
   let tone: SummaryTone = 'healthy'
   for (const metric of metrics) tone = strongerTone(tone, metric.tone)
+  for (const projection of projections) {
+    tone = strongerTone(tone, projectionTone(projection))
+  }
   return {
     tone: tone === 'critical' ? 'critical' : tone === 'attention' ? 'attention' : 'healthy',
     metrics,
@@ -835,7 +1109,15 @@ function cellTone(
     const status = raw?.toLowerCase()
     if (status === 'down') return 'critical'
     if (status === 'degraded') return 'attention'
-    return status === 'up' ? 'healthy' : 'neutral'
+    if (status === 'backoff' || status === 'started') return 'attention'
+    return status === 'up' || status === 'completed' ? 'healthy' : 'neutral'
+  }
+  if (column === 'phase') {
+    const phase = raw?.toLowerCase()
+    if (phase === 'victim') return 'critical'
+    if (phase === 'rolled_back') return 'attention'
+    if (phase === 'waiting') return 'attention'
+    return phase === 'completed' || phase === 'committed' ? 'healthy' : 'neutral'
   }
   if (column === 'health') {
     const health = raw?.toLowerCase()
@@ -859,6 +1141,18 @@ function cellTone(
     return (numberValue(raw) ?? 0) > 0 ? 'attention' : 'neutral'
   }
   if (column === 'blockedBy') return hasValue(raw) ? 'critical' : 'neutral'
+  if (column === 'resolution') {
+    return raw?.toLowerCase() === 'resolved' ? 'attention' : 'critical'
+  }
+  if (column === 'internalRetryable') {
+    return booleanValue(raw) === false ? 'attention' : 'neutral'
+  }
+  if (column === 'clientError') {
+    return raw === 'not_returned_yet' || !hasValue(raw) ? 'neutral' : 'critical'
+  }
+  if (column === 'victim') {
+    return hasValue(raw) ? 'critical' : 'neutral'
+  }
   return 'neutral'
 }
 
@@ -874,10 +1168,12 @@ function meterPercent(column: string, raw: string): number | undefined {
 }
 
 function projectionCell(
+  locale: Locale,
   row: DiagnosticRow,
   column: string,
 ): HTMLTableCellElement {
   const raw = row[column] ?? '—'
+  const display = localizedCellValue(locale, column, raw)
   const tone = cellTone(row, column)
   const td = element('td', {
     attrs: {
@@ -896,7 +1192,7 @@ function projectionCell(
     })
     td.append(
       element('span', { className: 'tidb-diagnose__cell-meter' },
-        element('span', { className: 'tidb-diagnose__cell-value', text: raw }),
+        element('span', { className: 'tidb-diagnose__cell-value', text: display }),
         element('span', {
           className: 'tidb-diagnose__cell-meter-track',
           attrs: { 'aria-hidden': 'true' },
@@ -907,9 +1203,13 @@ function projectionCell(
   }
 
   const stateColumn = column === 'status'
+    || column === 'phase'
     || column === 'health'
     || column === 'available'
     || column === 'conflict'
+    || column === 'resolution'
+    || column === 'internalRetryable'
+    || column === 'clientError'
   if (stateColumn && raw !== '—') {
     td.append(
       element('span', {
@@ -920,13 +1220,13 @@ function projectionCell(
           className: 'tidb-diagnose__state-dot',
           attrs: { 'aria-hidden': 'true' },
         }),
-        element('span', { text: raw }),
+        element('span', { text: display }),
       ),
     )
     return td
   }
 
-  td.textContent = raw
+  td.textContent = display
   return td
 }
 
@@ -986,12 +1286,17 @@ function projectionTable(
     }
   }
   const head = element('tr')
-  for (const column of columns) head.append(element('th', { text: column, attrs: { scope: 'col' } }))
+  for (const column of columns) {
+    head.append(element('th', {
+      text: localizedColumnTitle(locale, column),
+      attrs: { scope: 'col' },
+    }))
+  }
   const body = element('tbody')
   for (const row of projection.rows) {
     const tone = rowTone(projection.id, row)
     const line = element('tr', { attrs: { 'data-tone': tone } })
-    for (const column of columns) line.append(projectionCell(row, column))
+    for (const column of columns) line.append(projectionCell(locale, row, column))
     body.append(line)
   }
   panel.append(element('div', {
@@ -999,7 +1304,7 @@ function projectionTable(
     attrs: {
       tabindex: '0',
       role: 'region',
-      'aria-label': `${title} table`,
+      'aria-label': `${title} ${copy.table}`,
     },
   },
     element('table', {

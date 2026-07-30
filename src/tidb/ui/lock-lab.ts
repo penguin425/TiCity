@@ -24,6 +24,8 @@ type LockLabPhase =
   | 'resolved'
   | 'waking'
   | 'committing'
+  | 'committed'
+  | 'releasing'
   | 'retry_backoff'
   | 'retrying'
   | 'complete'
@@ -182,6 +184,8 @@ const COPY: Readonly<Record<Locale, LockLabCopy>> = {
       resolved: '循環を解消',
       waking: 'waiterを起床',
       committing: 'commitへ引き継ぎ',
+      committed: 'commit完了',
+      releasing: 'commit後のロック解放',
       retry_backoff: 'アプリケーションbackoff',
       retrying: '新しいトランザクションで再試行',
       complete: '完了',
@@ -285,6 +289,8 @@ const COPY: Readonly<Record<Locale, LockLabCopy>> = {
       resolved: 'Cycle resolved',
       waking: 'Waking a waiter',
       committing: 'Handing off to commit',
+      committed: 'Commit completed',
+      releasing: 'Releasing locks after commit',
       retry_backoff: 'Application backoff',
       retrying: 'Retrying as a new transaction',
       complete: 'Complete',
@@ -334,8 +340,8 @@ const EVENT_PHASE = {
   application_retry_backoff: 'retry_backoff',
   lock_waiter_woken: 'waking',
   commit_handoff: 'committing',
-  commit_summary: 'committing',
-  lock_release_after_commit: 'committing',
+  commit_summary: 'committed',
+  lock_release_after_commit: 'releasing',
   application_retry_begin: 'retrying',
   retry_lock_acquired: 'retrying',
   lock_lab_summary: 'complete',

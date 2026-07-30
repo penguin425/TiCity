@@ -296,4 +296,18 @@ describe('Lock Lab accessible projection', () => {
     expect(panel.root.parentNode).toBeNull()
     expect(() => panel.dispose()).not.toThrow()
   })
+
+  it('distinguishes commit completion from post-commit lock release', () => {
+    installTestDom()
+    const panel = createLockLabPanel('en')
+    const snapshot = applicationRetrySnapshot()
+
+    panel.update(lockEvent('commit', 'commit_summary', snapshot))
+    expect(panel.root.querySelector('[data-lock-phase]')?.textContent)
+      .toBe('Phase: Commit completed')
+
+    panel.update(lockEvent('release', 'lock_release_after_commit', snapshot))
+    expect(panel.root.querySelector('[data-lock-phase]')?.textContent)
+      .toBe('Phase: Releasing locks after commit')
+  })
 })
