@@ -4,6 +4,18 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.4.0-alpha.2] — 2026-07-31
+
+- Add an Inspect-mode Transaction Lab cutaway with a TiDB coordinator,
+  two mutation slots, PD timestamp pulse, two Regions with three voters each,
+  Raft quorum/apply indicators, leader-memory locks, and conceptual
+  `LOCK`/`DEFAULT`/`WRITE` MVCC cells.
+- Project the same immutable event snapshot into the 3D cutaway and an
+  accessible bilingual DOM inspector, including shape-based primary/secondary
+  markers and reduced-motion behavior.
+- Keep the cutaway fixed-capacity and resource-stable across repeated updates,
+  theme changes, replay, and disposal.
+
 ## [0.4.0-alpha.1] — 2026-07-31
 
 - Introduce the model-2 causal event graph with immutable post-event snapshots

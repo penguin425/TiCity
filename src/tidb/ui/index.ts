@@ -37,6 +37,10 @@ export {
 } from './catalog'
 export { createLegalPanel, createModelBadge } from './legal'
 export {
+  createTransactionLabPanel,
+  type TransactionLabPanel,
+} from './transaction-lab'
+export {
   CONTROL_COPY,
   DEFAULT_CITY_CONTROLS,
   SCENARIOS,

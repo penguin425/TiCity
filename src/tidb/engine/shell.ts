@@ -23,12 +23,15 @@ import { createCityPicker } from './picker'
 import type { CityPicker } from './picker'
 import { createTraceFlows } from './trace-flows'
 import type { TraceFlowController } from './trace-flows'
+import { projectTransactionLab } from '../world/transaction-lab-projection'
+import { EMPTY_TRANSACTION_LAB_PROJECTION } from '../world/transaction-lab'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
   readonly autoStart?: boolean
+  readonly inspectTransactionLab?: boolean
   readonly onSelect?: (component: CityComponent | null) => void
 }
 
@@ -45,6 +48,7 @@ export interface CityShell {
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
+  setTransactionLabInspect(enabled: boolean): void
   setHudExpanded(expanded: boolean): void
   resize(): void
   start(): void
@@ -202,6 +206,8 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   let lastStateTick = -1
   let lastTrace: TraceReceipt | null = null
   let networkEmphasis = false
+  let transactionLabInspect = options.inspectTransactionLab ?? false
+  let transactionLabProjectionKey = ''
   const focusAnchor = new THREE.Vector3()
 
   function syncNetworkEmphasis(): void {
@@ -210,6 +216,31 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     if (next === networkEmphasis) return
     networkEmphasis = next
     city.setNetworkEmphasis(next)
+  }
+
+  function syncTransactionLab(): void {
+    const playback = flows.playback
+    const event = playback.event
+    const key = [
+      transactionLabInspect ? 'inspect' : 'hidden',
+      playback.motion,
+      event?.id ?? '',
+    ].join('|')
+    if (key === transactionLabProjectionKey) return
+    transactionLabProjectionKey = key
+    const projection = transactionLabInspect
+      ? projectTransactionLab(event, {
+          inspect: true,
+          reducedMotion: playback.motion === 'reduced',
+          pulse: 0.72,
+        })
+      : null
+    city.transactionLab.update(
+      projection ?? {
+        ...EMPTY_TRANSACTION_LAB_PROJECTION,
+        reducedMotion: playback.motion === 'reduced',
+      },
+    )
   }
 
   function setTheme(next: CityTheme): void {
@@ -284,6 +315,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     controls.update(delta)
     city.updateVisuals(delta)
     flows.update(delta)
+    syncTransactionLab()
     syncNetworkEmphasis()
     audio.update(flows.activity)
     picker.update()
@@ -313,6 +345,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       lastTrace = null
       flows.stop()
     }
+    syncTransactionLab()
     syncNetworkEmphasis()
   }
 
@@ -359,6 +392,12 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       controls.setMode(mode)
       labels.setMode(mode)
       if (mode === 'walk') picker.select(null)
+    },
+    setTransactionLabInspect(enabled: boolean): void {
+      if (transactionLabInspect === enabled) return
+      transactionLabInspect = enabled
+      transactionLabProjectionKey = ''
+      syncTransactionLab()
     },
     setHudExpanded(expanded: boolean): void {
       if (hudExpanded === expanded) return
