@@ -263,7 +263,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-4')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-5')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))
@@ -1054,14 +1054,19 @@ describe('guided scenarios', () => {
     const sim = createTiDBSimulation()
     const receipt = sim.runScenario('commit-protocols')
     const selected = receipt.events
-      .filter((event) => event.kind === 'protocol_selection')
+      .filter((event) => typeof event.metadata.selected === 'string')
       .map((event) => event.metadata.selected)
 
+    expect(receipt.events).toHaveLength(74)
     expect(selected).toEqual(['1pc', 'async_commit', '2pc'])
     expect(sim.state.transactions.map((transaction) => transaction.protocol))
       .toEqual(['1pc', 'async_commit', '2pc'])
     expect(receipt.outcome).toBe('succeeded')
     expect(receipt.protocol).toBeNull()
+    expect(receipt.events.at(-1)?.snapshot?.protocolLab).toMatchObject({
+      phase: 'complete',
+      focusLaneId: null,
+    })
   })
 
   it('elects a live voter after the TiKV leader fails', () => {
