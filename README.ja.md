@@ -15,7 +15,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 ![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.6.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.7.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 
@@ -37,6 +37,16 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 - role、health、term、vote、log、commit、applyを明示した3 voter peer。
   Pre-VoteとVoteはそれぞれ2-of-3へ達し、新Leaderのcurrent-term no-opを
   persist、commit、applyします
+- 1PC、Async Commit、通常2PCを1つの74 eventの不変な比較receiptへ展開する
+  Protocol Lab
+- 宣言済みfixtureのeligibility outcomeとtimestampの出所を明示した3つの
+  独立した代表的な楽観transaction。各laneはprotocolの形を比較するもので、
+  表示SQLの実行でもlatency benchmarkでもありません
+- `TryOnePc`を持つ1 Regionの1PC Prewrite、2 RegionのAsync Commit prewrite、
+  通常2PCのprimary／secondary経路。すべてのTiKV mutationは、それぞれの
+  Regionで独立した2-of-3 Raft chainを通ります
+- 1PCにはcleanupを残さず、Async Commitでは両Regionのcommit record解決、
+  通常2PCではsecondary commitをbackgroundへ残すclient response境界
 - 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
   応答後のsecondary cleanupを持つ因果イベントグラフ
 - 3D City、Machine、Diagnoseへ投影される1つの不変なreceipt。Lock Labの
@@ -57,9 +67,9 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 
 | URL | 内容 |
 |---|---|
-| [`…/TiCity/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/?scenario=tikv-failover&event=trace-1-event-16) | exact event時点の3D Cityとscenarioで選択した詳細Lab |
-| [`…/machine/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/machine/?scenario=tikv-failover&event=trace-1-event-16) | 因果event DAGと、分離されたLock wait-forまたはRaft Pre-Vote／Vote意味graph |
-| [`…/diagnose/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/diagnose/?scenario=tikv-failover&event=trace-1-event-16) | exact event時点のtransaction、Raft選出、MVCC、lock wait、deadlock、retry診断 |
+| [`…/TiCity/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/?scenario=commit-protocols&event=trace-1-event-32) | Async Commitのclient応答境界における3D Cityとscenarioで選択した詳細Lab |
+| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | 因果event DAGと、選択Labから分離されたprotocol、lock、選出の意味graph |
+| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | exact event時点のtransaction、protocol、Raft、MVCC、lock wait、deadlock、retry診断 |
 
 3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
 不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。
@@ -89,6 +99,40 @@ TiDBがrouteを更新して同じlogical requestをretryします。これはapp
 surviving followerによるno-op applyは応答後のbackground workです。
 
 ![2-of-3の選出と復旧中のTiCity Raft Failure Lab](docs/raft-lab.png)
+
+[`commit-protocols` scenario](https://penguin425.github.io/TiCity/?scenario=commit-protocols)
+からProtocol Labを直接開けます。74 eventのreceiptに含まれるのは3つの独立した
+代表的な楽観transactionで、workbench SQLを3回実行したものでもlatency競争でも
+ありません。
+
+各laneの宣言済みfixture profileとprotocol outcomeは、意図的に比較開始時から
+表示します。これは不変なreceiptがこれからたどる固定経路の説明であり、現在の
+cursorですでに完了した処理を表すものではありません。lane stage、timestamp、
+Region Raft／MVCC、client応答、background cleanupは、選択したexact event時点の
+時間変化する状態です。
+
+- **1PC:** PDが`start_ts`を払い出し、モデル化した既定のlinear consistencyの
+  ために`latest_ts`も返します。TiCityが代表的なrequest boundを導出してから、
+  `TryOnePc=true`のPrewriteを1 Regionへ送ります。そのRegionでRaft applyした後、
+  TiKVが`one_pc_commit_ts`を返します。このlaneには通常のCommit RPC、永続的な
+  lock-CF中間状態、background cleanupがありません。
+- **Async Commit:** PDが`start_ts`と`latest_ts`を返します。2 Regionのprewriteは
+  それぞれ独立にRaft applyへ達して`min_commit_ts`を返し、モデル上の
+  `commit_ts`はその最大値であって、PDが払い出すcommit timestampではありません。
+  両prewriteの後にclientへ応答し、両Regionのcommit record解決はbackgroundで
+  続きます。
+- **通常2PC:** PDが`start_ts`を返し、両Regionのprewriteがjoinした後で
+  `commit_ts`を払い出します。primary commitとそのRegionのRaft applyがclient
+  responseを制御し、secondary commitとlock cleanupはbackgroundで続きます。
+
+これらのfixtureでは両方のoptional featureを有効にしています。Async Commitの
+eligibility判定は、対象client実装のdefaultである256 key、合計4,096 key byteに
+固定しています。これはこのモデルが取り込んだ実装上のdefaultであり、公開された
+安定的なTiDB contractでもtuning推奨値でもありません。通常2PC fixtureは意図的に
+257個のaggregate mutationを使い、どのfixtureもaggregate countとsynthetic ID
+だけを保持します。
+
+![1PC、Async Commit、通常2PCを比較するTiCity Protocol Lab](docs/protocol-lab.png)
 
 ## 代表シナリオ
 
@@ -149,16 +193,26 @@ src/tidb/
   決定論的な13 tick経過値／candidate policyを分けて表示します。PDは
   observer／routing限定で、retryはapplication retryではなく、同じlogical
   Region requestに対するTiDB内部処理です。
+- model-5 Protocol Labの1PC、Async Commit、通常2PCは、3つの独立した代表的な
+  fixtureです。event durationと順番に表示するlane順序はlatency比較ではありません。
+  `start_ts`と`latest_ts`はモデル上のPD TSO call、1PC timestampはTiKV result、
+  Async Commit timestampはTiKVが返した`min_commit_ts`の最大値、通常2PC
+  timestampはprewrite後のPDから来ます。
+- Protocol Labはtransaction commit coordinationと9本のRegion別Raft mutation
+  chainを分離します。各chainはconceptual MVCC状態が変わる前に、propose、
+  2 voterへのpersist、2-of-3 commit、applyを独立して示します。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-機構レベルの詳細projectionは、現時点では3 scenarioに適用されています。
+機構レベルの詳細projectionは、現時点では4 scenarioに適用されています。
 複数Regionトランザクションはtransaction 2PC、RegionごとのRaft、概念上のMVCCを
 展開します。Lock LabはLeaderメモリ上のlock競合を展開し、commit経路を前者の
 pipelineへhandoffします。Raft Failure Labは1 Regionの選出、current-term
-Leader no-op、PDの観測とrouting、TiDB内部request復旧を展開します。ほかの
-6 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
+Leader no-op、PDの観測とrouting、TiDB内部request復旧を展開します。Protocol
+Labはeligibility、timestamp authority、1 Regionの1PC、2 RegionのAsync Commit、
+通常2PCを、client／background境界と独立したRegion Raft chainを含めて展開します。
+ほかの5 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
 
 ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。

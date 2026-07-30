@@ -4,6 +4,69 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.7.0] — 2026-07-31
+
+- Complete the model-5 Protocol Lab vertical slice across exact-event City,
+  Machine, and Diagnose views, with every surface reading the same selected
+  snapshot from one deterministic 74-event immutable receipt.
+- Compare one-Region 1PC, two-Region Async Commit, and regular 2PC using three
+  independent representative optimistic fixtures rather than executions of
+  the displayed SQL or a latency benchmark.
+- Keep eligibility, timestamp authority, client-response/background cleanup,
+  conceptual MVCC, and nine independent per-Region Raft mutation chains
+  explicit without presenting transaction commit optimizations as Raft modes.
+- Separate declared fixture outcomes from exact-event temporal state and use a
+  non-causal presentation fence so independent sibling Region branches remain
+  visually monotonic during deterministic replay.
+- Add bilingual release documentation and the Protocol Lab screenshot to the
+  release archive, with deterministic, accessibility, responsive,
+  fixed-capacity, privacy, source-provenance, and production-build gates.
+
+## [0.7.0-beta.1] — 2026-07-31
+
+- Extend Machine with the three protocol lanes, their exact causal
+  fork/join/background paths, timestamp authorities, eligibility outcomes,
+  client boundaries, and separate per-Region Raft/MVCC state.
+- Extend Diagnose with exact-event 1PC, Async Commit, and regular 2PC
+  projections, including feature flags, aggregate fixture limits, commit
+  timestamp sources, outstanding locks, and background-completion state.
+- Preserve the selected `scenario` and exact `event` among City, Machine, and
+  Diagnose for all 74 snapshots, including each client response and
+  post-response commit-record cleanup.
+- Add responsive, accessibility, privacy, event-cursor, deterministic DAG,
+  immutable-loop, and transaction-versus-Raft boundary regression coverage.
+
+## [0.7.0-alpha.2] — 2026-07-31
+
+- Add a fixed-capacity 3D Protocol Lab cutaway with three distinct protocol
+  lanes, two Region slots per lane, three voters per Region, conceptual MVCC
+  cells, timestamp signals, client boundaries, and background paths.
+- Project each immutable Protocol Lab snapshot into an accessible bilingual
+  DOM inspector with exact eligibility, timestamp provenance, Raft quorum,
+  MVCC, client-response, and cleanup state synchronized to the Trace Dock.
+- Keep Transaction, Lock, Raft Failure, and Protocol Labs mutually exclusive
+  while sharing Inspect focus, theme, reduced-motion, replay, looping,
+  responsive layout, and disposal lifecycle.
+- Reuse the same immutable receipt during playback and looping without
+  rerunning a fixture, changing its selected protocol, or allocating another
+  timestamp.
+
+## [0.7.0-alpha.1] — 2026-07-31
+
+- Introduce the model-5 `commit-protocols` vertical slice with 74 immutable
+  events across three independent representative optimistic transactions.
+- Model a one-Region `TryOnePc` Prewrite returning TiKV
+  `one_pc_commit_ts`, two-Region Async Commit deriving `commit_ts` from the
+  maximum TiKV-returned `min_commit_ts`, and regular 2PC obtaining PD
+  `commit_ts` after all prewrites.
+- Pin Async Commit eligibility fixtures to the target client's 256-key and
+  4,096-byte implementation defaults while labeling them as non-stable,
+  non-prescriptive values; model no runtime fallback.
+- Put all nine TiKV mutations behind independent four-step Region Raft chains,
+  place client/background boundaries per protocol, deep-freeze every snapshot
+  and delta, and retain no SQL text, literal, real key, secondary-key list,
+  value, or result row.
+
 ## [0.6.0] — 2026-07-31
 
 - Complete the model-4 Raft Failure Lab vertical slice across exact-event
