@@ -437,6 +437,34 @@ export const DIAGNOSE_CSS = `
 .tidb-diagnose__panel[data-diagnose-section="gc"] { grid-area: gc; }
 .tidb-diagnose__panel[data-diagnose-section="tiflash"] { grid-area: tiflash; }
 
+.tidb-diagnose[data-active-lab="raft"] .tidb-diagnose__grid {
+  grid-template-areas:
+    "cluster raft-peers"
+    "cluster raft-election"
+    "cluster region-request-retry"
+    "transactions lock-waits"
+    "application-retry application-retry"
+    "deadlocks deadlocks"
+    "hot gc"
+    "tiflash tiflash"
+    "regions regions";
+}
+
+.tidb-diagnose[data-active-lab="raft"]
+  .tidb-diagnose__panel[data-diagnose-section="raft-peers"] {
+  grid-area: raft-peers;
+}
+
+.tidb-diagnose[data-active-lab="raft"]
+  .tidb-diagnose__panel[data-diagnose-section="raft-election"] {
+  grid-area: raft-election;
+}
+
+.tidb-diagnose[data-active-lab="raft"]
+  .tidb-diagnose__panel[data-diagnose-section="region-request-retry"] {
+  grid-area: region-request-retry;
+}
+
 .tidb-diagnose__panel-head {
   min-height: 56px;
   gap: 12px;
@@ -836,6 +864,22 @@ export const DIAGNOSE_CSS = `
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "cluster"
+      "transactions"
+      "lock-waits"
+      "deadlocks"
+      "application-retry"
+      "hot"
+      "gc"
+      "tiflash"
+      "regions";
+  }
+
+  .tidb-diagnose[data-active-lab="raft"] .tidb-diagnose__grid {
+    grid-template-areas:
+      "cluster"
+      "raft-peers"
+      "raft-election"
+      "region-request-retry"
       "transactions"
       "lock-waits"
       "deadlocks"

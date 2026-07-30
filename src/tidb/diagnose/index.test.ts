@@ -199,6 +199,151 @@ describe('TiDB diagnostic projections', () => {
     expect(root.textContent).toContain('transaction全体')
   })
 
+  it('projects Raft peers, election, and TiDB-internal request retry at exact events', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('tikv-failover')
+    const transport = receipt.events.find((event) =>
+      event.kind === 'region_request_transport_error')!
+    const vote = receipt.events.find((event) =>
+      event.kind === 'raft_vote_granted')!
+    const committed = receipt.events.find((event) =>
+      event.kind === 'raft_leader_noop_commit')!
+    const final = receipt.events.at(-1)!
+
+    const atTransport = projectDiagnostics({
+      ...simulation.state,
+      raftLab: transport.snapshot?.raftLab,
+    })
+    expect(atTransport.find((projection) => projection.id === 'raft-peers')?.rows)
+      .toEqual([
+        expect.objectContaining({
+          store: 'tikv-1',
+          raftRole: 'offline',
+          peerHealth: 'down',
+          currentLeader: 'false',
+          lastLog: '42 / 1',
+        }),
+        expect.objectContaining({ store: 'tikv-2', raftRole: 'follower' }),
+        expect.objectContaining({ store: 'tikv-3', raftRole: 'follower' }),
+      ])
+    expect(
+      atTransport.find((projection) =>
+        projection.id === 'region-request-retry')?.rows[0],
+    ).toMatchObject({
+      logicalRequest: 'region-request-1',
+      retrySource: 'tidb_internal',
+      internalAttempt: '1',
+      cacheState: 'cached',
+      requestStatus: 'transport_error',
+      clientVisibleError: 'false',
+      applicationRetry: 'false',
+      boundary: 'same logical Region request',
+    })
+
+    const atVote = projectDiagnostics({
+      ...simulation.state,
+      raftLab: vote.snapshot?.raftLab,
+    })
+    expect(atVote.find((projection) => projection.id === 'raft-election')?.rows[0])
+      .toMatchObject({
+        electionPhase: 'vote',
+        candidate: 'tikv-2',
+        preVotesGranted: 'tikv-2, tikv-3',
+        votesGranted: 'tikv-2, tikv-3',
+        electionQuorum: '2/2',
+        liveVoters: '2/3',
+        configuredTimeout: '10–20 ticks',
+        teachingElapsed: '13 ticks · MODEL POLICY',
+        candidatePolicy: 'MODEL POLICY: lowest live up-to-date Store ID',
+        pdRole: 'observer_and_routing_only',
+      })
+
+    const atCommit = projectDiagnostics({
+      ...simulation.state,
+      raftLab: committed.snapshot?.raftLab,
+    })
+    expect(
+      atCommit.find((projection) => projection.id === 'raft-peers')?.rows
+        .filter((row) => row.peerCommitIndex === '43'),
+    ).toHaveLength(2)
+
+    const atFinal = projectDiagnostics({
+      ...simulation.state,
+      raftLab: final.snapshot?.raftLab,
+    })
+    expect(atFinal.find((projection) =>
+      projection.id === 'region-request-retry')?.rows[0]).toMatchObject({
+      retrySource: 'tidb_internal',
+      internalAttempt: '2',
+      cachedLeader: 'tikv-2',
+      cacheState: 'refreshed',
+      requestStatus: 'completed',
+      clientVisibleError: 'false',
+      applicationRetry: 'false',
+    })
+    expect(atFinal.find((projection) => projection.id === 'raft-election')?.rows[0])
+      .toMatchObject({
+        currentLeader: 'tikv-2',
+        pdObservedLeader: 'tikv-2',
+        pdRouteLookup: 'true',
+      })
+
+    for (const event of receipt.events) {
+      if (!event.snapshot?.raftLab) continue
+      const rendered = JSON.stringify(projectDiagnostics({
+        ...simulation.state,
+        raftLab: event.snapshot.raftLab,
+      }))
+      expect(rendered).not.toMatch(
+        /SELECT \*|accounts|id = 425|row value|result row:/i,
+      )
+    }
+  })
+
+  it('renders the Raft MODEL POLICY, PD boundary, and retry boundary bilingually', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('tikv-failover')
+    const vote = receipt.events.find((event) =>
+      event.kind === 'raft_vote_granted')!
+    const final = receipt.events.at(-1)!
+    const dom = installTestDom()
+
+    const english = dom.mount('raft-diagnose-en')
+    mountDiagnose(english as unknown as HTMLElement, {
+      locale: 'en',
+      snapshot: {
+        ...simulation.state,
+        raftLab: vote.snapshot?.raftLab,
+      },
+    })
+    expect(english.dataset.activeLab).toBe('raft')
+    expect(english.textContent).toContain('Raft leader election')
+    expect(english.textContent).toContain(
+      'MODEL POLICY: lowest live, up-to-date Store ID',
+    )
+    expect(english.textContent).toContain('Observe and route metadata only')
+    expect(english.textContent).toContain('same logical Region request')
+    expect(
+      english.querySelector('[data-diagnose-section="raft-election"]'),
+    ).not.toBeNull()
+
+    const japanese = dom.mount('raft-diagnose-ja')
+    mountDiagnose(japanese as unknown as HTMLElement, {
+      locale: 'ja',
+      snapshot: {
+        ...simulation.state,
+        raftLab: final.snapshot?.raftLab,
+      },
+    })
+    expect(japanese.textContent).toContain('Raft leader選出')
+    expect(japanese.textContent).toContain(
+      'MODEL POLICY：稼働中でlogが最新のStore ID最小',
+    )
+    expect(japanese.textContent).toContain('観測とroute metadataのみ')
+    expect(japanese.textContent).toContain('同じlogical Region request')
+    expect(japanese.textContent).toContain('TiDB内部')
+  })
+
   it('projects event-time transaction, Raft, lock, and MVCC detail', () => {
     const projections = projectDiagnostics({
       transaction: {
@@ -299,6 +444,9 @@ describe('TiDB diagnostic projections', () => {
     expect(DIAGNOSE_CSS).toContain('"deadlocks deadlocks"')
     expect(DIAGNOSE_CSS).toContain('"cluster application-retry"')
     expect(DIAGNOSE_CSS).not.toContain('"cluster deadlocks"')
+    expect(DIAGNOSE_CSS).toContain('"cluster raft-peers"')
+    expect(DIAGNOSE_CSS).toContain('"cluster raft-election"')
+    expect(DIAGNOSE_CSS).toContain('"cluster region-request-retry"')
     expect(DIAGNOSE_CSS).toContain('td[data-column="lockWaitTimeout"]')
   })
 })

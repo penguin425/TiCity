@@ -48,6 +48,70 @@ function distance3(
   return Math.hypot(left[0] - right[0], left[1] - right[1], left[2] - right[2])
 }
 
+async function expectRaftVoteCity(page: Page): Promise<void> {
+  const eventId = 'trace-1-event-16'
+  await page.goto(`/?lang=en&scenario=tikv-failover&event=${eventId}`)
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', {
+    timeout: 15_000,
+  })
+
+  const layout = page.locator('.tidb-layout')
+  const raftLab = page.locator('[data-raft-lab]')
+  const election = raftLab.locator('[data-election-phase]')
+  const request = raftLab.locator('.tidb-raft-lab__request')
+  const dock = page.locator('[data-trace-dock]')
+  await expect(layout).toHaveAttribute('data-active-lab', 'raft')
+  await expect(layout).toHaveAttribute('data-inspect', 'open')
+  await expect(raftLab).toBeVisible()
+  await expect(raftLab).toHaveAttribute('tabindex', '0')
+  await raftLab.focus()
+  await expect(raftLab).toBeFocused()
+  await expect(raftLab.locator('[data-raft-phase]')).toHaveAttribute(
+    'data-raft-phase',
+    'vote',
+  )
+  await expect(election).toHaveAttribute('data-election-candidate', 'tikv-2')
+  await expect(election).toHaveAttribute('data-election-quorum', '2')
+  await expect(election).toContainText('Votes granted')
+  await expect(election).toContainText('2/2')
+  await expect(election).toContainText(
+    'Lowest live, up-to-date Store ID (TiCity MODEL POLICY)',
+  )
+  await expect(raftLab.locator('[data-raft-peer]')).toHaveCount(3)
+  await expect(raftLab.locator('[data-raft-peer="tikv-1"]'))
+    .toHaveAttribute('data-peer-health', 'down')
+  await expect(raftLab.locator('[data-raft-peer="tikv-2"]'))
+    .toHaveAttribute('data-peer-role', 'candidate')
+  await expect(request).toHaveAttribute('data-retry-source', 'tidb_internal')
+  await expect(request).toHaveAttribute('data-client-visible-error', 'false')
+  await expect(request).toContainText('TiDB internal')
+  await expect(request).toContainText('not an application retry')
+
+  await expect(page.locator('[data-transaction-lab]')).toBeHidden()
+  await expect(page.locator('[data-lock-lab]')).toBeHidden()
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  await expect(dock).toHaveAttribute('data-event-index', '15')
+  await expect(dock).toHaveAttribute('data-event-count', '27')
+  await expect(dock).toHaveAttribute('data-looping', 'true')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  const [labBox, dockBox] = await Promise.all([
+    raftLab.boundingBox(),
+    dock.boundingBox(),
+  ])
+  expect(labBox).not.toBeNull()
+  expect(dockBox).not.toBeNull()
+  if (!labBox || !dockBox) throw new Error('Raft Lab overlays have no layout box')
+  expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true)
+}
+
 for (const surface of pages) {
   test(`${surface.path} boots offline and passes the accessibility gate`, async ({ page }) => {
     const thirdPartyRequests: string[] = []
@@ -235,6 +299,134 @@ test('Lock Lab Machine and Diagnose preserve graph and Error 1213 event time', a
     .toContainText('0 active · 0 lock waits')
   await expect(page.locator('.tidb-diagnose__summary'))
     .not.toHaveAttribute('data-tone', 'critical')
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Raft Failure Lab exact vote cursor stays exclusive and clear on desktop and mobile', async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 1_440, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await expectRaftVoteCity(page)
+  }
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Raft Failure Lab Machine separates the causal DAG from the election graph', async ({
+  page,
+}) => {
+  const eventId = 'trace-1-event-16'
+  await page.goto(
+    `/machine/?lang=en&scenario=tikv-failover&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
+
+  const current = page.locator('[data-event-index][aria-current="step"]')
+  await expect(current).toHaveAttribute('data-event-index', '15')
+  await expect(current).toHaveAttribute('data-event-domain', 'raft')
+  await expect(current).toHaveAttribute('data-event-kind', 'raft_vote_granted')
+  await expect(current).toHaveAttribute('data-event-has-raft-snapshot', 'true')
+
+  const causal = page.locator('[data-graph-kind="causal-dag"]')
+  const election = page.locator('[data-raft-election-graph="semantic"]')
+  await expect(causal).toBeVisible()
+  await expect(election).toBeVisible()
+  await expect(election).toHaveAttribute('tabindex', '0')
+  await expect(election).toHaveAttribute('data-graph-kind', 'raft-election')
+  await expect(election).toHaveAttribute('data-election-candidate', 'tikv-2')
+  await expect(election).toHaveAttribute('data-election-quorum', '2')
+  await expect(causal.locator('[data-raft-election-graph]')).toHaveCount(0)
+  await expect(election.locator('[data-raft-peer-node]')).toHaveCount(3)
+  await expect(election.locator('path[data-raft-grant="pre_vote"]')).toHaveCount(2)
+  await expect(election.locator('path[data-raft-grant="vote"]')).toHaveCount(2)
+  await expect(election).toContainText(
+    'This election semantic graph is separate from the causal DAG above.',
+  )
+
+  const raftState = page.locator('[data-raft-lab-state="true"]')
+  await expect(raftState).toHaveAttribute('data-raft-event-id', eventId)
+  await expect(raftState).toHaveAttribute('data-raft-phase', 'vote')
+  await expect(raftState.locator('[data-raft-peer]')).toHaveCount(3)
+  await expect(raftState.locator('[data-raft-policy="model-policy"]'))
+    .toHaveAttribute(
+      'data-candidate-policy',
+      'lowest_live_up_to_date_store_id_model_policy',
+    )
+  await expect(raftState.locator('[data-pd-role="observer_and_routing_only"]'))
+    .toHaveAttribute('data-pd-votes', 'false')
+  const retry = raftState.locator('[data-same-logical-request="true"]')
+  await expect(retry).toHaveAttribute('data-retry-source', 'tidb_internal')
+  await expect(retry).toHaveAttribute('data-application-retry', 'false')
+  await expect(retry).toHaveAttribute('data-client-visible-error', 'false')
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Raft Failure Lab Diagnose preserves election and final retry snapshots', async ({
+  page,
+}) => {
+  const voteEventId = 'trace-1-event-16'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=tikv-failover&event=${voteEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(voteEventId)
+
+  const peersAtVote = page.locator('[data-table-section="raft-peers"]')
+  const electionAtVote = page.locator('[data-table-section="raft-election"]')
+  const retryAtVote = page.locator(
+    '[data-table-section="region-request-retry"]',
+  )
+  await expect(peersAtVote.locator('tbody tr')).toHaveCount(3)
+  await expect(peersAtVote).toContainText('tikv-1')
+  await expect(peersAtVote).toContainText('down')
+  await expect(electionAtVote).toContainText('vote')
+  await expect(electionAtVote).toContainText('tikv-2')
+  await expect(electionAtVote).toContainText('2/2')
+  await expect(electionAtVote).toContainText(
+    'MODEL POLICY: lowest live, up-to-date Store ID',
+  )
+  await expect(electionAtVote).toContainText('Observe and route metadata only')
+  await expect(page.locator('[data-diagnose-section="raft-election"]'))
+    .toHaveAttribute('data-tone', 'attention')
+  await expect(retryAtVote).toContainText('TiDB internal')
+  await expect(retryAtVote).toContainText('backoff')
+  await expect(retryAtVote).toContainText('same logical Region request')
+  await expect(retryAtVote).toContainText('false')
+  await expect(page.locator('[data-diagnose-section="region-request-retry"]'))
+    .toHaveAttribute('data-tone', 'attention')
+  await expect(page.locator('.tidb-diagnose__summary'))
+    .toHaveAttribute('data-tone', 'critical')
+
+  const finalEventId = 'trace-1-event-27'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=tikv-failover&event=${finalEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(finalEventId)
+  const electionAtEnd = page.locator('[data-table-section="raft-election"]')
+  const retryAtEnd = page.locator(
+    '[data-table-section="region-request-retry"]',
+  )
+  await expect(electionAtEnd).toContainText('elected')
+  await expect(electionAtEnd).toContainText('tikv-2')
+  await expect(electionAtEnd).toContainText('Observe and route metadata only')
+  await expect(electionAtEnd).toContainText('true')
+  await expect(retryAtEnd).toContainText('region-request-1')
+  await expect(retryAtEnd).toContainText('TiDB internal')
+  await expect(retryAtEnd).toContainText('2')
+  await expect(retryAtEnd).toContainText('refreshed')
+  await expect(retryAtEnd).toContainText('completed')
+  await expect(retryAtEnd).toContainText('false')
+  await expect(page.locator('[data-diagnose-section="raft-election"]'))
+    .toHaveAttribute('data-tone', 'healthy')
+  await expect(page.locator('[data-diagnose-section="region-request-retry"]'))
+    .toHaveAttribute('data-tone', 'healthy')
   await expectNoSeriousAccessibilityViolations(page)
 })
 

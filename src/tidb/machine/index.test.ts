@@ -367,4 +367,204 @@ describe('TiCity Machine replay', () => {
     expect(root.textContent).not.toContain('LOCK-LAB-425')
     expect(root.textContent).not.toContain('stock - 1')
   })
+
+  it('keeps the causal DAG separate from the exact 2-of-3 Pre-Vote and Vote semantic graph', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('tikv-failover')
+    const voteEvent = receipt.events.find((event) =>
+      event.kind === 'raft_vote_granted')
+    expect(voteEvent?.snapshot?.raftLab?.election).toMatchObject({
+      phase: 'vote',
+      candidateStoreId: 'tikv-2',
+      preVotesGranted: ['tikv-2', 'tikv-3'],
+      votesGranted: ['tikv-2', 'tikv-3'],
+    })
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt,
+      initialEventId: voteEvent?.id,
+    })
+
+    expect(root.querySelector('[data-graph-kind="causal-dag"]')).not.toBeNull()
+    const graph = root.querySelector('[data-raft-election-graph="semantic"]')
+    expect(graph).not.toBeNull()
+    expect(graph?.getAttribute('data-graph-kind')).toBe('raft-election')
+    expect(graph?.getAttribute('tabindex')).toBe('0')
+    expect(graph?.getAttribute('aria-label')).toContain(
+      'separate from the causal DAG above',
+    )
+    expect(graph?.getAttribute('data-election-candidate')).toBe('tikv-2')
+    expect(graph?.getAttribute('data-election-quorum')).toBe('2')
+    expect(graph?.getAttribute('data-edge-count')).toBe('4')
+    expect(graph?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+
+    expect(graph?.querySelectorAll('[data-raft-peer-node]')).toHaveLength(3)
+    expect(graph?.querySelector('[data-raft-peer-node="tikv-1"]')
+      ?.getAttribute('data-peer-health')).toBe('down')
+    expect(graph?.querySelector('[data-raft-peer-node="tikv-1"]')
+      ?.getAttribute('data-node-shape')).toBe('crossed')
+    expect(graph?.querySelector('[data-raft-peer-node="tikv-2"]')
+      ?.getAttribute('data-peer-role')).toBe('candidate')
+    expect(graph?.querySelector('[data-raft-peer-node="tikv-2"]')
+      ?.getAttribute('data-node-shape')).toBe('notched')
+
+    const preVoteEdges = graph?.querySelectorAll(
+      'path[data-raft-grant="pre_vote"]',
+    ) ?? []
+    const voteEdges = graph?.querySelectorAll(
+      'path[data-raft-grant="vote"]',
+    ) ?? []
+    expect(preVoteEdges).toHaveLength(2)
+    expect(voteEdges).toHaveLength(2)
+    expect([...preVoteEdges, ...voteEdges].every((edge) =>
+      edge.getAttribute('data-grant-to') === 'tikv-2')).toBe(true)
+    expect(graph?.querySelectorAll(
+      '[data-raft-grant-list="accessible"] li[data-raft-grant]',
+    )).toHaveLength(4)
+
+    expect(root.querySelectorAll('[data-raft-peer]')).toHaveLength(3)
+    expect(root.textContent).toContain('2 of 3 voters (2-of-3)')
+    expect(root.textContent).toContain(
+      'Lowest live, up-to-date Store ID',
+    )
+    expect(root.textContent).toContain('10–20 ticks')
+    expect(root.textContent).toContain('13 ticks')
+    expect(root.textContent).toContain(
+      'deterministic TiCity MODEL POLICY',
+    )
+    expect(root.querySelector('[data-raft-policy="model-policy"]')
+      ?.getAttribute('data-candidate-policy'))
+      .toBe('lowest_live_up_to_date_store_id_model_policy')
+    expect(root.querySelector('[data-raft-policy="model-policy"]')
+      ?.getAttribute('data-prevote-enabled')).toBe('true')
+    expect(root.querySelector('[data-raft-policy="model-policy"]')?.textContent)
+      .toContain('Pre-VoteEnabled')
+  })
+
+  it('shows the elected log, PD boundary, and same-logical-request TiDB retry in both locales', () => {
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('tikv-failover')
+    const completeEvent = receipt.events.find((event) =>
+      event.kind === 'raft_failover_complete')
+    expect(completeEvent?.snapshot?.raftLab?.request.status).toBe('completed')
+
+    for (const locale of ['en', 'ja'] as const) {
+      const dom = installTestDom()
+      const root = dom.mount(`machine-${locale}`)
+      mountMachine(root as unknown as HTMLElement, {
+        locale,
+        receipt,
+        initialEventId: completeEvent?.id,
+      })
+
+      const raftState = root.querySelector('[data-raft-lab-state="true"]')
+      expect(raftState?.getAttribute('data-raft-event-kind'))
+        .toBe('raft_failover_complete')
+      expect(raftState?.getAttribute('data-raft-phase')).toBe('complete')
+      expect(raftState?.textContent).toContain('tikv-1 → tikv-2')
+      expect(raftState?.querySelector('[data-raft-peer="tikv-2"]')
+        ?.getAttribute('data-peer-role')).toBe('leader')
+      expect(raftState?.querySelector('[data-raft-log-entry="leader_noop"]')
+        ?.getAttribute('data-raft-log-committed')).toBe('true')
+
+      const pd = raftState?.querySelector(
+        '[data-pd-role="observer_and_routing_only"]',
+      )
+      expect(pd?.getAttribute('data-pd-votes')).toBe('false')
+      expect(pd?.getAttribute('data-pd-route-lookup')).toBe('true')
+      expect(pd?.textContent).toContain(
+        locale === 'en'
+          ? 'does not choose a candidate, grant Pre-Votes or Votes, or elect the leader'
+          : '候補選択・Pre-Vote・Vote・Leader選出は行いません',
+      )
+
+      const retry = raftState?.querySelector(
+        '[data-retry-source="tidb_internal"]',
+      )
+      expect(retry?.getAttribute('data-same-logical-request')).toBe('true')
+      expect(retry?.getAttribute('data-application-retry')).toBe('false')
+      expect(retry?.getAttribute('data-client-visible-error')).toBe('false')
+      expect(retry?.getAttribute('data-client-result')).toBe('success')
+      expect(retry?.textContent).toContain('region-request-1')
+      expect(retry?.textContent).toContain(
+        locale === 'en'
+          ? 'same logical request, not an application retry'
+          : '同じlogical requestに対するTiDB内部retry',
+      )
+      expect(raftState?.textContent).not.toContain('SELECT *')
+      expect(raftState?.textContent).not.toContain('result row:')
+    }
+  })
+
+  it('mounts independent Lock and Raft slots and clears both on an event without snapshots', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const lockReceipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('lock-deadlock')
+    const raftReceipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('tikv-failover')
+    const lockEvent = lockReceipt.events.find((event) =>
+      event.kind === 'deadlock_detected')
+    const raftEvent = raftReceipt.events.find((event) =>
+      event.kind === 'raft_vote_granted')
+    if (!lockEvent?.snapshot?.lockLab || !raftEvent?.snapshot?.raftLab) {
+      throw new Error('Expected exact Lock and Raft snapshots.')
+    }
+    const combinedSnapshot: TraceStateSnapshot = {
+      ...raftEvent.snapshot,
+      lockLab: lockEvent.snapshot.lockLab,
+    }
+    const combinedEvent = {
+      ...raftEvent,
+      id: 'combined-semantic-event',
+      atMs: 2,
+      snapshot: combinedSnapshot,
+    }
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      initialIndex: 0,
+      receipt: {
+        id: 'independent-semantic-slots',
+        events: [
+          {
+            id: 'plain-event',
+            atMs: 0,
+            durationMs: 1,
+            domain: 'sql',
+            kind: 'plain',
+            label: 'Plain event',
+            detail: '',
+          },
+          combinedEvent,
+        ],
+      },
+    })
+
+    const lockSlot = root.querySelector(
+      '.tidb-machine__lock-slot',
+    ) as unknown as HTMLElement
+    const raftSlot = root.querySelector(
+      '.tidb-machine__raft-slot',
+    ) as unknown as HTMLElement
+    expect(lockSlot.hidden).toBe(true)
+    expect(raftSlot.hidden).toBe(true)
+    expect(lockSlot.getAttribute('aria-hidden')).toBe('true')
+    expect(raftSlot.getAttribute('aria-hidden')).toBe('true')
+    expect(root.querySelector('[data-event-id="plain-event"]')
+      ?.getAttribute('data-event-has-raft-snapshot')).toBe('false')
+    expect(root.querySelector('[data-event-id="combined-semantic-event"]')
+      ?.getAttribute('data-event-has-raft-snapshot')).toBe('true')
+
+    root.querySelector('[data-event-id="combined-semantic-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(lockSlot.hidden).toBe(false)
+    expect(raftSlot.hidden).toBe(false)
+    expect(lockSlot.getAttribute('aria-hidden')).toBe('false')
+    expect(raftSlot.getAttribute('aria-hidden')).toBe('false')
+    expect(root.querySelector('[data-lock-lab-state="true"]')).not.toBeNull()
+    expect(root.querySelector('[data-raft-lab-state="true"]')).not.toBeNull()
+  })
 })

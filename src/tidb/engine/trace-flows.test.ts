@@ -717,4 +717,47 @@ describe('TraceReceipt-driven city flows', () => {
     }
     city.dispose()
   })
+
+  it('resolves every Raft Failure Lab endpoint without the world-origin fallback', () => {
+    const simulation = createTiDBSimulation()
+    const trace = simulation.runScenario('tikv-failover')
+    const city = createTiDBSceneGraph()
+    city.updateState(simulation.state)
+    const point = new THREE.Vector3()
+    const fallback = new THREE.Vector3(0, 5, 0)
+
+    expect(trace.events).toHaveLength(27)
+    for (const traceEvent of trace.events) {
+      expect(traceEvent.snapshot?.raftLab, traceEvent.kind).toBeDefined()
+      for (const side of ['source', 'target'] as const) {
+        expect(
+          resolveTraceEndpoint(traceEvent, side, city, point),
+          `${traceEvent.id}:${traceEvent.kind}:${side}:${traceEvent[side] ?? '(default)'}`,
+        ).toBe(true)
+        expect(
+          point.equals(fallback),
+          `${traceEvent.id}:${traceEvent.kind}:${side} used the renderer fallback`,
+        ).toBe(false)
+      }
+    }
+
+    const failed = trace.events.find(
+      (traceEvent) => traceEvent.kind === 'tikv_process_unreachable',
+    )!
+    expect(resolveTraceEndpoint(failed, 'source', city, point)).toBe(true)
+    expect(point.equals(city.registry.get('region.0.peer.0')!.anchor)).toBe(true)
+
+    const observed = trace.events.find(
+      (traceEvent) => traceEvent.kind === 'pd_observes_region_leader',
+    )!
+    expect(resolveTraceEndpoint(observed, 'target', city, point)).toBe(true)
+    expect(point.equals(city.registry.get('pd.0')!.anchor)).toBe(true)
+
+    const retry = trace.events.find(
+      (traceEvent) => traceEvent.kind === 'region_request_retry',
+    )!
+    expect(resolveTraceEndpoint(retry, 'target', city, point)).toBe(true)
+    expect(point.equals(city.registry.get('region.0.peer.1')!.anchor)).toBe(true)
+    city.dispose()
+  })
 })
