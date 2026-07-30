@@ -14,6 +14,7 @@ import type {
   TraceRaftLabSnapshot,
   TraceReceipt,
   TraceStateSnapshot,
+  TraceTiFlashMppLabSnapshot,
 } from '../model/types'
 import { CATALOG, resolveLocale, type Locale } from '../ui/catalog'
 import { element, svgElement } from '../ui/dom'
@@ -777,6 +778,77 @@ const GC_MACHINE_COPY = {
       eligible: 'Eligible',
       deleted: 'Deleted',
     },
+  },
+} as const
+
+const TIFLASH_MPP_MACHINE_COPY = {
+  ja: {
+    eyebrow: 'TIFLASH / MPP LAB · EXACT SNAPSHOT',
+    title: 'Learner複製と2-stage MPP',
+    phase: 'フェーズ',
+    snapshot: 'Snapshot',
+    graphTitle: 'Fragment / task意味グラフ',
+    graphDirection:
+      'この意味グラフは選択exact eventのsnapshotから導出します。上の時系列因果DAGを置き換えず、並行eventの実network到着順も主張しません。',
+    persistent: 'PERSISTENT · REGION RAFT / DELTAMERGE',
+    ephemeral: 'EPHEMERAL · MPP EXCHANGE',
+    provisioning: 'Replica provisioning',
+    provisioningNote:
+      'AVAILABLE / PROGRESSは配置状態であり、任意snapshotの即時read readinessではありません。',
+    learners: 'Region learner / snapshot gate',
+    tasks: 'Fragments / tasks',
+    tunnels: 'Exchange tunnels',
+    root: 'TiDB root / client stream',
+    region: 'Region',
+    learner: 'Learner',
+    indexes: 'commit / received / DM / applied / required',
+    gate: 'Read gate',
+    store: 'Store',
+    task: 'Task',
+    fragment: 'Fragment',
+    stage: 'Stage',
+    exchange: 'Exchange',
+    packets: 'Packets',
+    result: 'Result stage',
+    retry: 'Retry / fallback',
+    boundary:
+      'Raft learner複製は永続MVCC stateを更新します。MPP Exchangeは一時query blockだけを運び、Raft/MVCC stateを変更しません。',
+    privacy:
+      'PRIVACY: raw SQL、address、実key/value、group値、結果行、session ID、production TSOを保持しません。',
+  },
+  en: {
+    eyebrow: 'TIFLASH / MPP LAB · EXACT SNAPSHOT',
+    title: 'Learner replication and two-stage MPP',
+    phase: 'Phase',
+    snapshot: 'Snapshot',
+    graphTitle: 'Fragment and task semantic graph',
+    graphDirection:
+      'This semantic graph is derived from the selected exact-event snapshot. It does not replace the chronological causal DAG above or claim a production network arrival order.',
+    persistent: 'PERSISTENT · REGION RAFT / DELTAMERGE',
+    ephemeral: 'EPHEMERAL · MPP EXCHANGE',
+    provisioning: 'Replica provisioning',
+    provisioningNote:
+      'AVAILABLE and PROGRESS describe placement, not immediate read readiness for an arbitrary snapshot.',
+    learners: 'Region learners and snapshot gates',
+    tasks: 'Fragments and tasks',
+    tunnels: 'Exchange tunnels',
+    root: 'TiDB root and client stream',
+    region: 'Region',
+    learner: 'Learner',
+    indexes: 'commit / received / DM / applied / required',
+    gate: 'Read gate',
+    store: 'Store',
+    task: 'Task',
+    fragment: 'Fragment',
+    stage: 'Stage',
+    exchange: 'Exchange',
+    packets: 'Packets',
+    result: 'Result stage',
+    retry: 'Retry / fallback',
+    boundary:
+      'Raft learner replication updates persistent MVCC state. MPP Exchange carries ephemeral query blocks and never changes Raft or MVCC state.',
+    privacy:
+      'PRIVACY: no raw SQL, address, real key/value, group value, result row, session ID, or production TSO is retained.',
   },
 } as const
 
@@ -3628,6 +3700,231 @@ function renderGcState(
   )
 }
 
+function renderTiFlashMppState(
+  event: MachineEvent,
+  locale: Locale,
+): HTMLElement | null {
+  const lab = event.snapshot?.tiflashMppLab
+  if (!lab) return null
+  const copy = TIFLASH_MPP_MACHINE_COPY[locale]
+  const taskById = new Map(lab.tasks.map((task) => [task.id, task]))
+
+  const learnerRail = element('section', {
+    className: 'tidb-machine__tiflash-rail is-persistent',
+    attrs: {
+      'data-tiflash-plane': lab.configuration.replicationPlane,
+      'data-initial-snapshot-modeled': String(
+        lab.configuration.initialSnapshotTransferModeled,
+      ),
+    },
+  },
+  element('header', {},
+    element('h3', { text: copy.learners }),
+    element('span', { text: copy.persistent }),
+  ),
+  element('div', {
+    className: 'tidb-machine__tiflash-card-grid',
+    attrs: { role: 'list' },
+  },
+  ...lab.learners.map((learner) => {
+    const card = element('article', {
+      className: `tidb-machine__tiflash-card is-${learner.readGate}`,
+      attrs: {
+        role: 'listitem',
+        'data-tiflash-learner-region': String(learner.regionId),
+        'data-tiflash-learner-store': learner.learnerStoreId,
+        'data-tiflash-learner-role': learner.role,
+        'data-tiflash-learner-voter': String(learner.voter),
+        'data-tiflash-read-gate': learner.readGate,
+        'data-tiflash-gate-reason': learner.gateReason ?? '',
+        'data-required-read-index':
+          learner.requiredReadIndex === null
+            ? ''
+            : String(learner.requiredReadIndex),
+        'data-applied-index': String(learner.learnerAppliedIndex),
+      },
+    },
+    element('h4', { text: `${copy.region} ${learner.regionId}` }),
+    element('strong', {
+      text: `${copy.learner}: ${learner.learnerStoreId}`,
+    }),
+    element('span', {
+      text:
+        `${copy.indexes}: ${learner.leaderCommitIndex} / ` +
+        `${learner.learnerReceivedIndex} / ` +
+        `${learner.deltaMergeFlushedIndex} / ` +
+        `${learner.learnerAppliedIndex} / ` +
+        `${learner.requiredReadIndex ?? '—'}`,
+    }),
+    element('span', {
+      text: `${copy.gate}: ${learner.readGate}` +
+        `${learner.gateReason ? ` · ${learner.gateReason}` : ''}`,
+    }),
+    )
+    return card
+  }),
+  ),
+  )
+
+  const fragmentGraph = element('section', {
+    className: 'tidb-machine__tiflash-graph',
+    attrs: {
+      tabindex: '0',
+      'aria-label': copy.graphTitle,
+      'data-tiflash-mpp-semantic-graph': 'fragment-task',
+      'data-causal-dag-replaced': 'false',
+      'data-fragment-count': String(lab.fragments.length),
+      'data-task-count': String(lab.tasks.length),
+      'data-tunnel-count': String(lab.tunnels.length),
+    },
+  },
+  element('header', {},
+    element('div', {},
+      element('h3', { text: copy.graphTitle }),
+      element('p', { text: copy.graphDirection }),
+    ),
+    element('span', { text: copy.ephemeral }),
+  ),
+  element('div', {
+    className: 'tidb-machine__tiflash-fragments',
+    attrs: { role: 'list' },
+  },
+  ...lab.fragments.map((fragment) => {
+    const fragmentTasks = fragment.taskIds
+      .map((taskId) => taskById.get(taskId))
+      .filter((task): task is NonNullable<typeof task> => task !== undefined)
+    return element('article', {
+      className: 'tidb-machine__tiflash-fragment',
+      attrs: {
+        role: 'listitem',
+        'data-mpp-fragment': fragment.id,
+        'data-mpp-fragment-kind': fragment.kind,
+      },
+    },
+    element('h4', { text: `${copy.fragment}: ${fragment.id}` }),
+    element('p', { text: fragment.operatorTokens.join(' → ') }),
+    element('ul', {},
+      ...fragmentTasks.map((task) => element('li', {
+        attrs: {
+          'data-mpp-task': task.id,
+          'data-mpp-task-stage': task.stage,
+          'data-mpp-task-store': task.storeId,
+          'data-mpp-task-feeds-root': String(task.feedsTiDBRoot),
+        },
+      },
+      element('strong', { text: task.id }),
+      element('span', { text: `${copy.store}: ${task.storeId}` }),
+      element('span', {
+        text: `${copy.region}: ${
+          task.regionIds.length > 0 ? task.regionIds.join(', ') : '—'
+        }`,
+      }),
+      element('span', { text: `${copy.stage}: ${task.stage}` }),
+      )),
+    ),
+    )
+  }),
+  ),
+  element('section', { className: 'tidb-machine__tiflash-tunnels' },
+    element('h3', { text: copy.tunnels }),
+    element('ul', { attrs: { role: 'list' } },
+      ...lab.tunnels.map((tunnel) => element('li', {
+        attrs: {
+          role: 'listitem',
+          'data-mpp-tunnel': tunnel.id,
+          'data-mpp-exchange': tunnel.exchangeType,
+          'data-mpp-tunnel-state': tunnel.status,
+          'data-mpp-tunnel-locality': tunnel.locality,
+          'data-mpp-persistent': 'false',
+        },
+      },
+      element('code', { text: tunnel.id }),
+      element('span', {
+        text: `${tunnel.sourceTaskId} → ${tunnel.targetTaskId}`,
+      }),
+      element('strong', {
+        text:
+          `${tunnel.exchangeType} · ${tunnel.locality} · ` +
+          `${copy.packets} ${tunnel.packetCount}`,
+      }),
+      )),
+    ),
+  ),
+  )
+
+  return element('section', {
+    className: 'tidb-machine__tiflash-state',
+    attrs: {
+      'aria-labelledby': 'tidb-machine-tiflash-mpp-title',
+      'data-tiflash-mpp-machine-state': 'true',
+      'data-tiflash-mpp-event-id': event.id,
+      'data-tiflash-mpp-event-kind': event.kind ?? '',
+      'data-tiflash-mpp-phase': lab.phase,
+      'data-tiflash-mpp-model': 'model-7',
+    },
+  },
+  element('header', { className: 'tidb-machine__tiflash-head' },
+    element('div', {},
+      element('p', {
+        className: 'tidb-machine__tiflash-eyebrow',
+        text: copy.eyebrow,
+      }),
+      element('h2', {
+        text: copy.title,
+        attrs: { id: 'tidb-machine-tiflash-mpp-title' },
+      }),
+    ),
+    element('div', { className: 'tidb-machine__tiflash-head-meta' },
+      element('span', {
+        text: `${copy.phase}: ${lab.phase}`,
+        attrs: { 'data-mpp-phase-state': lab.phase },
+      }),
+      element('span', { text: `${copy.snapshot} · ${event.id}` }),
+    ),
+  ),
+  element('section', {
+    className: 'tidb-machine__tiflash-provisioning',
+    attrs: {
+      'data-provisioning-available': String(
+        lab.configuration.provisioningAvailable,
+      ),
+      'data-provisioning-progress': String(
+        lab.configuration.provisioningProgress,
+      ),
+      'data-provisioning-means-read-ready': 'false',
+    },
+  },
+  element('h3', { text: copy.provisioning }),
+  element('p', { text: copy.provisioningNote }),
+  ),
+  learnerRail,
+  fragmentGraph,
+  element('section', {
+    className: 'tidb-machine__tiflash-root',
+    attrs: {
+      'data-mpp-root-task': lab.result.taskId,
+      'data-mpp-result-stage': lab.result.stage,
+      'data-mpp-root-stream-count': String(lab.result.rootStreamCount),
+      'data-mpp-client-complete': String(lab.result.clientComplete),
+      'data-mpp-retry-count': String(lab.retry.retryCount),
+      'data-mpp-fallback': String(lab.retry.fallbackToTiKV),
+    },
+  },
+  element('h3', { text: copy.root }),
+  element('dl', {},
+    gcFact(copy.result, lab.result.stage),
+    gcFact(copy.packets, String(lab.result.chunksDecoded)),
+    gcFact(copy.retry,
+      `${lab.retry.retryCount} / ${String(lab.retry.fallbackToTiKV)}`),
+  ),
+  ),
+  element('footer', { className: 'tidb-machine__tiflash-boundary' },
+    element('p', { text: copy.boundary }),
+    element('p', { text: copy.privacy }),
+  ),
+  )
+}
+
 export function adaptTraceReceipt(source: unknown): MachineReceipt {
   const receipt = record(source)
   const rawEvents = Array.isArray(receipt.events) ? receipt.events : []
@@ -3946,6 +4243,8 @@ function renderTimeline(
       'data-event-has-raft-snapshot': event.snapshot?.raftLab ? 'true' : 'false',
       'data-event-has-protocol-snapshot': event.snapshot?.protocolLab ? 'true' : 'false',
       'data-event-has-gc-snapshot': event.snapshot?.gcLab ? 'true' : 'false',
+      'data-event-has-tiflash-mpp-snapshot':
+        event.snapshot?.tiflashMppLab ? 'true' : 'false',
       'data-event-status': status,
       'data-event-state': state,
     })
@@ -4051,6 +4350,11 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     Boolean(event.snapshot?.gcLab))
   const gcSlot = element('div', {
     className: 'tidb-machine__gc-slot',
+  })
+  const hasTiFlashMppSnapshots = receipt.events.some((event) =>
+    Boolean(event.snapshot?.tiflashMppLab))
+  const tiflashMppSlot = element('div', {
+    className: 'tidb-machine__tiflash-slot',
   })
   const detail = element('section', {
     className: 'tidb-machine__detail',
@@ -4251,6 +4555,21 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
       if (gcState) gcSlot.replaceChildren(gcState)
       else gcSlot.replaceChildren()
     }
+    if (hasTiFlashMppSnapshots) {
+      const tiflashMppState = event
+        ? renderTiFlashMppState(event, locale)
+        : null
+      tiflashMppSlot.hidden = tiflashMppState === null
+      tiflashMppSlot.setAttribute(
+        'aria-hidden',
+        tiflashMppState === null ? 'true' : 'false',
+      )
+      if (tiflashMppState) {
+        tiflashMppSlot.replaceChildren(tiflashMppState)
+      } else {
+        tiflashMppSlot.replaceChildren()
+      }
+    }
     options.onSeek?.(event, current)
 
     for (const marker of frame.querySelectorAll<SVGElement>('[data-event-index]')) {
@@ -4318,6 +4637,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     ...(hasRaftSnapshots ? [raftSlot] : []),
     ...(hasProtocolSnapshots ? [protocolSlot] : []),
     ...(hasGcSnapshots ? [gcSlot] : []),
+    ...(hasTiFlashMppSnapshots ? [tiflashMppSlot] : []),
     detail,
     element('p', { className: 'tidb-machine__note', text: CATALOG[locale].simulatedTiming }),
   )

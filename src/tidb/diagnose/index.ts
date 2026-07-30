@@ -23,6 +23,11 @@ export const DIAGNOSE_SECTIONS = [
   'gc-delete-ranges',
   'gc-store-compaction',
   'gc-mvcc-chains',
+  'tiflash-replication',
+  'tiflash-read-gates',
+  'tiflash-mpp-tasks',
+  'tiflash-mpp-tunnels',
+  'tiflash-mpp-root',
   'transactions',
   'lock-waits',
   'deadlocks',
@@ -41,6 +46,14 @@ const GC_DETAIL_SECTIONS = new Set<DiagnoseSection>([
   'gc-delete-ranges',
   'gc-store-compaction',
   'gc-mvcc-chains',
+])
+
+const TIFLASH_MPP_DETAIL_SECTIONS = new Set<DiagnoseSection>([
+  'tiflash-replication',
+  'tiflash-read-gates',
+  'tiflash-mpp-tasks',
+  'tiflash-mpp-tunnels',
+  'tiflash-mpp-root',
 ])
 
 export const DIAGNOSE_SUMMARY_SECTIONS = [
@@ -153,11 +166,11 @@ WHERE VARIABLE_NAME = 'tikv_gc_safe_point';`,
     id: 'tiflash-lag',
     ja: {
       symptom: 'TiFlashが選ばれない、分析queryが待機・timeoutする',
-      guidance: 'TiFlashは要求snapshotまで複製が進むのを待ちます。lagは古い結果ではなく待機やtimeoutとして現れるため、AVAILABLEとPROGRESSを確認します。',
+      guidance: 'AVAILABLEとPROGRESSはreplica配置の状態で、任意snapshotの即時read readinessではありません。Region別のsafe-ts／ReadIndex／learner applied indexとtask時間を確認します。遅れは古い結果ではなく待機やtimeoutとして現れます。',
     },
     en: {
       symptom: 'TiFlash is not chosen, or analytical queries wait or time out',
-      guidance: 'TiFlash waits until replication covers the requested snapshot. Lag appears as waiting or timeout, not stale results, so check AVAILABLE and PROGRESS.',
+      guidance: 'AVAILABLE and PROGRESS describe replica provisioning, not immediate readiness for the requested snapshot. Inspect each Region’s safe-ts, ReadIndex, learner applied index, and task time. Lag appears as waiting or timeout, not stale results.',
     },
     sql: `SELECT TABLE_SCHEMA, TABLE_NAME, REPLICA_COUNT, LOCATION_LABELS, AVAILABLE, PROGRESS
 FROM INFORMATION_SCHEMA.TIFLASH_REPLICA
@@ -180,6 +193,11 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
     'gc-delete-ranges': 'Delete Ranges / Store fan-out',
     'gc-store-compaction': 'TiKV検出 / Compaction Filter',
     'gc-mvcc-chains': '代表MVCC chain cleanup',
+    'tiflash-replication': 'TiFlash learner複製',
+    'tiflash-read-gates': 'Region別snapshot gate',
+    'tiflash-mpp-tasks': 'MPP fragments / tasks',
+    'tiflash-mpp-tunnels': 'MPP Exchange tunnels',
+    'tiflash-mpp-root': 'TiDB root stream / 境界',
     transactions: 'Transactions / locks',
     'lock-waits': '現在のロック待機',
     deadlocks: 'デッドロック履歴',
@@ -203,6 +221,11 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
     'gc-delete-ranges': 'Delete Ranges / Store fan-out',
     'gc-store-compaction': 'TiKV detection / Compaction Filter',
     'gc-mvcc-chains': 'Representative MVCC chain cleanup',
+    'tiflash-replication': 'TiFlash learner replication',
+    'tiflash-read-gates': 'Per-Region snapshot gates',
+    'tiflash-mpp-tasks': 'MPP fragments and tasks',
+    'tiflash-mpp-tunnels': 'MPP Exchange tunnels',
+    'tiflash-mpp-root': 'TiDB root stream and boundaries',
     transactions: 'Transactions / locks',
     'lock-waits': 'Active lock waits',
     deadlocks: 'Deadlock history',
@@ -1520,6 +1543,159 @@ function gcMvccChainRows(state: Record<string, unknown>): DiagnosticRow[] {
   })
 }
 
+function tiflashMppLabState(
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  return record(state.tiflashMppLab)
+}
+
+function tiflashReplicationRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const lab = tiflashMppLabState(state)
+  if (Object.keys(lab).length === 0) return []
+  const configuration = record(lab.configuration)
+  return array(lab.learners).map((entry) => {
+    const learner = record(entry)
+    return {
+      region: value(learner.regionId),
+      leaderStore: value(learner.leaderStoreId),
+      learnerStore: value(learner.learnerStoreId),
+      role: value(learner.role),
+      voter: value(learner.voter),
+      replicationMode: value(learner.replicationMode),
+      leaderCommitIndex: value(learner.leaderCommitIndex),
+      learnerReceivedIndex: value(learner.learnerReceivedIndex),
+      learnerRaftCommandIndex: value(learner.learnerRaftCommandIndex),
+      deltaMergeCommittedIndex: value(learner.deltaMergeFlushedIndex),
+      learnerAppliedIndex: value(learner.learnerAppliedIndex),
+      replicationPlane: value(configuration.replicationPlane),
+      initialSnapshotTransferModeled:
+        value(configuration.initialSnapshotTransferModeled),
+      exchangeMutation: 'false',
+    }
+  })
+}
+
+function tiflashReadGateRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const lab = tiflashMppLabState(state)
+  if (Object.keys(lab).length === 0) return []
+  const configuration = record(lab.configuration)
+  return array(lab.learners).map((entry) => {
+    const learner = record(entry)
+    return {
+      region: value(learner.regionId),
+      learnerStore: value(learner.learnerStoreId),
+      snapshotTs: value(lab.snapshotTs),
+      leaderSafeTs: value(learner.leaderSafeTs),
+      selfSafeTs: value(learner.selfSafeTs),
+      safeTsLagBucket: value(learner.safeTsLagBucket),
+      gateState: value(learner.readGate),
+      gateReason: value(learner.gateReason),
+      readIndexSkipped: value(learner.readIndexSkipped),
+      requiredReadIndex: value(learner.requiredReadIndex),
+      learnerAppliedIndex: value(learner.learnerAppliedIndex),
+      lockCount: value(learner.lockCount),
+      postReadValidated: value(learner.postReadValidated),
+      staleRead: value(configuration.staleRead),
+      readinessBoundary: 'per_region_not_node_global_resolved_ts',
+    }
+  })
+}
+
+function tiflashMppTaskRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const lab = tiflashMppLabState(state)
+  if (Object.keys(lab).length === 0) return []
+  const fragments = new Map(
+    array(lab.fragments).map((entry) => {
+      const fragment = record(entry)
+      return [fragment.id, fragment] as const
+    }),
+  )
+  return array(lab.tasks).map((entry) => {
+    const task = record(entry)
+    const fragment = fragments.get(task.fragmentId)
+    return {
+      task: value(task.id),
+      fragment: value(task.fragmentId),
+      fragmentKind: value(fragment?.kind),
+      operators: value(fragment?.operatorTokens),
+      store: value(task.storeId),
+      regions: value(task.regionIds),
+      stage: value(task.stage),
+      rootTask: value(task.root),
+      feedsTiDBRoot: value(task.feedsTiDBRoot),
+      taskBoundary: 'tasks_group_regions_by_tiflash_address',
+    }
+  })
+}
+
+function tiflashMppTunnelRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const lab = tiflashMppLabState(state)
+  if (Object.keys(lab).length === 0) return []
+  const configuration = record(lab.configuration)
+  return array(lab.tunnels).map((entry) => {
+    const tunnel = record(entry)
+    return {
+      tunnel: value(tunnel.id),
+      exchangeType: value(tunnel.exchangeType),
+      sourceTask: value(tunnel.sourceTaskId),
+      targetTask: value(tunnel.targetTaskId),
+      state: value(tunnel.status),
+      packetCount: value(tunnel.packetCount),
+      bytesBucket: value(tunnel.bytesBucket),
+      persistence: value(tunnel.persistence),
+      exchangePlane: value(configuration.exchangePlane),
+      raftOrMvccMutation: 'false',
+    }
+  })
+}
+
+function tiflashMppRootRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const lab = tiflashMppLabState(state)
+  if (Object.keys(lab).length === 0) return []
+  const configuration = record(lab.configuration)
+  const result = record(lab.result)
+  const retry = record(lab.retry)
+  const pins = record(lab.pins)
+  return [{
+    phase: value(lab.phase),
+    queryToken: value(configuration.queryToken),
+    tableToken: value(configuration.tableToken),
+    optimizerChoice: value(configuration.optimizerChoice),
+    provisioningAvailable: value(configuration.provisioningAvailable),
+    provisioningProgress: value(configuration.provisioningProgress),
+    provisioningMeaning: value(configuration.provisioningMeaning),
+    rootTask: value(result.taskId),
+    resultStage: value(result.stage),
+    rootStreams: value(result.rootStreamCount),
+    chunksDecoded: value(result.chunksDecoded),
+    columnsSent: value(result.columnsSent),
+    rowsBucket: value(result.rowsBucket),
+    clientComplete: value(result.clientComplete),
+    retryCount: value(retry.retryCount),
+    fallbackToTiKV: value(retry.fallbackToTiKV),
+    failureCode: value(retry.failureCode),
+    failureRetryModeled: value(configuration.failureRetryModeled),
+    tiflashPin: value(pins.tiflash),
+    tiflashProxyPin: value(pins.tiflashProxy),
+    tidbPin: value(pins.tidb),
+    tikvPin: value(pins.tikv),
+    provisioningBoundary:
+      'AVAILABLE_and_PROGRESS_do_not_guarantee_snapshot_readiness',
+    fallbackBoundary:
+      'query_level_before_client_output_not_partial_task_resume',
+  }]
+}
+
 function lockLabState(state: Record<string, unknown>): Record<string, unknown> {
   return record(state.lockLab)
 }
@@ -1737,6 +1913,11 @@ export function projectDiagnostics(snapshot: TiCityState | unknown): DiagnosticP
     'gc-delete-ranges': () => gcDeleteRangeRows(state),
     'gc-store-compaction': () => gcStoreCompactionRows(state),
     'gc-mvcc-chains': () => gcMvccChainRows(state),
+    'tiflash-replication': () => tiflashReplicationRows(state),
+    'tiflash-read-gates': () => tiflashReadGateRows(state),
+    'tiflash-mpp-tasks': () => tiflashMppTaskRows(state),
+    'tiflash-mpp-tunnels': () => tiflashMppTunnelRows(state),
+    'tiflash-mpp-root': () => tiflashMppRootRows(state),
     transactions: () => transactionRows(state),
     'lock-waits': () => lockWaitRows(state),
     deadlocks: () => deadlockRows(state),
@@ -2364,7 +2545,11 @@ function projectionTable(
       'data-diagnose-section': projection.id,
       'data-tone': tone,
       'aria-labelledby': titleId,
-      ...(GC_DETAIL_SECTIONS.has(projection.id)
+      ...(projection.rows.length > 0 &&
+      (
+        GC_DETAIL_SECTIONS.has(projection.id) ||
+        TIFLASH_MPP_DETAIL_SECTIONS.has(projection.id)
+      )
         ? { 'data-privacy-boundary': 'synthetic-aggregate-only' }
         : {}),
     },
@@ -2470,6 +2655,10 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
   const hasGcDetail = projections.some((projection) =>
     GC_DETAIL_SECTIONS.has(projection.id) && projection.rows.length > 0
   )
+  const hasTiFlashMppDetail = projections.some((projection) =>
+    TIFLASH_MPP_DETAIL_SECTIONS.has(projection.id) &&
+    projection.rows.length > 0
+  )
   installCityUiStyles(root.ownerDocument ?? document)
   installDiagnoseStyles(root.ownerDocument ?? document)
 
@@ -2518,13 +2707,15 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
 
   root.classList.add('tidb-surface', 'tidb-diagnose')
   root.setAttribute('lang', locale)
-  root.dataset.activeLab = hasGcDetail
-    ? 'gc-storage'
-    : hasProtocolDetail
-      ? 'protocol'
-      : hasRaftDetail
-        ? 'raft'
-        : 'none'
+  root.dataset.activeLab = hasTiFlashMppDetail
+    ? 'tiflash-mpp'
+    : hasGcDetail
+      ? 'gc-storage'
+      : hasProtocolDetail
+        ? 'protocol'
+        : hasRaftDetail
+          ? 'raft'
+          : 'none'
   root.replaceChildren(
     element('header', { className: 'tidb-diagnose__head' },
       element('div', { className: 'tidb-diagnose__head-copy' },

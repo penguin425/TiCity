@@ -38,7 +38,7 @@ export const DIAGNOSE_PAGE_COPY: Record<Locale, DiagnosePageCopy> = {
       'hotspot-split': 'hotspot、split、rebalance',
       'tikv-failover': 'TiKV障害とleader election',
       'gc-safe-point': '長時間transactionとGC safe point',
-      'tiflash-mpp': 'TiFlash catch-upとMPP',
+      'tiflash-mpp': 'TiFlash learner複製とMPP Exchange',
     },
   },
   en: {
@@ -61,7 +61,7 @@ export const DIAGNOSE_PAGE_COPY: Record<Locale, DiagnosePageCopy> = {
       'hotspot-split': 'Hotspot, split, and rebalance',
       'tikv-failover': 'TiKV failure and leader election',
       'gc-safe-point': 'Long transaction and GC safe point',
-      'tiflash-mpp': 'TiFlash catch-up and MPP',
+      'tiflash-mpp': 'TiFlash learner replication and MPP Exchange',
     },
   },
 }
@@ -202,6 +202,61 @@ const GC_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
   'GC/Storage Lab completed': 'GC/Storage Labが完了',
 }
 
+const TIFLASH_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
+  tiflash_mpp_query_received:
+    'TiDBがgrouped aggregate queryを受信',
+  tiflash_mpp_snapshot_tso:
+    'PDがquery snapshot TSOを採番',
+  tiflash_safe_ts_read_state_update:
+    'Region別safe-ts read stateを観測',
+  tiflash_replica_placement_observed:
+    'TiDBがTiFlash replicaの配置完了を観測',
+  tiflash_mpp_access_path_selected:
+    'optimizerがTiFlash MPP access pathを選択',
+  tiflash_mpp_fragments_built:
+    'TiDBが2つのMPP fragmentを構築',
+  tiflash_mpp_regions_scheduled:
+    'TiDBがRegionをTiFlash Store別にgroup化',
+  tiflash_mpp_tasks_built:
+    'TiDBが4つのMPP taskを生成',
+  tiflash_mpp_tunnels_registered:
+    '6本の一時的MPP tunnelを登録',
+  tiflash_mpp_dispatch_batch:
+    'TiDBが4つのtaskを並行dispatch',
+  tiflash_mpp_tasks_prepared:
+    'TiFlashが全taskをprepareして登録',
+  tiflash_snapshot_gating_started:
+    'scan taskがRegion別snapshot gateを開始',
+  tiflash_snapshot_gate_ready_safe_ts:
+    'Region 24がself safe-ts経路でgateを通過',
+  tiflash_mvcc_lock_checks_complete:
+    '全RegionのMVCC lock checkが完了',
+  tiflash_dm_snapshot_scans_started:
+    '2つのscan taskがDeltaMerge snapshot readerを構築',
+  tiflash_regions_post_read_validated:
+    'Region epochとrangeをread後に再検証',
+  tiflash_partial_hash_aggregate_complete:
+    'scan taskがpartial aggregationを完了',
+  tiflash_hash_partition_started:
+    'scan taskがaggregate blockのHashPartitionを開始',
+  tiflash_hash_exchange_received:
+    'final taskが全HashPartition blockを受信',
+  tiflash_final_hash_aggregate_complete:
+    'final taskが2段目のaggregationを完了',
+  tiflash_root_passthrough_sent:
+    '2本のPassThrough streamが結果blockをTiDBへ送信',
+  tiflash_mpp_gather_decoded:
+    'TiDB MPPGatherがresult chunkをdecode',
+  tiflash_client_columns_sent:
+    'TiDBがresult column metadataを送信',
+  tiflash_client_rows_streamed:
+    'TiDBがaggregate row bucketをstream',
+  tiflash_root_streams_eof:
+    '両root streamがEOFに到達',
+  tiflash_client_query_complete:
+    'TiDBがclient responseを完了',
+}
+
 function protocolEventNameJa(label: string): string | undefined {
   const exact = PROTOCOL_EVENT_LABELS_JA[label]
   if (exact) return exact
@@ -251,11 +306,48 @@ function gcEventNameJa(label: string): string | undefined {
   return undefined
 }
 
+function tiflashEventNameJa(event: TraceEvent): string | undefined {
+  const exact = TIFLASH_EVENT_LABELS_JA[event.kind]
+  if (exact) return exact
+  const region = event.regionId
+  if (region !== undefined) {
+    const names: Readonly<Record<string, string>> = {
+      tiflash_raft_leader_commit:
+        `Region ${region}がRaft entryをcommit`,
+      tiflash_learner_receive:
+        `Region ${region} learnerがentryを受信`,
+      tiflash_learner_apply_command:
+        `Region ${region}がRaft commandをapply`,
+      tiflash_dm_committed_flush:
+        `Region ${region}がcommit済みrowをDeltaMergeへ書き込み`,
+      tiflash_learner_applied_advance:
+        `Region ${region} learnerのapplied indexが前進`,
+      tiflash_snapshot_safe_ts_check:
+        `Region ${region}がstart_tsとself safe-tsを比較`,
+      tiflash_read_index_requested:
+        `Region ${region}がReadIndexを要求`,
+      tiflash_read_index_returned:
+        `Region ${region}が必要なReadIndexを受信`,
+      tiflash_learner_wait_applied:
+        `Region ${region}がlearner applyを待機`,
+      tiflash_snapshot_gate_ready_read_index:
+        `Region ${region}がReadIndexとapplyでgateを通過`,
+    }
+    return names[event.kind]
+  }
+  if (event.kind === 'tiflash_hash_exchange_send') {
+    const tunnel = event.label.split(' ')[0]
+    return `${tunnel}がaggregate blockを送信`
+  }
+  return undefined
+}
+
 export function diagnoseEventName(locale: Locale, event: TraceEvent): string {
   return locale === 'ja'
     ? LOCK_EVENT_LABELS_JA[event.label] ??
       protocolEventNameJa(event.label) ??
       gcEventNameJa(event.label) ??
+      tiflashEventNameJa(event) ??
       event.label
     : event.label
 }

@@ -1873,6 +1873,202 @@ export const MACHINE_CSS = `
 .tidb-machine__gc-boundaries .tidb-machine__gc-privacy {
   grid-column: 1 / -1;
 }
+.tidb-machine__tiflash-state {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--domain-tiflash, #49a7ff) 52%, var(--tc-border));
+  border-radius: 12px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--tc-panel) 88%, transparent);
+}
+.tidb-machine__tiflash-head,
+.tidb-machine__tiflash-head-meta,
+.tidb-machine__tiflash-rail > header,
+.tidb-machine__tiflash-graph > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tidb-machine__tiflash-eyebrow {
+  margin: 0 0 4px;
+  color: var(--domain-tiflash, #49a7ff);
+  font: 800 9px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .11em;
+}
+.tidb-machine__tiflash-head h2,
+.tidb-machine__tiflash-rail h3,
+.tidb-machine__tiflash-graph h3,
+.tidb-machine__tiflash-tunnels h3,
+.tidb-machine__tiflash-root h3,
+.tidb-machine__tiflash-provisioning h3 {
+  margin: 0;
+  color: var(--tc-text);
+  font: 780 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-head h2 {
+  font-size: 15px;
+}
+.tidb-machine__tiflash-head-meta {
+  align-items: flex-end;
+  flex-direction: column;
+  color: var(--tc-muted);
+  font: 700 9px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-provisioning,
+.tidb-machine__tiflash-rail,
+.tidb-machine__tiflash-graph,
+.tidb-machine__tiflash-root,
+.tidb-machine__tiflash-boundary {
+  margin-top: 9px;
+  border: 1px solid var(--tc-border);
+  border-radius: 9px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--tc-panel-2) 68%, transparent);
+}
+.tidb-machine__tiflash-provisioning {
+  border-left: 4px solid var(--tc-yellow);
+}
+.tidb-machine__tiflash-provisioning p,
+.tidb-machine__tiflash-graph header p,
+.tidb-machine__tiflash-boundary p {
+  margin: 5px 0 0;
+  color: var(--tc-muted);
+  font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-rail.is-persistent {
+  border-top: 3px solid var(--domain-raft, #ff7a59);
+}
+.tidb-machine__tiflash-rail > header span,
+.tidb-machine__tiflash-graph > header > span {
+  color: var(--domain-tiflash, #49a7ff);
+  font: 800 9px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .05em;
+}
+.tidb-machine__tiflash-card-grid,
+.tidb-machine__tiflash-fragments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 8px;
+}
+.tidb-machine__tiflash-card,
+.tidb-machine__tiflash-fragment {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border: 1px solid var(--tc-border);
+  border-left: 4px solid var(--domain-tiflash, #49a7ff);
+  border-radius: 7px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--tc-panel) 64%, transparent);
+}
+.tidb-machine__tiflash-card.is-ready,
+.tidb-machine__tiflash-card.is-mvcc_checked,
+.tidb-machine__tiflash-card.is-validated {
+  border-left-color: var(--domain-kv, #64e572);
+}
+.tidb-machine__tiflash-card.is-waiting_applied {
+  border-left-color: var(--tc-yellow);
+}
+.tidb-machine__tiflash-card h4,
+.tidb-machine__tiflash-fragment h4 {
+  margin: 0;
+  color: var(--tc-text);
+  font: 780 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-card strong,
+.tidb-machine__tiflash-card span,
+.tidb-machine__tiflash-fragment p,
+.tidb-machine__tiflash-fragment li {
+  overflow-wrap: anywhere;
+  color: var(--tc-muted);
+  font: 9px/1.42 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-card strong {
+  color: var(--domain-tiflash, #49a7ff);
+}
+.tidb-machine__tiflash-graph {
+  border-top: 3px solid var(--domain-tiflash, #49a7ff);
+}
+.tidb-machine__tiflash-graph:focus-visible {
+  outline: 3px solid var(--domain-tiflash, #49a7ff);
+  outline-offset: 2px;
+}
+.tidb-machine__tiflash-fragments {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tidb-machine__tiflash-fragment ul,
+.tidb-machine__tiflash-tunnels ul {
+  display: grid;
+  gap: 5px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tidb-machine__tiflash-fragment li {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--tc-border) 72%, transparent);
+  border-radius: 5px;
+  padding: 5px;
+}
+.tidb-machine__tiflash-fragment li strong {
+  color: var(--tc-text);
+}
+.tidb-machine__tiflash-tunnels {
+  margin-top: 9px;
+}
+.tidb-machine__tiflash-tunnels ul {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tidb-machine__tiflash-tunnels li {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr) auto;
+  gap: 7px;
+  border-left: 3px solid var(--domain-tiflash, #49a7ff);
+  padding: 6px 7px;
+  background: color-mix(in srgb, var(--tc-panel) 62%, transparent);
+  color: var(--tc-muted);
+  font: 9px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-tunnels code {
+  color: var(--tc-text);
+}
+.tidb-machine__tiflash-tunnels strong {
+  color: var(--domain-tiflash, #49a7ff);
+  text-align: right;
+}
+.tidb-machine__tiflash-root {
+  border-left: 4px solid var(--domain-sql, #20d9c2);
+}
+.tidb-machine__tiflash-root dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 7px 0 0;
+}
+.tidb-machine__tiflash-root dl > div {
+  border: 1px solid var(--tc-border);
+  border-radius: 6px;
+  padding: 6px;
+}
+.tidb-machine__tiflash-root dt,
+.tidb-machine__tiflash-root dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 9px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.tidb-machine__tiflash-root dt { color: var(--tc-muted); }
+.tidb-machine__tiflash-root dd {
+  margin-top: 3px;
+  color: var(--tc-text);
+}
+.tidb-machine__tiflash-boundary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
 .tidb-machine__detail {
   position: relative;
   min-height: 8em;
@@ -2027,6 +2223,18 @@ export const MACHINE_CSS = `
   .tidb-machine__gc-boundaries .tidb-machine__gc-privacy {
     grid-column: auto;
   }
+  .tidb-machine__tiflash-card-grid,
+  .tidb-machine__tiflash-fragments,
+  .tidb-machine__tiflash-tunnels ul,
+  .tidb-machine__tiflash-boundary {
+    grid-template-columns: 1fr;
+  }
+  .tidb-machine__tiflash-fragment li {
+    grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+  }
+  .tidb-machine__tiflash-root dl {
+    grid-template-columns: 1fr;
+  }
   .tidb-machine__wait-list li {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   }
@@ -2062,6 +2270,23 @@ export const MACHINE_CSS = `
     width: 100%;
     max-width: none;
     align-items: flex-start;
+  }
+  .tidb-machine__tiflash-head,
+  .tidb-machine__tiflash-rail > header,
+  .tidb-machine__tiflash-graph > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .tidb-machine__tiflash-head-meta {
+    width: 100%;
+    align-items: flex-start;
+  }
+  .tidb-machine__tiflash-fragment li,
+  .tidb-machine__tiflash-tunnels li {
+    grid-template-columns: 1fr;
+  }
+  .tidb-machine__tiflash-tunnels strong {
+    text-align: left;
   }
   .tidb-machine__gc-graph-head {
     align-items: flex-start;
