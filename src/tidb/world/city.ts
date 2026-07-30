@@ -13,6 +13,7 @@ import {
   FOCUS_ANCHORS,
   HTAP_PATHS,
   LOCK_LAB_ORIGIN,
+  PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
@@ -29,6 +30,8 @@ import { createLockLab } from './lock-lab'
 import type { LockLab } from './lock-lab'
 import { createRaftLab } from './raft-lab'
 import type { RaftLab } from './raft-lab'
+import { createProtocolLab } from './protocol-lab'
+import type { ProtocolLab } from './protocol-lab'
 
 export type CityComponentKind =
   | 'client'
@@ -89,6 +92,7 @@ export interface TiDBSceneGraph {
   readonly transactionLab: TransactionLab
   readonly lockLab: LockLab
   readonly raftLab: RaftLab
+  readonly protocolLab: ProtocolLab
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
@@ -471,6 +475,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   raftLab.object.position.set(...RAFT_LAB_ORIGIN)
   raftLab.object.scale.setScalar(0.92)
   root.add(raftLab.object)
+  const protocolLab = createProtocolLab()
+  protocolLab.object.position.set(...PROTOCOL_LAB_ORIGIN)
+  protocolLab.object.scale.setScalar(0.92)
+  root.add(protocolLab.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
@@ -1086,6 +1094,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     transactionLab,
     lockLab,
     raftLab,
+    protocolLab,
     getAnchor(id: string, out: THREE.Vector3): boolean {
       const component = registry.get(id)
       if (component) {
@@ -1111,6 +1120,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       transactionLab.setTheme(next)
       lockLab.setTheme(next)
       raftLab.setTheme(next)
+      protocolLab.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -1127,6 +1137,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       transactionLab.dispose()
       lockLab.dispose()
       raftLab.dispose()
+      protocolLab.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()

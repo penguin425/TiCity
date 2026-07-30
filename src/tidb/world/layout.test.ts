@@ -12,6 +12,7 @@ import {
   FOCUS_ANCHORS,
   HTAP_PATHS,
   LOCK_LAB_ORIGIN,
+  PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
@@ -85,9 +86,12 @@ describe('TiCity layout', () => {
     expect(FOCUS_ANCHORS['transaction.lab']).toBe(TRANSACTION_LAB_ORIGIN)
     expect(FOCUS_ANCHORS['lock.lab']).toBe(LOCK_LAB_ORIGIN)
     expect(FOCUS_ANCHORS['raft.lab']).toBe(RAFT_LAB_ORIGIN)
+    expect(FOCUS_ANCHORS['protocol.lab']).toBe(PROTOCOL_LAB_ORIGIN)
     expect(LOCK_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(RAFT_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
+    expect(PROTOCOL_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(LOCK_LAB_ORIGIN[1]).toBeGreaterThan(0)
     expect(RAFT_LAB_ORIGIN[1]).toBeGreaterThan(0)
+    expect(PROTOCOL_LAB_ORIGIN[1]).toBeGreaterThan(0)
   })
 })

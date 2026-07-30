@@ -26,6 +26,7 @@ import {
   type Locale,
 } from './ui'
 import { createLockLabPanel } from './ui/lock-lab'
+import { createProtocolLabPanel } from './ui/protocol-lab'
 import { createRaftLabPanel } from './ui/raft-lab'
 import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTransactionLabPanel } from './ui/transaction-lab'
@@ -173,12 +174,15 @@ function initialScenario(): ScenarioId {
     : 'point-read'
 }
 
-type DetailLab = 'transaction' | 'lock' | 'raft'
+type DetailLab = 'transaction' | 'lock' | 'raft' | 'protocol'
 
 function detailLabForTrace(trace: TraceReceipt | null): DetailLab | null {
   const snapshots = (trace?.events ?? [])
     .map((event) => event.snapshot)
     .filter((snapshot) => snapshot !== undefined)
+  if (snapshots.some((snapshot) => snapshot.protocolLab !== undefined)) {
+    return 'protocol'
+  }
   if (snapshots.some((snapshot) => snapshot.raftLab !== undefined)) return 'raft'
   if (snapshots.some((snapshot) => snapshot.lockLab !== undefined)) return 'lock'
   return snapshots.length > 0 ? 'transaction' : null
@@ -540,10 +544,12 @@ function boot(): void {
   const transactionLabPanel = createTransactionLabPanel(locale)
   const lockLabPanel = createLockLabPanel(locale)
   const raftLabPanel = createRaftLabPanel(locale)
+  const protocolLabPanel = createProtocolLabPanel(locale)
   worldHost.append(
     transactionLabPanel.root,
     lockLabPanel.root,
     raftLabPanel.root,
+    protocolLabPanel.root,
   )
 
   const traceDock = createTracePlaybackDock(locale, {
@@ -619,7 +625,9 @@ function boot(): void {
           ? 'lock.lab'
           : activeLab === 'raft'
             ? 'raft.lab'
-            : 'transaction.lab',
+            : activeLab === 'protocol'
+              ? 'protocol.lab'
+              : 'transaction.lab',
       )
     }
   }
@@ -792,6 +800,7 @@ function boot(): void {
       transactionLabPanel.setLocale(next)
       lockLabPanel.setLocale(next)
       raftLabPanel.setLocale(next)
+      protocolLabPanel.setLocale(next)
       movementPad.setLocale(next)
       hint.textContent = copy[next].hint[currentView]
       surfaceLinkKey = ''
@@ -844,6 +853,7 @@ function boot(): void {
         transactionLabPanel.update(playback.event, activeEvents)
         lockLabPanel.update(playback.event, activeEvents)
         raftLabPanel.update(playback.event, activeEvents)
+        protocolLabPanel.update(playback.event, activeEvents)
       }
     }
 
@@ -903,6 +913,7 @@ function boot(): void {
     transactionLabPanel.update(null)
     lockLabPanel.update(null)
     raftLabPanel.update(null)
+    protocolLabPanel.update(null)
     syncSurfaceLinks(null)
     world?.update(simulation.state, null)
   }
@@ -949,6 +960,7 @@ function boot(): void {
     transactionLabPanel.dispose()
     lockLabPanel.dispose()
     raftLabPanel.dispose()
+    protocolLabPanel.dispose()
     movementPad.dispose()
     world?.dispose()
   }, { once: true })

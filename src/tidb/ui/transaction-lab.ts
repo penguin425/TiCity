@@ -197,7 +197,8 @@ export function createTransactionLabPanel(
     // but their matching view is the sole DOM detail surface.
     const snapshot =
       eventSnapshot?.lockLab === undefined &&
-      eventSnapshot?.raftLab === undefined
+      eventSnapshot?.raftLab === undefined &&
+      eventSnapshot?.protocolLab === undefined
       ? eventSnapshot
       : undefined
     const nextKey = snapshotKey(currentEvent, currentActive, locale)

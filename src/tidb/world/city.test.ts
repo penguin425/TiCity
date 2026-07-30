@@ -10,6 +10,7 @@ import { createTiDBSimulation } from '../model'
 import {
   COMPONENT_ANCHORS,
   LOCK_LAB_ORIGIN,
+  PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
   TICITY_LAYOUT,
 } from './layout'
@@ -74,6 +75,23 @@ describe('TiCity scene graph', () => {
     city.setTheme('day')
     city.dispose()
     expect(city.raftLab.debug.disposed).toBe(true)
+  })
+
+  it('mounts the fixed Protocol Lab on the shared focus stage and owns its lifecycle', () => {
+    const city = createTiDBSceneGraph()
+    const focus = new THREE.Vector3()
+
+    expect(city.protocolLab.object.parent).toBe(city.root)
+    expect(city.protocolLab.object.visible).toBe(false)
+    expect(city.getAnchor('protocol.lab', focus)).toBe(true)
+    expect(focus.toArray()).toEqual([...PROTOCOL_LAB_ORIGIN])
+    expect(city.protocolLab.object.userData.boundary).toContain(
+      'per-Region Raft quorum',
+    )
+
+    city.setTheme('day')
+    city.dispose()
+    expect(city.protocolLab.debug.disposed).toBe(true)
   })
 
   it('keeps PD out of every data-network segment', () => {

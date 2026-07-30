@@ -95,6 +95,7 @@ export {
   COMPONENT_ANCHORS,
   DISTRICT_BOUNDS,
   RAFT_LAB_ORIGIN,
+  PROTOCOL_LAB_ORIGIN,
   TICITY_LAYOUT,
   regionPeerPosition,
 } from './layout'
@@ -124,6 +125,17 @@ export {
   createRaftLab,
   EMPTY_RAFT_LAB_PROJECTION,
 } from './raft-lab'
+export {
+  createProtocolLab,
+  EMPTY_PROTOCOL_LAB_PROJECTION,
+} from './protocol-lab'
+export { projectProtocolLab } from './protocol-lab-projection'
+export type {
+  ProtocolLab,
+  ProtocolLabLaneProjection,
+  ProtocolLabProjection,
+  ProtocolLabRegionProjection,
+} from './protocol-lab'
 export { projectRaftLab } from './raft-lab-projection'
 export type {
   RaftLab,
