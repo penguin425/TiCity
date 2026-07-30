@@ -4,10 +4,7 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
-The following v0.8 entries are planned release-note boundaries. They do not
-assert that a tag, GitHub Release, or deployment exists yet.
-
-## [0.8.0] — Planned, not released
+## [0.8.0] — 2026-07-31
 
 - Complete the model-6 GC/Storage Lab vertical slice across exact-event City,
   Machine, and Diagnose, with every surface reading the same selected snapshot
@@ -20,11 +17,11 @@ assert that a tag, GitHub Release, or deployment exists yet.
   commits while labeling synthetic timestamps, counts, bottommost-compaction
   placement, and durations as non-benchmark teaching fixtures.
 - Include bilingual release documentation and the GC/Storage Lab screenshot in
-  the planned release archive, with deterministic, accessibility, responsive,
+  the release archive, with deterministic, accessibility, responsive,
   fixed-capacity, reduced-motion, privacy, source-provenance, and
   production-build gates.
 
-## [0.8.0-beta.1] — Planned, not released
+## [0.8.0-beta.1] — 2026-07-31
 
 - Extend Machine with a two-round semantic GC pipeline kept separate from its
   causal DAG, plus exact safe-point, ResolveLock, Delete Range, Store filter,
@@ -43,7 +40,7 @@ assert that a tag, GitHub Release, or deployment exists yet.
   raftstore-v1 `UnsafeDestroyRange` explicitly no-Raft, and Compaction Filter
   distinct from Raft log GC.
 
-## [0.8.0-alpha.2] — Planned, not released
+## [0.8.0-alpha.2] — 2026-07-31
 
 - Add a fixed-capacity 3D GC/Storage Lab cutaway and accessible bilingual DOM
   inspector synchronized with the City Trace Dock and exact selected event.
@@ -55,7 +52,7 @@ assert that a tag, GitHub Release, or deployment exists yet.
   without rerunning GC, recomputing a candidate, advancing PD, or changing
   filter results.
 
-## [0.8.0-alpha.1] — Planned, not released
+## [0.8.0-alpha.1] — 2026-07-31
 
 - Introduce the model-6 `gc-safe-point` vertical slice with 43 deeply frozen
   exact-event snapshots and typed deltas across two deterministic GC/storage

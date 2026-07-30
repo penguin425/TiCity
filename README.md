@@ -16,12 +16,11 @@ Live site: <https://penguin425.github.io/TiCity/>
 ![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> The latest published release is TiCity v0.7.0. This development tree also
-> contains the unreleased model-6 GC/Storage Lab planned for v0.8. Both target
-> the TiDB v8.5 LTS line as static, offline models. TiCity does not execute SQL
-> or return real data or invented result rows. A single SQL statement entered
-> by the user is classified entirely in the browser, and only a modeled route
-> and explanation are generated.
+> TiCity v0.8.0 is the current published release. It targets the TiDB v8.5 LTS
+> line as a static, offline model and includes the model-6 GC/Storage Lab.
+> TiCity does not execute SQL or return real data or invented result rows. A
+> single SQL statement entered by the user is classified entirely in the
+> browser, and only a modeled route and explanation are generated.
 
 ## What you can inspect
 
@@ -54,7 +53,7 @@ Live site: <https://penguin425.github.io/TiCity/>
 - Client-response boundaries that leave no 1PC cleanup, both Async Commit
   Regions for background commit-record resolution, and the regular 2PC
   secondary for background commit
-- An unreleased model-6 GC/Storage Lab that expands one 43-event immutable
+- A model-6 GC/Storage Lab that expands one 43-event immutable
   receipt into two GC rounds: an active transaction first caps the candidate
   at global `minStartTS - 1`, then an explicit fixture boundary completes that
   transaction and lets the second candidate advance
@@ -161,12 +160,11 @@ retain only aggregate counts and synthetic identifiers.
 
 ![TiCity Protocol Lab comparing 1PC, Async Commit, and regular 2PC](docs/protocol-lab.png)
 
-Open the unreleased GC/Storage Lab directly with the `gc-safe-point` scenario:
+Open the GC/Storage Lab directly with the live `gc-safe-point` scenario:
 [City](https://penguin425.github.io/TiCity/?scenario=gc-safe-point&event=trace-1-event-22),
 [Machine](https://penguin425.github.io/TiCity/machine/?scenario=gc-safe-point&event=trace-1-event-22),
 or [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=gc-safe-point&event=trace-1-event-22).
-These links name the planned v0.8 route and exact event; the published site
-will expose the detailed projection only after a v0.8 prerelease is deployed.
+These live links preserve the v0.8 scenario and selected exact event.
 City uses a fixed-capacity 3D cutaway and bilingual semantic inspector. Machine
 adds a two-row semantic pipeline without replacing the exact causal DAG.
 Diagnose exposes the candidate and bounds, coordinator stages, locks, range,
@@ -274,7 +272,7 @@ src/tidb/
   per-Region Raft mutation chains. Each chain independently shows propose,
   two-voter persistence, 2-of-3 commit, and apply before its conceptual MVCC
   state changes.
-- In the unreleased model-6 GC/Storage Lab, all 43 events carry one deeply
+- In the model-6 GC/Storage Lab, all 43 events carry one deeply
   frozen `gcLab` post-event snapshot. City, Machine, and Diagnose project that
   same selected snapshot. The first safe point is capped to
   `globalMinStartTS - 1`; service-point selection, `mysql.tidb` staging,
@@ -289,8 +287,7 @@ src/tidb/
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
 
-Detailed mechanism-level projections in this development tree apply to five
-scenarios. The
+Detailed mechanism-level projections in v0.8 apply to five scenarios. The
 cross-Region transaction expands transaction 2PC, per-Region Raft, and
 conceptual MVCC. Lock Lab expands leader-memory lock contention and hands off
 its commit path instead of duplicating that pipeline. Raft Failure Lab expands
@@ -298,7 +295,7 @@ one Region's election, current-term leader no-op, PD observation and routing,
 and TiDB-internal request recovery. Protocol Lab expands eligibility,
 timestamp authority, one-Region 1PC, two-Region Async Commit, and regular 2PC,
 including their client/background boundaries and independent Region Raft
-chains. The unreleased GC/Storage Lab expands its two safe-point and storage
+chains. GC/Storage Lab expands its two safe-point and storage
 rounds without folding Resolve Locks, Delete Range, global publication, or
 physical compaction into one step. The other four scenarios remain compact
 teaching traces and do not yet claim the same mechanism depth.
