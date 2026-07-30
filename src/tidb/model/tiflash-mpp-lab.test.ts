@@ -62,6 +62,11 @@ describe('model-7 TiFlash learner and MPP vertical slice', () => {
     expect(first.receipt.events.map((candidate, index) => candidate.id))
       .toEqual(first.receipt.events.map((_, index) =>
         `trace-1-event-${index + 1}`))
+    expect(first.receipt.events[36]).toMatchObject({
+      id: 'trace-1-event-37',
+      kind: 'tiflash_learner_applied_advance',
+      regionId: 26,
+    })
 
     for (const candidate of first.receipt.events) {
       expect(candidate.snapshot?.tiflashMppLab, candidate.kind).toBeDefined()
@@ -116,6 +121,42 @@ describe('model-7 TiFlash learner and MPP vertical slice', () => {
     const lab = finalLab(receipt)
     const byRegion = new Map(lab.learners.map((learner) =>
       [learner.regionId, learner]))
+    const firstLab = receipt.events[0]?.snapshot?.tiflashMppLab
+    const safeTsObserved = event(
+      receipt,
+      'tiflash_safe_ts_read_state_update',
+    )
+    const safeTsObservedIndex = receipt.events.indexOf(safeTsObserved)
+    const beforeSafeTsObservation =
+      receipt.events[safeTsObservedIndex - 1]?.snapshot?.tiflashMppLab
+    const safeTsProjection = (snapshot: TraceTiFlashMppLabSnapshot) =>
+      snapshot.learners.map((learner) => ({
+        regionId: learner.regionId,
+        leaderSafeTs: learner.leaderSafeTs,
+        selfSafeTs: learner.selfSafeTs,
+        safeTsLagBucket: learner.safeTsLagBucket,
+      }))
+
+    expect(firstLab).toBeDefined()
+    expect(beforeSafeTsObservation).toBeDefined()
+    expect(firstLab?.learners.find((learner) =>
+      learner.regionId === 24)).toMatchObject({
+      leaderSafeTs: receipt.startTs,
+      selfSafeTs: receipt.startTs,
+      safeTsLagBucket: 'none',
+    })
+    expect(firstLab?.learners.filter((learner) =>
+      learner.regionId !== 24).every((learner) =>
+      learner.selfSafeTs < (receipt.startTs ?? 0))).toBe(true)
+    expect(safeTsProjection(safeTsObserved.snapshot!.tiflashMppLab!))
+      .toEqual(safeTsProjection(beforeSafeTsObservation!))
+    expect(safeTsObserved.deltas).toHaveLength(3)
+    expect(safeTsObserved.deltas?.every((delta) =>
+      delta.kind === 'tiflash_mpp_safe_ts_observed')).toBe(true)
+    expect(safeTsObserved.metadata).toMatchObject({
+      observationOnly: true,
+      stateMutation: false,
+    })
 
     expect(byRegion.get(24)).toMatchObject({
       readIndexSkipped: true,
@@ -159,9 +200,59 @@ describe('model-7 TiFlash learner and MPP vertical slice', () => {
         .toBe(regionId === 25 ? 251 : 261)
     }
 
+    for (const [
+      regionId,
+      learnerStoreId,
+      leaderStoreId,
+    ] of [
+      [25, 'tiflash-2', 'tikv-2'],
+      [26, 'tiflash-1', 'tikv-3'],
+    ] as const) {
+      expect(event(
+        receipt,
+        'tiflash_read_index_requested',
+        regionId,
+      )).toMatchObject({
+        source: learnerStoreId,
+        target: leaderStoreId,
+      })
+      expect(event(
+        receipt,
+        'tiflash_read_index_returned',
+        regionId,
+      )).toMatchObject({
+        source: leaderStoreId,
+        target: learnerStoreId,
+      })
+    }
+
     const scanStart = event(receipt, 'tiflash_dm_snapshot_scans_started')
     const lockCheck = event(receipt, 'tiflash_mvcc_lock_checks_complete')
     expect(scanStart.dependsOn).toEqual([lockCheck.id])
+  })
+
+  it('treats safe-ts deltas as repeatable observations of existing state', () => {
+    const initial = createTiFlashMppLabState(1_000_000_001)
+    const learner = initial.learners.find((candidate) =>
+      candidate.regionId === 24)!
+    const observation = {
+      kind: 'tiflash_mpp_safe_ts_observed',
+      regionId: learner.regionId,
+      leaderSafeTs: learner.leaderSafeTs,
+      selfSafeTs: learner.selfSafeTs,
+      lagBucket: learner.safeTsLagBucket,
+    } as const
+
+    const once = reduceTiFlashMppLabState(initial, observation)
+    const twice = reduceTiFlashMppLabState(once, observation)
+
+    expect(once).toEqual(initial)
+    expect(twice).toEqual(once)
+    expect(() => reduceTiFlashMppLabState(initial, {
+      ...observation,
+      selfSafeTs: observation.selfSafeTs - 1,
+      lagBucket: 'about_2s',
+    })).toThrow(/cannot mutate/)
   })
 
   it('keeps persistent learner replication distinct from ephemeral exchange', () => {

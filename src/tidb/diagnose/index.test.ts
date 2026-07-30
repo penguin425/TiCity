@@ -54,6 +54,46 @@ describe('TiDB diagnostic projections', () => {
       .toMatchObject({ blockedBy: 'txn-7' })
   })
 
+  it('preserves legacy TiFlash progress when no model-7 Region gates exist', () => {
+    const legacy = {
+      tiflash: {
+        ready: false,
+        resolvedTs: 84,
+        targetTs: 100,
+        lagMs: 820,
+        progress: 0.84,
+        pendingVersions: 7,
+        mppQueries: 2,
+      },
+    }
+    const tiflash = projectDiagnostics(legacy).find((projection) =>
+      projection.id === 'tiflash')
+    expect(tiflash?.rows).toEqual([{
+      available: 'false',
+      resolvedTs: '84',
+      targetTs: '100',
+      lagSeconds: '820',
+      progress: '0.84',
+      pendingVersions: '7',
+      mppQueries: '2',
+    }])
+
+    const dom = installTestDom()
+    const root = dom.mount('legacy-tiflash')
+    mountDiagnose(root as unknown as HTMLElement, {
+      locale: 'en',
+      snapshot: legacy,
+    })
+    const metric = root.querySelector('[data-summary-metric="tiflash"]')
+    expect(metric?.getAttribute('data-tone')).toBe('attention')
+    expect(metric?.querySelector('.tidb-diagnose__metric-value')?.textContent)
+      .toBe('Catching up')
+    expect(metric?.querySelector('.tidb-diagnose__metric-detail')?.textContent)
+      .toBe('820 lag')
+    expect(metric?.querySelector('svg')?.getAttribute('aria-label'))
+      .toBe('TiFlash replication progress')
+  })
+
   it('separates active lock waits, retained deadlock history, and application retry', () => {
     const simulation = createTiDBSimulation({ seed: 425 })
     const receipt = simulation.runScenario('lock-deadlock')
@@ -908,7 +948,11 @@ describe('TiDB diagnostic projections', () => {
     if (!event?.snapshot?.tiflashMppLab) {
       throw new Error('Expected the Region 26 applied-index snapshot.')
     }
-    const projections = projectDiagnostics(event.snapshot)
+    const exactSnapshot = {
+      ...simulation.state,
+      tiflashMppLab: event.snapshot.tiflashMppLab,
+    }
+    const projections = projectDiagnostics(exactSnapshot)
 
     expect(projections.find((projection) =>
       projection.id === 'tiflash-replication')?.rows).toHaveLength(3)
@@ -950,12 +994,40 @@ describe('TiDB diagnostic projections', () => {
       provisioningBoundary:
         'AVAILABLE_and_PROGRESS_do_not_guarantee_snapshot_readiness',
     })
+    expect(projections.find((projection) =>
+      projection.id === 'tiflash-mpp-tunnels')?.rows.map((row) => ({
+        tunnel: row.tunnel,
+        locality: row.locality,
+      }))).toEqual([
+      { tunnel: 'tunnel-hash-1', locality: 'local' },
+      { tunnel: 'tunnel-hash-2', locality: 'remote' },
+      { tunnel: 'tunnel-hash-3', locality: 'remote' },
+      { tunnel: 'tunnel-hash-4', locality: 'local' },
+      { tunnel: 'tunnel-root-1', locality: 'root' },
+      { tunnel: 'tunnel-root-2', locality: 'root' },
+    ])
+    const waitingSummary = projections.find((projection) =>
+      projection.id === 'tiflash')?.rows[0]
+    expect(waitingSummary).toMatchObject({
+      readReady: 'false',
+      readyRegions: '1',
+      totalRegions: '3',
+      waitingRegions: '2',
+      progress: String(1 / 3),
+      readinessSource: 'per_region_snapshot_gates',
+      lagUnit: 'waiting_region_gate_count_not_seconds',
+      provisioningAvailable: 'true',
+      provisioningProgress: '1',
+    })
+    expect(waitingSummary).not.toHaveProperty('resolvedTs')
+    expect(waitingSummary).not.toHaveProperty('targetTs')
+    expect(waitingSummary).not.toHaveProperty('lagSeconds')
 
     const dom = installTestDom()
     const root = dom.mount('tiflash-diagnose')
     mountDiagnose(root as unknown as HTMLElement, {
       locale: 'en',
-      snapshot: event.snapshot,
+      snapshot: exactSnapshot,
     })
     expect(root.dataset.activeLab).toBe('tiflash-mpp')
     expect(root.querySelectorAll(
@@ -982,6 +1054,62 @@ describe('TiDB diagnostic projections', () => {
     expect(detailedText).not.toMatch(
       /SELECT\s|GROUP BY|SQL_DIGEST|inventory|customer/i,
     )
+    const waitingMetric = root.querySelector(
+      '[data-summary-metric="tiflash"]',
+    )
+    expect(waitingMetric?.getAttribute('data-tone')).toBe('attention')
+    expect(
+      waitingMetric?.querySelector(
+        '.tidb-diagnose__metric-value',
+      )?.textContent,
+    ).toBe('1/3')
+    expect(
+      waitingMetric?.querySelector(
+        '.tidb-diagnose__metric-detail',
+      )?.textContent,
+    ).toBe('2 Region gates waiting')
+    expect(waitingMetric?.querySelector('svg')?.getAttribute('aria-label'))
+      .toBe('Per-Region TiFlash snapshot-gate readiness')
+
+    const final = receipt.events.at(-1)
+    if (!final?.snapshot?.tiflashMppLab) {
+      throw new Error('Expected the final TiFlash/MPP snapshot.')
+    }
+    const finalSnapshot = {
+      ...simulation.state,
+      tiflashMppLab: final.snapshot.tiflashMppLab,
+    }
+    const finalProjections = projectDiagnostics(finalSnapshot)
+    const readySummary = finalProjections.find((projection) =>
+      projection.id === 'tiflash')?.rows[0]
+    expect(readySummary).toMatchObject({
+      readReady: 'true',
+      readyRegions: '3',
+      totalRegions: '3',
+      waitingRegions: '0',
+      progress: '1',
+      readinessSource: 'per_region_snapshot_gates',
+    })
+
+    const finalRoot = dom.mount('tiflash-diagnose-final')
+    mountDiagnose(finalRoot as unknown as HTMLElement, {
+      locale: 'en',
+      snapshot: finalSnapshot,
+    })
+    const readyMetric = finalRoot.querySelector(
+      '[data-summary-metric="tiflash"]',
+    )
+    expect(readyMetric?.getAttribute('data-tone')).toBe('healthy')
+    expect(
+      readyMetric?.querySelector(
+        '.tidb-diagnose__metric-value',
+      )?.textContent,
+    ).toBe('3/3')
+    expect(
+      readyMetric?.querySelector(
+        '.tidb-diagnose__metric-detail',
+      )?.textContent,
+    ).toBe('0 Region gates waiting')
   })
 
   it('labels every rendered diagnostic value as simulated', () => {

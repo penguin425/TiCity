@@ -805,6 +805,30 @@ describe('TraceReceipt-driven city flows', () => {
     expect(resolveTraceEndpoint(rootEvent!, 'target', city, point)).toBe(true)
     expect(point.equals(rootAnchor)).toBe(true)
 
+    for (const [
+      regionId,
+      leaderStoreId,
+      leaderComponentId,
+    ] of [
+      [25, 'tikv-2', 'region.25.peer.1'],
+      [26, 'tikv-3', 'region.26.peer.2'],
+    ] as const) {
+      const request = trace.events.find((traceEvent) =>
+        traceEvent.kind === 'tiflash_read_index_requested' &&
+        traceEvent.regionId === regionId)!
+      const response = trace.events.find((traceEvent) =>
+        traceEvent.kind === 'tiflash_read_index_returned' &&
+        traceEvent.regionId === regionId)!
+      const leaderAnchor = city.registry.get(leaderComponentId)!.anchor
+
+      expect(request.target).toBe(leaderStoreId)
+      expect(response.source).toBe(leaderStoreId)
+      expect(resolveTraceEndpoint(request, 'target', city, point)).toBe(true)
+      expect(point.equals(leaderAnchor)).toBe(true)
+      expect(resolveTraceEndpoint(response, 'source', city, point)).toBe(true)
+      expect(point.equals(leaderAnchor)).toBe(true)
+    }
+
     city.dispose()
   })
 })

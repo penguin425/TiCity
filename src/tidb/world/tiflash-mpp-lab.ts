@@ -36,6 +36,8 @@ export type TiFlashMppLabGateReason =
   | 'read_index_pending'
   | 'applied_index_behind'
   | 'applied_index_ready'
+  | 'self_safe_ts'
+  | 'read_index_applied'
 export type TiFlashMppLabTunnelLocality =
   | 'local'
   | 'remote'

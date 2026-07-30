@@ -148,6 +148,12 @@ function gateReason(
   provisioningAvailable: boolean,
 ): TiFlashMppLabGateReason {
   if (!provisioningAvailable) return 'replica_unavailable'
+  /*
+   * Preserve the model-owned gate decision before deriving an explanatory
+   * fallback from indexes. In particular, a safe-TS fast path intentionally
+   * has no required ReadIndex and must not be mislabeled "not requested."
+   */
+  if (learner.gateReason !== null) return learner.gateReason
   if (learner.requiredReadIndex === null) {
     return learner.readGate === 'read_index_requested'
       ? 'read_index_pending'

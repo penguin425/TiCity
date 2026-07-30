@@ -489,9 +489,13 @@ export function createTiDBSimulation(
   let transactionCounter = 0
   let tiflashQueue: PendingTiFlashVersion[] = []
 
-  function allocateTs(): number {
+  function nextTs(): number {
     const physical = TSO_BASE + Math.floor(state.t * 1_000) * 1_000
-    const timestamp = Math.max(state.tso.lastAllocated + 1, physical)
+    return Math.max(state.tso.lastAllocated + 1, physical)
+  }
+
+  function allocateTs(): number {
+    const timestamp = nextTs()
     state.tso.lastAllocated = timestamp
     state.tso.allocations++
     return timestamp
@@ -1072,8 +1076,9 @@ export function createTiDBSimulation(
     builder: TraceBuilder,
     warnings: string[],
   ): TraceReceipt {
+    const anticipatedSnapshotTs = nextTs()
     let tiflashMppLab: TraceTiFlashMppLabSnapshot =
-      createTiFlashMppLabState()
+      createTiFlashMppLabState(anticipatedSnapshotTs)
 
     function projection(): TraceStateSnapshot {
       return freezeTraceSnapshot({
@@ -1276,6 +1281,9 @@ export function createTiDBSimulation(
     )
 
     const startTs = allocateTs()
+    if (startTs !== anticipatedSnapshotTs) {
+      throw new Error('TiFlash/MPP snapshot TSO changed after fixture creation.')
+    }
     const snapshotEvent = addTiFlashMppEvent(
       'tso',
       'tiflash_mpp_snapshot_tso',
@@ -1296,7 +1304,7 @@ export function createTiDBSimulation(
       },
     )
 
-    const safeTsUpdated = addTiFlashMppEvent(
+    const safeTsObserved = addTiFlashMppEvent(
       'tiflash',
       'tiflash_safe_ts_read_state_update',
       'Per-Region safe-ts read state was observed',
@@ -1305,32 +1313,18 @@ export function createTiDBSimulation(
         source: 'tiflash-proxy',
         target: 'tiflash-1',
         dependsOn: [snapshotEvent.id],
-        deltas: [
-          {
-            kind: 'tiflash_mpp_safe_ts_update',
-            regionId: 24,
-            leaderSafeTs: startTs,
-            selfSafeTs: startTs,
-            lagBucket: 'none',
-          },
-          {
-            kind: 'tiflash_mpp_safe_ts_update',
-            regionId: 25,
-            leaderSafeTs: startTs,
-            selfSafeTs: 999_998_000,
-            lagBucket: 'about_2s',
-          },
-          {
-            kind: 'tiflash_mpp_safe_ts_update',
-            regionId: 26,
-            leaderSafeTs: startTs,
-            selfSafeTs: 999_998_000,
-            lagBucket: 'about_2s',
-          },
-        ],
+        deltas: tiflashMppLab.learners.map((learner): TraceStateDelta => ({
+          kind: 'tiflash_mpp_safe_ts_observed',
+          regionId: learner.regionId,
+          leaderSafeTs: learner.leaderSafeTs,
+          selfSafeTs: learner.selfSafeTs,
+          lagBucket: learner.safeTsLagBucket,
+        })),
         metadata: {
           regionCount: 3,
           correctnessScope: 'per_region',
+          observationOnly: true,
+          stateMutation: false,
         },
       },
     )
@@ -1343,7 +1337,7 @@ export function createTiDBSimulation(
       {
         source: 'tidb-1',
         target: 'tiflash-placement',
-        dependsOn: [safeTsUpdated.id],
+        dependsOn: [safeTsObserved.id],
         deltas: [{
           kind: 'tiflash_mpp_provisioning_observed',
           available: true,
@@ -1595,14 +1589,17 @@ export function createTiDBSimulation(
     for (const regionId of [25, 26]) {
       const check = safeChecks.get(regionId)
       if (!check) throw new Error(`Missing Region ${regionId} safe-ts check.`)
+      const learner = tiflashMppLab.learners.find((candidate) =>
+        candidate.regionId === regionId)
+      if (!learner) throw new Error(`Missing Region ${regionId} learner.`)
       const requested = addTiFlashMppEvent(
         'tiflash',
         'tiflash_read_index_requested',
         `Region ${regionId} requested ReadIndex`,
         'ReadIndex asks the Region leader for the committed index needed by this snapshot; it does not copy data.',
         {
-          source: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
-          target: `tikv-region-${regionId}`,
+          source: learner.learnerStoreId,
+          target: learner.leaderStoreId,
           regionId,
           dependsOn: [check.id],
           ...(presentationFence
@@ -1629,14 +1626,17 @@ export function createTiDBSimulation(
     for (const [regionId, requiredReadIndex] of [[25, 251], [26, 261]] as const) {
       const requested = requestEvents.get(regionId)
       if (!requested) throw new Error(`Missing Region ${regionId} ReadIndex request.`)
+      const learner = tiflashMppLab.learners.find((candidate) =>
+        candidate.regionId === regionId)
+      if (!learner) throw new Error(`Missing Region ${regionId} learner.`)
       const returned = addTiFlashMppEvent(
         'tiflash',
         'tiflash_read_index_returned',
         `Region ${regionId} received required ReadIndex`,
         'The response identifies the committed Raft index the local learner must have applied before reading.',
         {
-          source: `tikv-region-${regionId}`,
-          target: regionId === 25 ? 'tiflash-2' : 'tiflash-1',
+          source: learner.leaderStoreId,
+          target: learner.learnerStoreId,
           regionId,
           dependsOn: [requested.id],
           ...(presentationFence
