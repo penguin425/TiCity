@@ -11,6 +11,9 @@ export { DIAGNOSE_CSS, installDiagnoseStyles } from './styles'
 
 export const DIAGNOSE_SECTIONS = [
   'cluster',
+  'raft-peers',
+  'raft-election',
+  'region-request-retry',
   'transactions',
   'lock-waits',
   'deadlocks',
@@ -147,6 +150,9 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME;`,
 const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
   ja: {
     cluster: 'Cluster topology',
+    'raft-peers': 'Raft voter peers',
+    'raft-election': 'Raft leader選出',
+    'region-request-retry': 'TiDB Region request再試行',
     transactions: 'Transactions / locks',
     'lock-waits': '現在のロック待機',
     deadlocks: 'デッドロック履歴',
@@ -158,6 +164,9 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
   },
   en: {
     cluster: 'Cluster topology',
+    'raft-peers': 'Raft voter peers',
+    'raft-election': 'Raft leader election',
+    'region-request-retry': 'TiDB Region request retry',
     transactions: 'Transactions / locks',
     'lock-waits': 'Active lock waits',
     deadlocks: 'Deadlock history',
@@ -331,6 +340,39 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     newTransaction: '新transaction',
     newStartTs: '新start_ts',
     boundary: '再試行境界',
+    store: 'Store',
+    raftRole: 'Raft role',
+    peerHealth: 'peer状態',
+    currentTerm: 'current term',
+    votedFor: '投票先',
+    lastLog: 'last log (index/term)',
+    matchIndex: 'match index',
+    peerCommitIndex: 'commit index',
+    peerAppliedIndex: 'apply index',
+    oldLeader: '旧Leader',
+    currentLeader: '現在Leader',
+    electionPhase: '選出phase',
+    candidate: '候補',
+    preVotesGranted: 'Pre-Vote獲得',
+    votesGranted: 'Vote獲得',
+    electionQuorum: '選出quorum',
+    liveVoters: '稼働voter',
+    prevoteEnabled: 'Pre-Vote',
+    configuredTimeout: '設定timeout範囲',
+    teachingElapsed: 'teaching経過',
+    candidatePolicy: '候補policy',
+    failedStore: '障害Store',
+    pdRole: 'PD role',
+    pdObservedLeader: 'PD観測Leader',
+    pdRouteLookup: 'PD route lookup',
+    logicalRequest: 'logical request',
+    retrySource: 'retry source',
+    internalAttempt: '内部試行',
+    cachedLeader: 'cache上Leader',
+    cacheState: 'Region cache',
+    requestStatus: 'request状態',
+    clientVisibleError: 'client返却error',
+    applicationRetry: 'application retry',
   },
   en: {
     client: 'client',
@@ -362,6 +404,39 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     newTransaction: 'new transaction',
     newStartTs: 'new start_ts',
     boundary: 'retry boundary',
+    store: 'Store',
+    raftRole: 'Raft role',
+    peerHealth: 'peer health',
+    currentTerm: 'current term',
+    votedFor: 'voted for',
+    lastLog: 'last log (index/term)',
+    matchIndex: 'match index',
+    peerCommitIndex: 'commit index',
+    peerAppliedIndex: 'apply index',
+    oldLeader: 'old leader',
+    currentLeader: 'current leader',
+    electionPhase: 'election phase',
+    candidate: 'candidate',
+    preVotesGranted: 'Pre-Votes granted',
+    votesGranted: 'Votes granted',
+    electionQuorum: 'election quorum',
+    liveVoters: 'live voters',
+    prevoteEnabled: 'Pre-Vote',
+    configuredTimeout: 'configured timeout window',
+    teachingElapsed: 'teaching elapsed',
+    candidatePolicy: 'candidate policy',
+    failedStore: 'failed store',
+    pdRole: 'PD role',
+    pdObservedLeader: 'leader observed by PD',
+    pdRouteLookup: 'PD route lookup',
+    logicalRequest: 'logical request',
+    retrySource: 'retry source',
+    internalAttempt: 'internal attempt',
+    cachedLeader: 'cached leader',
+    cacheState: 'Region cache',
+    requestStatus: 'request status',
+    clientVisibleError: 'client-visible error',
+    applicationRetry: 'application retry',
   },
 }
 
@@ -387,12 +462,33 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'phase:completed': '完了',
     'internalRetryable:false': 'false（TiDB内部retryなし）',
     'clientError:not_returned_yet': '未返却',
+    'candidatePolicy:MODEL POLICY: lowest live up-to-date Store ID':
+      'MODEL POLICY：稼働中でlogが最新のStore ID最小',
+    'retrySource:tidb_internal': 'TiDB内部',
+    'boundary:same logical Region request': '同じlogical Region request',
+    'raftRole:pre_candidate': 'Pre-Candidate',
+    'peerHealth:down': '停止',
+    'peerHealth:up': '稼働',
+    'requestStatus:transport_error': 'transport error',
+    'requestStatus:backoff': '内部backoff',
+    'requestStatus:retrying': '内部retry中',
+    'requestStatus:served': 'TiKVで処理済み',
+    'requestStatus:completed': '完了',
+    'cacheState:cached': 'cache済み',
+    'cacheState:invalidated': '無効化',
+    'cacheState:refreshed': '更新済み',
+    'pdRole:observer_and_routing_only': '観測とroute metadataのみ',
   },
   en: {
     'detectorScope:cluster_wide': 'cluster-wide',
     'resolution:rolling_back': 'rolling back',
     'internalRetryable:false': 'false (no TiDB internal retry)',
     'clientError:not_returned_yet': 'Not returned yet',
+    'candidatePolicy:MODEL POLICY: lowest live up-to-date Store ID':
+      'MODEL POLICY: lowest live, up-to-date Store ID',
+    'retrySource:tidb_internal': 'TiDB internal',
+    'boundary:same logical Region request': 'same logical Region request',
+    'pdRole:observer_and_routing_only': 'Observe and route metadata only',
   },
 }
 
@@ -447,6 +543,82 @@ function clusterRows(state: Record<string, unknown>): DiagnosticRow[] {
       zone: value(node.zone),
     }
   })
+}
+
+function raftLabState(state: Record<string, unknown>): Record<string, unknown> {
+  return record(state.raftLab)
+}
+
+function raftPeerRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const raftLab = raftLabState(state)
+  if (Object.keys(raftLab).length === 0) return []
+  return array(raftLab.peers).map((entry) => {
+    const peer = record(entry)
+    return {
+      store: value(peer.storeId),
+      raftRole: value(peer.role),
+      peerHealth: peer.healthy === false ? 'down' : 'up',
+      currentTerm: value(peer.currentTerm),
+      votedFor: value(peer.votedFor),
+      lastLog: `${value(peer.lastLogIndex)} / ${value(peer.lastLogTerm)}`,
+      matchIndex: value(peer.matchIndex),
+      peerCommitIndex: value(peer.commitIndex),
+      peerAppliedIndex: value(peer.appliedIndex),
+      oldLeader: value(peer.storeId === raftLab.oldLeaderStoreId),
+      currentLeader: value(peer.storeId === raftLab.leaderStoreId),
+    }
+  })
+}
+
+function raftElectionRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const raftLab = raftLabState(state)
+  if (Object.keys(raftLab).length === 0) return []
+  const election = record(raftLab.election)
+  const pd = record(raftLab.pd)
+  const preVotes = array(election.preVotesGranted)
+  const votes = array(election.votesGranted)
+  return [{
+    region: value(raftLab.regionId),
+    electionPhase: value(election.phase),
+    candidate: value(election.candidateStoreId),
+    preVotesGranted: value(preVotes),
+    votesGranted: value(votes),
+    electionQuorum: `${votes.length}/${value(raftLab.quorum)}`,
+    liveVoters: `${value(raftLab.liveVoterCount)}/3`,
+    prevoteEnabled: value(election.prevoteEnabled),
+    configuredTimeout:
+      `${value(election.configuredElectionTimeoutTicks)}–` +
+      `${value(election.configuredMaxElectionTimeoutTicks)} ticks`,
+    teachingElapsed: `${value(election.elapsedTicks)} ticks · MODEL POLICY`,
+    candidatePolicy: election.candidatePolicy ===
+      'lowest_live_up_to_date_store_id_model_policy'
+      ? 'MODEL POLICY: lowest live up-to-date Store ID'
+      : value(election.candidatePolicy),
+    oldLeader: value(raftLab.oldLeaderStoreId),
+    currentLeader: value(raftLab.leaderStoreId),
+    failedStore: value(raftLab.failedStoreId),
+    pdRole: value(pd.role),
+    pdObservedLeader: value(pd.observedLeaderStoreId),
+    pdRouteLookup: value(pd.routeLookupCompleted),
+  }]
+}
+
+function regionRequestRetryRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const raftLab = raftLabState(state)
+  if (Object.keys(raftLab).length === 0) return []
+  const request = record(raftLab.request)
+  return [{
+    logicalRequest: value(request.logicalRequestId),
+    retrySource: value(request.source),
+    internalAttempt: value(request.attempt),
+    cachedLeader: value(request.cachedLeaderStoreId),
+    cacheState: value(request.cacheState),
+    requestStatus: value(request.status),
+    fixedBackoffMs: value(request.backoffMs),
+    clientVisibleError: value(request.clientVisibleError),
+    applicationRetry: 'false',
+    boundary: 'same logical Region request',
+  }]
 }
 
 function lockLabState(state: Record<string, unknown>): Record<string, unknown> {
@@ -654,6 +826,9 @@ export function projectDiagnostics(snapshot: TiCityState | unknown): DiagnosticP
   const state = record(snapshot)
   const sources: Record<DiagnoseSection, () => DiagnosticRow[]> = {
     cluster: () => clusterRows(state),
+    'raft-peers': () => raftPeerRows(state),
+    'raft-election': () => raftElectionRows(state),
+    'region-request-retry': () => regionRequestRetryRows(state),
     transactions: () => transactionRows(state),
     'lock-waits': () => lockWaitRows(state),
     deadlocks: () => deadlockRows(state),
@@ -731,6 +906,29 @@ function rowTone(section: DiagnoseSection, row: DiagnosticRow): SummaryTone {
     if (status === 'down') return 'critical'
     if (status === 'degraded') return 'attention'
     return status === 'up' ? 'healthy' : 'neutral'
+  }
+  if (section === 'raft-peers') {
+    if (row.peerHealth?.toLowerCase() === 'down') return 'attention'
+    return row.raftRole?.toLowerCase() === 'leader' ? 'healthy' : 'neutral'
+  }
+  if (section === 'raft-election') {
+    const phase = row.electionPhase?.toLowerCase()
+    if (phase === 'timeout' || phase === 'pre_vote' || phase === 'vote') {
+      return 'attention'
+    }
+    return phase === 'elected' || phase === 'idle' ? 'healthy' : 'neutral'
+  }
+  if (section === 'region-request-retry') {
+    if (booleanValue(row.clientVisibleError) === true) return 'critical'
+    const status = row.requestStatus?.toLowerCase()
+    if (
+      status === 'transport_error' ||
+      status === 'backoff' ||
+      status === 'retrying'
+    ) {
+      return 'attention'
+    }
+    return status === 'served' || status === 'completed' ? 'healthy' : 'neutral'
   }
   if (section === 'transactions') {
     if (booleanValue(row.conflict) === true) return 'attention'
@@ -1328,6 +1526,14 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
   const projections = options.project
     ? options.project(options.snapshot)
     : projectDiagnostics(options.snapshot)
+  const hasRaftDetail = projections.some((projection) =>
+    (
+      projection.id === 'raft-peers' ||
+      projection.id === 'raft-election' ||
+      projection.id === 'region-request-retry'
+    ) &&
+    projection.rows.length > 0
+  )
   installCityUiStyles(root.ownerDocument ?? document)
   installDiagnoseStyles(root.ownerDocument ?? document)
 
@@ -1376,6 +1582,7 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
 
   root.classList.add('tidb-surface', 'tidb-diagnose')
   root.setAttribute('lang', locale)
+  root.dataset.activeLab = hasRaftDetail ? 'raft' : 'none'
   root.replaceChildren(
     element('header', { className: 'tidb-diagnose__head' },
       element('div', { className: 'tidb-diagnose__head-copy' },

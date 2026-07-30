@@ -4,6 +4,8 @@ import type {
   TraceDomain,
   TraceEvent,
   TraceLockLabSnapshot,
+  TraceRaftLabPeerSnapshot,
+  TraceRaftLabSnapshot,
   TraceReceipt,
   TraceStateSnapshot,
 } from '../model/types'
@@ -131,6 +133,74 @@ const MACHINE_COPY = {
     retryOf: '再試行元',
     newTransaction: '新しい transaction',
     fixedBackoff: '固定 teaching backoff',
+    raftEyebrow: 'RAFT FAILURE LAB / SEMANTIC STATE',
+    raftTitle: 'Region Raft選出と内部retry',
+    raftPhase: 'Raft Labフェーズ',
+    raftGraph: 'Pre-Vote / Vote グラフ',
+    raftGraphDirection: '矢印は投票するvoter → 候補です。この選出意味グラフは上の因果 DAG とは別です。',
+    raftGraphContract: 'PRE-VOTE / VOTE · 2-OF-3',
+    region: 'Region',
+    electionState: '選出状態',
+    candidate: '候補',
+    preVote: 'Pre-Vote',
+    enabled: '有効',
+    oldToNewLeader: 'Leader遷移',
+    noLeader: 'Leader不在',
+    failedStore: '障害Store',
+    liveVoters: '稼働voter',
+    electionQuorum: '選出quorum',
+    twoOfThree: '3 voter中2（2-of-3）',
+    grant: '獲得',
+    noGrants: 'この時点では獲得票はありません。',
+    voter: '投票者',
+    peerStates: '3 voter peer状態',
+    raftRole: 'Raft role',
+    health: 'Health',
+    healthy: '稼働',
+    down: '停止',
+    currentTerm: 'current term',
+    votedFor: '投票先',
+    lastLog: 'last log index / term',
+    matchIndex: 'match index',
+    commitIndex: 'commit index',
+    appliedIndex: 'apply index',
+    electionPolicy: '候補とtiming',
+    candidatePolicy: '候補決定',
+    candidatePolicyValue: '稼働中でlogが最新のStore ID最小',
+    configuredWindow: '設定上のtimeout範囲',
+    elapsedTicks: 'この断面の経過',
+    ticks: 'ticks',
+    deterministicPolicy: '候補と正確なtick進行は決定的なTiCity MODEL POLICYです。TiDB/TiKVの実運用結果を保証しません。',
+    postElectionLog: '選出後log',
+    logEntry: 'Entry',
+    noEntry: 'まだありません',
+    persistedStores: '永続化Store',
+    committed: 'Commit済み',
+    appliedStores: 'Apply済みStore',
+    yes: 'はい',
+    no: 'いいえ',
+    pdBoundary: 'PDの境界',
+    pdRole: 'PD role',
+    pdObserveRouteOnly: '監視とroute metadataのみ',
+    observedLeader: '観測Leader',
+    routeLookup: 'route lookup',
+    pdDoesNotVote: 'PDはLeader情報を観測してrouteを支援しますが、候補選択・Pre-Vote・Vote・Leader選出は行いません。',
+    tidbRetry: 'TiDB内部request retry',
+    logicalRequest: 'Logical request',
+    raftRetrySource: '再試行元',
+    tidbInternal: 'TiDB内部',
+    retryAttempt: '内部試行',
+    cachedLeader: 'cache上のLeader',
+    cacheState: 'Leader cache',
+    requestState: 'Request状態',
+    internalBackoff: '内部backoff',
+    clientVisibleError: 'client-visible error',
+    clientBoundary: 'Client境界',
+    clientPending: '応答待ち（エラー未返却）',
+    clientSuccess: '成功（エラーなし）',
+    sameLogicalRetry: '同じlogical requestに対するTiDB内部retryです。アプリケーションretryではありません。',
+    completeValue: '完了',
+    incompleteValue: '未完了',
     empty: '—',
   },
   en: {
@@ -170,6 +240,74 @@ const MACHINE_COPY = {
     retryOf: 'Retry of',
     newTransaction: 'New transaction',
     fixedBackoff: 'Fixed teaching backoff',
+    raftEyebrow: 'RAFT FAILURE LAB / SEMANTIC STATE',
+    raftTitle: 'Region Raft election and internal retry',
+    raftPhase: 'Raft Lab phase',
+    raftGraph: 'Pre-Vote / Vote graph',
+    raftGraphDirection: 'Arrows run granting voter → candidate. This election semantic graph is separate from the causal DAG above.',
+    raftGraphContract: 'PRE-VOTE / VOTE · 2-OF-3',
+    region: 'Region',
+    electionState: 'Election state',
+    candidate: 'Candidate',
+    preVote: 'Pre-Vote',
+    enabled: 'Enabled',
+    oldToNewLeader: 'Leader transition',
+    noLeader: 'No leader',
+    failedStore: 'Failed store',
+    liveVoters: 'Live voters',
+    electionQuorum: 'Election quorum',
+    twoOfThree: '2 of 3 voters (2-of-3)',
+    grant: 'Granted',
+    noGrants: 'No votes have been granted at this event.',
+    voter: 'Voter',
+    peerStates: 'Three voter peer states',
+    raftRole: 'Raft role',
+    health: 'Health',
+    healthy: 'Healthy',
+    down: 'Down',
+    currentTerm: 'Current term',
+    votedFor: 'Voted for',
+    lastLog: 'Last log index / term',
+    matchIndex: 'Match index',
+    commitIndex: 'Commit index',
+    appliedIndex: 'Apply index',
+    electionPolicy: 'Candidate and timing',
+    candidatePolicy: 'Candidate selection',
+    candidatePolicyValue: 'Lowest live, up-to-date Store ID',
+    configuredWindow: 'Configured timeout window',
+    elapsedTicks: 'Elapsed at this snapshot',
+    ticks: 'ticks',
+    deterministicPolicy: 'The exact candidate and tick progression are deterministic TiCity MODEL POLICY, not a TiDB/TiKV production guarantee.',
+    postElectionLog: 'Post-election log',
+    logEntry: 'Entry',
+    noEntry: 'Not present yet',
+    persistedStores: 'Persisted stores',
+    committed: 'Committed',
+    appliedStores: 'Applied stores',
+    yes: 'Yes',
+    no: 'No',
+    pdBoundary: 'PD boundary',
+    pdRole: 'PD role',
+    pdObserveRouteOnly: 'Observe and route metadata only',
+    observedLeader: 'Observed leader',
+    routeLookup: 'Route lookup',
+    pdDoesNotVote: 'PD observes leader metadata and assists routing; it does not choose a candidate, grant Pre-Votes or Votes, or elect the leader.',
+    tidbRetry: 'TiDB internal request retry',
+    logicalRequest: 'Logical request',
+    raftRetrySource: 'Retry source',
+    tidbInternal: 'TiDB internal',
+    retryAttempt: 'Internal attempt',
+    cachedLeader: 'Cached leader',
+    cacheState: 'Leader cache',
+    requestState: 'Request state',
+    internalBackoff: 'Internal backoff',
+    clientVisibleError: 'Client-visible error',
+    clientBoundary: 'Client boundary',
+    clientPending: 'Response pending; no error returned',
+    clientSuccess: 'Succeeded with no error',
+    sameLogicalRetry: 'This is a TiDB internal retry of the same logical request, not an application retry.',
+    completeValue: 'Complete',
+    incompleteValue: 'Incomplete',
     empty: '—',
   },
 } as const
@@ -311,6 +449,367 @@ const APPLICATION_RETRY_STATUS_COPY = {
     completed: 'Retry completed',
   },
 } as const
+
+const RAFT_PHASE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceRaftLabSnapshot['phase'], string>>
+>> = {
+  ja: {
+    healthy: '正常',
+    requesting: '旧Leaderへrequest',
+    leader_lost: 'Leader喪失',
+    backoff: 'TiDB内部backoff',
+    timeout: '選出timeout',
+    pre_vote: 'Pre-Vote',
+    vote: 'Vote',
+    elected: '新Leader選出',
+    confirming: '新Leaderを確認',
+    routing: 'routeを更新',
+    serving: 'requestを再実行',
+    complete: '完了',
+  },
+  en: {
+    healthy: 'Healthy',
+    requesting: 'Requesting the old leader',
+    leader_lost: 'Leader lost',
+    backoff: 'TiDB internal backoff',
+    timeout: 'Election timeout',
+    pre_vote: 'Pre-Vote',
+    vote: 'Vote',
+    elected: 'New leader elected',
+    confirming: 'Confirming the new leader',
+    routing: 'Refreshing the route',
+    serving: 'Serving the retried request',
+    complete: 'Complete',
+  },
+}
+
+const RAFT_ELECTION_PHASE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceRaftLabSnapshot['election']['phase'], string>>
+>> = {
+  ja: {
+    idle: '待機',
+    timeout: 'Timeout',
+    pre_vote: 'Pre-Vote',
+    vote: 'Vote',
+    elected: '選出済み',
+  },
+  en: {
+    idle: 'Idle',
+    timeout: 'Timeout',
+    pre_vote: 'Pre-Vote',
+    vote: 'Vote',
+    elected: 'Elected',
+  },
+}
+
+const RAFT_ROLE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceRaftLabPeerSnapshot['role'], string>>
+>> = {
+  ja: {
+    leader: 'Leader',
+    follower: 'Follower',
+    pre_candidate: 'Pre-Candidate',
+    candidate: 'Candidate',
+    offline: 'Offline',
+  },
+  en: {
+    leader: 'Leader',
+    follower: 'Follower',
+    pre_candidate: 'Pre-Candidate',
+    candidate: 'Candidate',
+    offline: 'Offline',
+  },
+}
+
+const RAFT_REQUEST_STATUS_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceRaftLabSnapshot['request']['status'], string>>
+>> = {
+  ja: {
+    idle: '待機',
+    sent: '送信済み',
+    transport_error: 'transport error',
+    backoff: 'backoff',
+    retrying: '再試行中',
+    served: 'TiKVで処理済み',
+    completed: '完了',
+  },
+  en: {
+    idle: 'Idle',
+    sent: 'Sent',
+    transport_error: 'Transport error',
+    backoff: 'Backoff',
+    retrying: 'Retrying',
+    served: 'Served by TiKV',
+    completed: 'Completed',
+  },
+}
+
+const RAFT_CACHE_STATE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceRaftLabSnapshot['request']['cacheState'], string>>
+>> = {
+  ja: {
+    cached: 'cache済み',
+    invalidated: '無効化',
+    refreshed: '更新済み',
+  },
+  en: {
+    cached: 'Cached',
+    invalidated: 'Invalidated',
+    refreshed: 'Refreshed',
+  },
+}
+
+function raftFact(label: string, value: string): HTMLElement {
+  return element('div', {},
+    element('dt', { text: label }),
+    element('dd', { text: value }),
+  )
+}
+
+function renderRaftElectionGraph(
+  raftLab: TraceRaftLabSnapshot,
+  locale: Locale,
+): HTMLDivElement {
+  const copy = MACHINE_COPY[locale]
+  const candidate = raftLab.election.candidateStoreId
+  const wrapper = element('div', {
+    className: 'tidb-machine__raft-election-graph',
+    attrs: {
+      role: 'group',
+      tabindex: '0',
+      'aria-label': `${copy.raftGraph}. ${copy.raftGraphDirection}`,
+      'data-raft-election-graph': 'semantic',
+      'data-graph-kind': 'raft-election',
+      'data-election-phase': raftLab.election.phase,
+      'data-election-candidate': candidate ?? '',
+      'data-election-quorum': String(raftLab.quorum),
+      'data-edge-count': String(
+        raftLab.election.preVotesGranted.length +
+        raftLab.election.votesGranted.length,
+      ),
+    },
+  })
+  const graphHead = element('div', {
+    className: 'tidb-machine__raft-card-head',
+  },
+  element('h3', { text: copy.raftGraph }),
+  element('span', {
+    className: 'tidb-machine__raft-graph-contract',
+    text: copy.raftGraphContract,
+  }),
+  )
+  const direction = element('p', {
+    className: 'tidb-machine__raft-direction',
+    text: copy.raftGraphDirection,
+  })
+
+  const width = 680
+  const height = 250
+  const peerY = 28
+  const peerWidth = 150
+  const peerHeight = 58
+  const candidateY = 190
+  const positions = new Map<string, number>()
+  raftLab.peers.forEach((peer, index) => {
+    positions.set(peer.storeId, 105 + index * 235)
+  })
+  const diagram = svgElement('svg', {
+    class: 'tidb-machine__raft-election-svg',
+    viewBox: `0 0 ${width} ${height}`,
+    'aria-hidden': 'true',
+    'data-graph-kind': 'raft-election-visual',
+  })
+  const defs = svgElement('defs')
+  const preVoteMarker = svgElement('marker', {
+    id: 'tidb-machine-raft-prevote-arrow',
+    viewBox: '0 0 10 10',
+    refX: '8',
+    refY: '5',
+    markerWidth: '7',
+    markerHeight: '7',
+    orient: 'auto-start-reverse',
+  })
+  preVoteMarker.append(svgElement('path', {
+    class: 'tidb-machine__raft-prevote-arrow',
+    d: 'M 1 1 L 9 5 L 1 9',
+  }))
+  const voteMarker = svgElement('marker', {
+    id: 'tidb-machine-raft-vote-arrow',
+    viewBox: '0 0 10 10',
+    refX: '8',
+    refY: '5',
+    markerWidth: '7',
+    markerHeight: '7',
+    orient: 'auto-start-reverse',
+  })
+  voteMarker.append(svgElement('path', {
+    class: 'tidb-machine__raft-vote-arrow',
+    d: 'M 0 0 L 10 5 L 0 10 z',
+  }))
+  defs.append(preVoteMarker, voteMarker)
+  diagram.append(defs)
+
+  const grants = [
+    {
+      stage: 'pre_vote',
+      label: 'PV',
+      stores: raftLab.election.preVotesGranted,
+      endX: width / 2 - 26,
+      endY: candidateY,
+    },
+    {
+      stage: 'vote',
+      label: 'V',
+      stores: raftLab.election.votesGranted,
+      endX: width / 2 + 26,
+      endY: candidateY,
+    },
+  ] as const
+  for (const grant of grants) {
+    grant.stores.forEach((storeId, index) => {
+      const startX = positions.get(storeId)
+      if (startX === undefined || candidate === null) return
+      const controlX = (startX + grant.endX) / 2 +
+        (grant.stage === 'pre_vote' ? -22 : 22)
+      const controlY = 116 + index * 16
+      diagram.append(svgElement('path', {
+        class: `tidb-machine__raft-grant is-${grant.stage}`,
+        d: `M ${startX} ${peerY + peerHeight} Q ${controlX} ${controlY} ${grant.endX} ${grant.endY}`,
+        'data-raft-grant': grant.stage,
+        'data-grant-from': storeId,
+        'data-grant-to': candidate,
+        'data-grant-counted': 'true',
+        'marker-end': grant.stage === 'pre_vote'
+          ? 'url(#tidb-machine-raft-prevote-arrow)'
+          : 'url(#tidb-machine-raft-vote-arrow)',
+      }))
+      appendSvgText(
+        diagram,
+        `tidb-machine__raft-grant-label is-${grant.stage}`,
+        grant.label,
+        controlX,
+        controlY - 4,
+        { 'text-anchor': 'middle' },
+      )
+    })
+  }
+
+  for (const peer of raftLab.peers) {
+    const x = positions.get(peer.storeId)
+    if (x === undefined) continue
+    const node = svgElement('g', {
+      class: `tidb-machine__raft-node is-${peer.role} ${peer.healthy ? 'is-healthy' : 'is-down'}`,
+      'data-raft-peer-node': peer.storeId,
+      'data-peer-role': peer.role,
+      'data-peer-health': peer.healthy ? 'healthy' : 'down',
+      'data-node-shape': peer.role === 'leader'
+        ? 'double'
+        : peer.role === 'candidate' || peer.role === 'pre_candidate'
+          ? 'notched'
+          : peer.role === 'offline'
+            ? 'crossed'
+            : 'rounded',
+    })
+    node.append(svgElement('rect', {
+      class: 'tidb-machine__raft-node-box',
+      x: String(x - peerWidth / 2),
+      y: String(peerY),
+      width: String(peerWidth),
+      height: String(peerHeight),
+      rx: peer.role === 'candidate' || peer.role === 'pre_candidate'
+        ? '2'
+        : '11',
+    }))
+    appendSvgText(
+      node,
+      'tidb-machine__raft-node-store',
+      `${peer.healthy ? '●' : '×'} ${peer.storeId}`,
+      x,
+      peerY + 23,
+      { 'text-anchor': 'middle' },
+    )
+    appendSvgText(
+      node,
+      'tidb-machine__raft-node-role',
+      `${RAFT_ROLE_COPY[locale][peer.role]} · term ${peer.currentTerm}`,
+      x,
+      peerY + 43,
+      { 'text-anchor': 'middle' },
+    )
+    diagram.append(node)
+  }
+
+  diagram.append(svgElement('rect', {
+    class: 'tidb-machine__raft-candidate-box',
+    x: String(width / 2 - 112),
+    y: String(candidateY),
+    width: '224',
+    height: '44',
+    rx: '4',
+    'data-candidate-shape': 'notched',
+  }))
+  appendSvgText(
+    diagram,
+    'tidb-machine__raft-candidate-label',
+    `${copy.candidate}: ${candidate ?? copy.pending}`,
+    width / 2,
+    candidateY + 19,
+    { 'text-anchor': 'middle' },
+  )
+  appendSvgText(
+    diagram,
+    'tidb-machine__raft-candidate-quorum',
+    copy.twoOfThree,
+    width / 2,
+    candidateY + 35,
+    { 'text-anchor': 'middle' },
+  )
+
+  const grantList = element('ul', {
+    className: 'tidb-machine__raft-grant-list',
+    attrs: {
+      'aria-label': copy.raftGraph,
+      'data-raft-grant-list': 'accessible',
+    },
+  })
+  for (const grant of grants) {
+    for (const storeId of grant.stores) {
+      grantList.append(element('li', {
+        attrs: {
+          'data-raft-grant': grant.stage,
+          'data-grant-from': storeId,
+          'data-grant-to': candidate ?? '',
+        },
+      },
+      element('strong', {
+        text: grant.stage === 'pre_vote' ? 'PRE-VOTE' : 'VOTE',
+      }),
+      element('span', {
+        text: `${copy.voter}: ${storeId} → ${copy.candidate}: ${candidate ?? copy.pending}`,
+      }),
+      element('small', { text: copy.grant }),
+      ))
+    }
+  }
+  if (
+    raftLab.election.preVotesGranted.length === 0 &&
+    raftLab.election.votesGranted.length === 0
+  ) {
+    grantList.append(element('li', {
+      className: 'tidb-machine__raft-empty',
+      text: copy.noGrants,
+      attrs: { 'data-raft-grant-empty': 'true' },
+    }))
+  }
+
+  wrapper.append(graphHead, direction, diagram, grantList)
+  return wrapper
+}
 
 function renderWaitForDiagram(
   lockLab: TraceLockLabSnapshot,
@@ -640,6 +1139,266 @@ function renderLockState(
   )
 }
 
+function renderRaftPeerCard(
+  peer: TraceRaftLabPeerSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  return element('li', {
+    className: 'tidb-machine__raft-peer',
+    attrs: {
+      'data-raft-peer': peer.storeId,
+      'data-peer-role': peer.role,
+      'data-peer-health': peer.healthy ? 'healthy' : 'down',
+      'data-peer-term': String(peer.currentTerm),
+      'data-peer-voted-for': peer.votedFor ?? '',
+    },
+  },
+  element('div', { className: 'tidb-machine__raft-peer-head' },
+    element('strong', {
+      text: `${peer.healthy ? '●' : '×'} ${peer.storeId}`,
+    }),
+    element('span', {
+      className: 'tidb-machine__raft-role',
+      text: RAFT_ROLE_COPY[locale][peer.role],
+      attrs: {
+        'aria-label': `${copy.raftRole}: ${RAFT_ROLE_COPY[locale][peer.role]}`,
+      },
+    }),
+  ),
+  element('dl', { className: 'tidb-machine__raft-facts' },
+    raftFact(copy.health, peer.healthy ? copy.healthy : copy.down),
+    raftFact(copy.currentTerm, String(peer.currentTerm)),
+    raftFact(copy.votedFor, peer.votedFor ?? copy.empty),
+    raftFact(copy.lastLog, `${peer.lastLogIndex} / ${peer.lastLogTerm}`),
+    raftFact(copy.matchIndex, String(peer.matchIndex)),
+    raftFact(copy.commitIndex, String(peer.commitIndex)),
+    raftFact(copy.appliedIndex, String(peer.appliedIndex)),
+  ),
+  )
+}
+
+function renderRaftState(
+  event: MachineEvent,
+  locale: Locale,
+): HTMLElement | null {
+  const raftLab = event.snapshot?.raftLab
+  if (!raftLab) return null
+  const copy = MACHINE_COPY[locale]
+  const election = raftLab.election
+  const log = raftLab.log
+  const request = raftLab.request
+  const pd = raftLab.pd
+  const clientResult = request.status === 'completed' ? 'success' : 'pending'
+  const logEntry =
+    log.entryKind === null || log.index === null || log.term === null
+      ? copy.noEntry
+      : `${log.entryKind} · index ${log.index} · term ${log.term}`
+
+  const policyCard = element('section', {
+    className: 'tidb-machine__raft-card',
+    attrs: {
+      'data-raft-policy': 'model-policy',
+      'data-candidate-policy': election.candidatePolicy,
+      'data-prevote-enabled': String(election.prevoteEnabled),
+      'data-configured-timeout-min': String(
+        election.configuredElectionTimeoutTicks,
+      ),
+      'data-configured-timeout-max': String(
+        election.configuredMaxElectionTimeoutTicks,
+      ),
+      'data-elapsed-ticks': String(election.elapsedTicks),
+    },
+  },
+  element('h3', { text: copy.electionPolicy }),
+  element('dl', { className: 'tidb-machine__raft-facts' },
+    raftFact(
+      copy.electionState,
+      RAFT_ELECTION_PHASE_COPY[locale][election.phase],
+    ),
+    raftFact(copy.candidate, election.candidateStoreId ?? copy.pending),
+    raftFact(
+      copy.preVote,
+      election.prevoteEnabled ? copy.enabled : copy.no,
+    ),
+    raftFact(copy.candidatePolicy, copy.candidatePolicyValue),
+    raftFact(
+      copy.configuredWindow,
+      `${election.configuredElectionTimeoutTicks}–${election.configuredMaxElectionTimeoutTicks} ${copy.ticks}`,
+    ),
+    raftFact(
+      copy.elapsedTicks,
+      `${election.elapsedTicks} ${copy.ticks}`,
+    ),
+  ),
+  element('p', {
+    className: 'tidb-machine__raft-policy-note',
+    text: copy.deterministicPolicy,
+    attrs: {
+      'data-policy-contract': election.candidatePolicy,
+    },
+  }),
+  )
+
+  const logCard = element('section', {
+    className: 'tidb-machine__raft-card',
+    attrs: {
+      'data-raft-log-entry': log.entryKind ?? 'none',
+      'data-raft-log-committed': String(log.committed),
+    },
+  },
+  element('h3', { text: copy.postElectionLog }),
+  element('dl', { className: 'tidb-machine__raft-facts' },
+    raftFact(copy.logEntry, logEntry),
+    raftFact(
+      copy.persistedStores,
+      log.persistedStoreIds.length > 0
+        ? log.persistedStoreIds.join(' · ')
+        : copy.empty,
+    ),
+    raftFact(copy.committed, log.committed ? copy.yes : copy.no),
+    raftFact(
+      copy.appliedStores,
+      log.appliedStoreIds.length > 0
+        ? log.appliedStoreIds.join(' · ')
+        : copy.empty,
+    ),
+  ),
+  )
+
+  const pdCard = element('section', {
+    className: 'tidb-machine__raft-card is-pd-boundary',
+    attrs: {
+      'data-pd-role': pd.role,
+      'data-pd-votes': 'false',
+      'data-pd-route-lookup': String(pd.routeLookupCompleted),
+    },
+  },
+  element('h3', { text: copy.pdBoundary }),
+  element('dl', { className: 'tidb-machine__raft-facts' },
+    raftFact(copy.pdRole, copy.pdObserveRouteOnly),
+    raftFact(copy.observedLeader, pd.observedLeaderStoreId ?? copy.empty),
+    raftFact(
+      copy.routeLookup,
+      pd.routeLookupCompleted ? copy.completeValue : copy.incompleteValue,
+    ),
+  ),
+  element('p', {
+    className: 'tidb-machine__raft-boundary-note',
+    text: copy.pdDoesNotVote,
+  }),
+  )
+
+  const retryCard = element('section', {
+    className: 'tidb-machine__raft-card is-retry-boundary',
+    attrs: {
+      'data-raft-request': request.logicalRequestId,
+      'data-retry-source': request.source,
+      'data-same-logical-request': 'true',
+      'data-application-retry': 'false',
+      'data-request-status': request.status,
+      'data-request-attempt': String(request.attempt),
+      'data-client-visible-error': String(request.clientVisibleError),
+      'data-client-result': clientResult,
+    },
+  },
+  element('h3', { text: copy.tidbRetry }),
+  element('dl', { className: 'tidb-machine__raft-facts' },
+    raftFact(copy.logicalRequest, request.logicalRequestId),
+    raftFact(copy.raftRetrySource, copy.tidbInternal),
+    raftFact(copy.retryAttempt, String(request.attempt)),
+    raftFact(copy.cachedLeader, request.cachedLeaderStoreId ?? copy.empty),
+    raftFact(
+      copy.cacheState,
+      RAFT_CACHE_STATE_COPY[locale][request.cacheState],
+    ),
+    raftFact(
+      copy.requestState,
+      RAFT_REQUEST_STATUS_COPY[locale][request.status],
+    ),
+    raftFact(copy.internalBackoff, `${request.backoffMs} ms`),
+    raftFact(copy.clientVisibleError, String(request.clientVisibleError)),
+    raftFact(
+      copy.clientBoundary,
+      clientResult === 'success' ? copy.clientSuccess : copy.clientPending,
+    ),
+  ),
+  element('p', {
+    className: 'tidb-machine__raft-boundary-note',
+    text: copy.sameLogicalRetry,
+  }),
+  )
+
+  return element('section', {
+    className: 'tidb-machine__raft-state',
+    attrs: {
+      'aria-labelledby': 'tidb-machine-raft-title',
+      'data-raft-lab-state': 'true',
+      'data-raft-event-id': event.id,
+      'data-raft-event-kind': event.kind ?? '',
+      'data-raft-event-branch': event.branchId ?? '',
+      'data-raft-phase': raftLab.phase,
+      'data-region-id': String(raftLab.regionId),
+    },
+  },
+  element('header', { className: 'tidb-machine__raft-head' },
+    element('div', {},
+      element('p', {
+        className: 'tidb-machine__raft-eyebrow',
+        text: copy.raftEyebrow,
+      }),
+      element('h2', {
+        text: copy.raftTitle,
+        attrs: { id: 'tidb-machine-raft-title' },
+      }),
+    ),
+    element('div', { className: 'tidb-machine__raft-head-meta' },
+      element('span', {
+        className: 'tidb-machine__raft-phase',
+        text: `${copy.raftPhase}: ${RAFT_PHASE_COPY[locale][raftLab.phase]}`,
+        attrs: { 'data-phase-state': raftLab.phase },
+      }),
+      element('span', {
+        className: 'tidb-machine__raft-snapshot',
+        text: `SNAPSHOT · ${event.id}`,
+      }),
+    ),
+  ),
+  element('dl', { className: 'tidb-machine__raft-summary' },
+    raftFact(copy.region, `Region ${raftLab.regionId}`),
+    raftFact(
+      copy.oldToNewLeader,
+      `${raftLab.oldLeaderStoreId} → ${raftLab.leaderStoreId ?? copy.noLeader}`,
+    ),
+    raftFact(copy.failedStore, raftLab.failedStoreId ?? copy.empty),
+    raftFact(copy.liveVoters, `${raftLab.liveVoterCount}/3`),
+    raftFact(copy.electionQuorum, copy.twoOfThree),
+  ),
+  renderRaftElectionGraph(raftLab, locale),
+  element('section', {
+    className: 'tidb-machine__raft-peers',
+    attrs: { 'aria-labelledby': 'tidb-machine-raft-peers-title' },
+  },
+  element('h3', {
+    text: copy.peerStates,
+    attrs: { id: 'tidb-machine-raft-peers-title' },
+  }),
+  element('ul', {
+    className: 'tidb-machine__raft-peer-list',
+    attrs: { 'aria-label': copy.peerStates },
+  },
+  ...raftLab.peers.map((peer) => renderRaftPeerCard(peer, locale)),
+  ),
+  ),
+  element('div', { className: 'tidb-machine__raft-grid' },
+    policyCard,
+    logCard,
+    pdCard,
+    retryCard,
+  ),
+  )
+}
+
 export function adaptTraceReceipt(source: unknown): MachineReceipt {
   const receipt = record(source)
   const rawEvents = Array.isArray(receipt.events) ? receipt.events : []
@@ -955,6 +1714,7 @@ function renderTimeline(
       'data-event-branch': event.branchId ?? '',
       'data-event-transaction': event.transactionId ?? '',
       'data-event-has-lock-snapshot': event.snapshot?.lockLab ? 'true' : 'false',
+      'data-event-has-raft-snapshot': event.snapshot?.raftLab ? 'true' : 'false',
       'data-event-status': status,
       'data-event-state': state,
     })
@@ -1049,6 +1809,8 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
   const frame = element('div', { className: 'tidb-machine__frame' })
   const hasLockSnapshots = receipt.events.some((event) => Boolean(event.snapshot?.lockLab))
   const lockSlot = element('div', { className: 'tidb-machine__lock-slot' })
+  const hasRaftSnapshots = receipt.events.some((event) => Boolean(event.snapshot?.raftLab))
+  const raftSlot = element('div', { className: 'tidb-machine__raft-slot' })
   const detail = element('section', {
     className: 'tidb-machine__detail',
     attrs: { 'aria-live': 'polite', 'aria-atomic': 'true' },
@@ -1221,6 +1983,13 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
       if (lockState) lockSlot.replaceChildren(lockState)
       else lockSlot.replaceChildren()
     }
+    if (hasRaftSnapshots) {
+      const raftState = event ? renderRaftState(event, locale) : null
+      raftSlot.hidden = raftState === null
+      raftSlot.setAttribute('aria-hidden', raftState === null ? 'true' : 'false')
+      if (raftState) raftSlot.replaceChildren(raftState)
+      else raftSlot.replaceChildren()
+    }
     options.onSeek?.(event, current)
 
     for (const marker of frame.querySelectorAll<SVGElement>('[data-event-index]')) {
@@ -1285,6 +2054,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     transport,
     frame,
     ...(hasLockSnapshots ? [lockSlot] : []),
+    ...(hasRaftSnapshots ? [raftSlot] : []),
     detail,
     element('p', { className: 'tidb-machine__note', text: CATALOG[locale].simulatedTiming }),
   )
