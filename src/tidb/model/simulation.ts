@@ -9,6 +9,14 @@
 import { getScenario } from './scenarios'
 import { analyzeSql } from './sql'
 import {
+  createLockLabState,
+  detectWaitForCycle,
+  freezeLockLabSnapshot,
+  isLockLabDelta,
+  reduceLockLabState,
+  selectWaiterByStartTs,
+} from './lock-lab'
+import {
   clonePeers,
   createRegions,
   createTopology,
@@ -36,6 +44,7 @@ import type {
   TraceDomain,
   TraceEvent,
   TraceEventStatus,
+  TraceLockLabSnapshot,
   TraceMetadataValue,
   TraceOutcome,
   TracePath,
@@ -132,6 +141,12 @@ function freezeTraceDelta(delta: TraceStateDelta): TraceStateDelta {
       storeIds: Object.freeze([...delta.storeIds]),
     })
   }
+  if (delta.kind === 'deadlock_state') {
+    return Object.freeze({
+      ...delta,
+      cycleTransactionIds: Object.freeze([...delta.cycleTransactionIds]),
+    })
+  }
   return Object.freeze({ ...delta })
 }
 
@@ -153,6 +168,9 @@ function freezeTraceSnapshot(snapshot: TraceStateSnapshot): TraceStateSnapshot {
         : Object.freeze({ ...region.pessimisticLock }),
       mvcc: Object.freeze({ ...region.mvcc }),
     }))),
+    ...(snapshot.lockLab
+      ? { lockLab: freezeLockLabSnapshot(snapshot.lockLab) }
+      : {}),
   })
 }
 
@@ -258,6 +276,9 @@ function createMetrics(): TiCityState['metrics'] {
     regionSplits: 0,
     leaderElections: 0,
     gcRuns: 0,
+    lockWaits: 0,
+    deadlocks: 0,
+    retries: 0,
   }
 }
 
@@ -2016,6 +2037,1048 @@ export function createTiDBSimulation(
     )
   }
 
+  /**
+   * A composite Lock Lab trace with two clients. It deliberately ends each
+   * successful lock sequence at an explicit commit handoff/summary boundary
+   * instead of duplicating the model-2 2PC/Raft/MVCC vertical slice.
+   */
+  function traceLockDeadlockScenario(
+    id: string,
+    analysis: SqlAnalysis,
+    regions: readonly [RegionState, RegionState],
+    builder: TraceBuilder,
+    warnings: string[],
+  ): TraceReceipt {
+    const clientA = 'client-a'
+    const clientB = 'client-b'
+    const tidbA = 'tidb-1'
+    const tidbB = 'tidb-2'
+    const resourceA = 'resource-a'
+    const resourceB = 'resource-b'
+    const detectorLeaderStoreId: StoreId = 'tikv-3'
+    const retryBackoffMs = 120
+    let lockLab: TraceLockLabSnapshot = createLockLabState(
+      detectorLeaderStoreId,
+      [
+        {
+          id: resourceA,
+          regionId: regions[0].id,
+          leaderStoreId: regions[0].leaderStoreId,
+        },
+        {
+          id: resourceB,
+          regionId: regions[1].id,
+          leaderStoreId: regions[1].leaderStoreId,
+        },
+      ],
+    )
+
+    function projection(): TraceStateSnapshot {
+      return freezeTraceSnapshot({
+        modelVersion: state.modelVersion,
+        tsoLastAllocated: state.tso.lastAllocated,
+        /*
+         * This is a multi-client receipt. The canonical transaction collection
+         * lives under lockLab; leaving the legacy focus transaction null keeps
+         * model-2 single-transaction consumers backward compatible.
+         */
+        transaction: null,
+        regions: regions.map((region) => {
+          const resource = lockLab.resources.find((candidate) =>
+            candidate.regionId === region.id)
+          return {
+            regionId: region.id,
+            leaderStoreId: region.leaderStoreId,
+            term: region.term,
+            proposedIndex: null,
+            persistedStoreIds: [],
+            acknowledgements: 0,
+            quorum: 2,
+            commitIndex: region.commitIndex,
+            appliedIndex: region.appliedIndex,
+            peers: region.peers.map((peer) => ({
+              storeId: peer.storeId,
+              raftRole: peer.raftRole,
+              matchIndex: peer.matchIndex,
+              appliedIndex: peer.appliedIndex,
+              healthy: peer.healthy,
+            })),
+            pessimisticLock: resource?.holderTransactionId
+              ? {
+                transactionId: resource.holderTransactionId,
+                leaderStoreId: region.leaderStoreId,
+                resourceId: resource.id,
+                storage: 'leader_memory' as const,
+                replicated: false as const,
+              }
+              : null,
+            mvcc: {
+              defaultCf: 'empty' as const,
+              lockCf: 'empty' as const,
+              writeCf: 'empty' as const,
+              startTs: null,
+              commitTs: null,
+              primary: region.id === regions[0].id,
+            },
+          }
+        }),
+        lockLab,
+      })
+    }
+
+    function addLockEvent(
+      domain: TraceDomain,
+      kind: string,
+      label: string,
+      detail: string,
+      options: EventOptions = {},
+    ): TraceEvent {
+      const deltas = options.deltas ?? []
+      for (const delta of deltas) {
+        if (isLockLabDelta(delta)) {
+          lockLab = reduceLockLabState(lockLab, delta)
+        }
+      }
+      return builder.add(domain, kind, label, detail, {
+        ...options,
+        path: options.path ?? 'critical',
+        snapshot: projection(),
+        deltas,
+      })
+    }
+
+    function actualTransaction(transactionId: string): TransactionState {
+      const transaction = state.transactions.find((candidate) =>
+        candidate.id === transactionId)
+      if (!transaction) throw new Error(`Missing Lock Lab transaction ${transactionId}.`)
+      return transaction
+    }
+
+    const root = addLockEvent(
+      'client',
+      'lock_lab_start',
+      'Two clients begin a synthetic Lock Lab',
+      'The model uses only resource-a and resource-b; it retains no SQL text, row key, or value.',
+      {
+        source: 'client',
+        target: 'tiproxy-1',
+        metadata: {
+          clients: 2,
+          resources: 2,
+          syntheticResources: true,
+        },
+      },
+    )
+
+    const transactionAId = `txn-${++transactionCounter}`
+    const startTsA = allocateTs()
+    state.transactions.push({
+      id: transactionAId,
+      mode: 'pessimistic',
+      protocol: '2pc',
+      startTs: startTsA,
+      commitTs: null,
+      regionIds: regions.map((region) => region.id),
+      primaryRegionId: regions[0].id,
+      phase: 'active',
+      conflict: false,
+      clientId: clientA,
+      attempt: 1,
+    })
+    const beginA = addLockEvent(
+      'tso',
+      'start_ts',
+      'PD allocated Client A start_ts',
+      `Client A attempt 1 starts at logical timestamp ${startTsA}.`,
+      {
+        source: tidbA,
+        target: 'pd-1',
+        transactionId: transactionAId,
+        dependsOn: [root.id],
+        branchId: clientA,
+        deltas: [
+          {
+            kind: 'tso_allocate',
+            purpose: 'start_ts',
+            timestamp: startTsA,
+          },
+          {
+            kind: 'lock_transaction_begin',
+            clientId: clientA,
+            transactionId: transactionAId,
+            attempt: 1,
+            retryOfTransactionId: null,
+            startTs: startTsA,
+          },
+        ],
+        metadata: {
+          clientId: clientA,
+          attempt: 1,
+          startTs: startTsA,
+        },
+      },
+    )
+
+    const transactionBId = `txn-${++transactionCounter}`
+    const startTsB = allocateTs()
+    state.transactions.push({
+      id: transactionBId,
+      mode: 'pessimistic',
+      protocol: '2pc',
+      startTs: startTsB,
+      commitTs: null,
+      regionIds: regions.map((region) => region.id),
+      primaryRegionId: regions[1].id,
+      phase: 'active',
+      conflict: false,
+      clientId: clientB,
+      attempt: 1,
+    })
+    const beginB = addLockEvent(
+      'tso',
+      'start_ts',
+      'PD allocated Client B start_ts',
+      `Client B attempt 1 starts at logical timestamp ${startTsB}.`,
+      {
+        source: tidbB,
+        target: 'pd-1',
+        transactionId: transactionBId,
+        dependsOn: [beginA.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'tso_allocate',
+            purpose: 'start_ts',
+            timestamp: startTsB,
+          },
+          {
+            kind: 'lock_transaction_begin',
+            clientId: clientB,
+            transactionId: transactionBId,
+            attempt: 1,
+            retryOfTransactionId: null,
+            startTs: startTsB,
+          },
+        ],
+        metadata: {
+          clientId: clientB,
+          attempt: 1,
+          startTs: startTsB,
+        },
+      },
+    )
+
+    const initialRaftIndexes = new Map(regions.map((region) => [
+      region.id,
+      { commitIndex: region.commitIndex, appliedIndex: region.appliedIndex },
+    ]))
+    const acquireA = addLockEvent(
+      'kv',
+      'lock_acquired',
+      'Client A acquired resource-a',
+      `Region ${regions[0].id}'s leader stores the pessimistic lock only in memory.`,
+      {
+        source: tidbA,
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        transactionId: transactionAId,
+        dependsOn: [beginB.id],
+        branchId: clientA,
+        deltas: [{
+          kind: 'lock_owner',
+          action: 'acquire',
+          resourceId: resourceA,
+          regionId: regions[0].id,
+          transactionId: transactionAId,
+          leaderStoreId: regions[0].leaderStoreId,
+        }],
+        metadata: {
+          resourceId: resourceA,
+          storage: 'leader_memory',
+          replicated: false,
+          raftIndexBefore: regions[0].commitIndex,
+          raftIndexAfter: regions[0].commitIndex,
+        },
+      },
+    )
+    const acquireB = addLockEvent(
+      'kv',
+      'lock_acquired',
+      'Client B acquired resource-b',
+      `Region ${regions[1].id}'s leader stores the pessimistic lock only in memory.`,
+      {
+        source: tidbB,
+        target: regions[1].leaderStoreId,
+        regionId: regions[1].id,
+        transactionId: transactionBId,
+        dependsOn: [beginB.id],
+        branchId: clientB,
+        deltas: [{
+          kind: 'lock_owner',
+          action: 'acquire',
+          resourceId: resourceB,
+          regionId: regions[1].id,
+          transactionId: transactionBId,
+          leaderStoreId: regions[1].leaderStoreId,
+        }],
+        metadata: {
+          resourceId: resourceB,
+          storage: 'leader_memory',
+          replicated: false,
+          raftIndexBefore: regions[1].commitIndex,
+          raftIndexAfter: regions[1].commitIndex,
+        },
+      },
+    )
+
+    const edgeAToB = 'wait-edge-a-to-b'
+    const waitA = addLockEvent(
+      'kv',
+      'lock_wait_enqueued',
+      'Client A waits for Client B',
+      'resource-b queues Client A and registers the DATA_LOCK_WAITS direction A → B.',
+      {
+        status: 'warning',
+        source: regions[1].leaderStoreId,
+        target: detectorLeaderStoreId,
+        regionId: regions[1].id,
+        transactionId: transactionAId,
+        dependsOn: [acquireA.id, acquireB.id],
+        branchId: clientA,
+        deltas: [
+          {
+            kind: 'lock_wait_queue',
+            action: 'enqueue',
+            resourceId: resourceB,
+            transactionId: transactionAId,
+            position: 0,
+          },
+          {
+            kind: 'wait_for_edge',
+            action: 'add',
+            edgeId: edgeAToB,
+            waiterTransactionId: transactionAId,
+            holderTransactionId: transactionBId,
+            resourceId: resourceB,
+            regionId: regions[1].id,
+          },
+        ],
+        metadata: {
+          resourceId: resourceB,
+          waiterTransactionId: transactionAId,
+          holderTransactionId: transactionBId,
+          direction: 'waiter_to_holder',
+          queuePosition: 0,
+        },
+      },
+    )
+    state.metrics.lockWaits++
+
+    const edgeBToA = 'wait-edge-b-to-a'
+    const waitB = addLockEvent(
+      'kv',
+      'lock_wait_enqueued',
+      'Client B waits for Client A',
+      'resource-a queues Client B and registers B → A, closing a two-transaction cycle.',
+      {
+        status: 'warning',
+        source: regions[0].leaderStoreId,
+        target: detectorLeaderStoreId,
+        regionId: regions[0].id,
+        transactionId: transactionBId,
+        dependsOn: [waitA.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'lock_wait_queue',
+            action: 'enqueue',
+            resourceId: resourceA,
+            transactionId: transactionBId,
+            position: 0,
+          },
+          {
+            kind: 'wait_for_edge',
+            action: 'add',
+            edgeId: edgeBToA,
+            waiterTransactionId: transactionBId,
+            holderTransactionId: transactionAId,
+            resourceId: resourceA,
+            regionId: regions[0].id,
+          },
+        ],
+        metadata: {
+          resourceId: resourceA,
+          waiterTransactionId: transactionBId,
+          holderTransactionId: transactionAId,
+          direction: 'waiter_to_holder',
+          queuePosition: 0,
+        },
+      },
+    )
+    state.metrics.lockWaits++
+
+    const detectorLookup = addLockEvent(
+      'kv',
+      'deadlock_detector_lookup',
+      'Locate the cluster-wide detector leader',
+      `PD returns only the current detector leader location (${detectorLeaderStoreId}); no lock, key, or row data passes through PD.`,
+      {
+        source: regions[0].leaderStoreId,
+        target: 'pd-1',
+        regionId: regions[0].id,
+        transactionId: transactionBId,
+        dependsOn: [waitB.id],
+        branchId: 'deadlock-detector',
+        metadata: {
+          detectorScope: 'cluster_wide',
+          detectorLeaderStoreId,
+          pdRole: 'leader_lookup_only',
+          rowData: false,
+        },
+      },
+    )
+
+    const cycle = detectWaitForCycle(lockLab.waitForEdges, edgeBToA)
+    if (!cycle) throw new Error('Lock Lab failed to detect its synthetic wait-for cycle.')
+    const deadlockId = 'deadlock-1'
+    const detected = addLockEvent(
+      'kv',
+      'deadlock_detected',
+      'Cluster-wide detector found a cycle',
+      'The detector followed B → A → B. This is a classic, non-retryable transaction deadlock.',
+      {
+        status: 'failed',
+        source: regions[0].leaderStoreId,
+        target: detectorLeaderStoreId,
+        regionId: regions[0].id,
+        transactionId: transactionBId,
+        dependsOn: [detectorLookup.id],
+        branchId: 'deadlock-detector',
+        deltas: [{
+          kind: 'deadlock_state',
+          action: 'detect',
+          deadlockId,
+          cycleTransactionIds: cycle,
+          victimTransactionId: null,
+          selectionPolicy: 'cycle_closing_waiter_model_policy',
+          retryable: false,
+        }],
+        metadata: {
+          deadlockId,
+          cycleLength: cycle.length - 1,
+          retryable: false,
+          detectorScope: 'cluster_wide',
+        },
+      },
+    )
+    state.metrics.deadlocks++
+    state.metrics.conflicts++
+
+    const victimSelected = addLockEvent(
+      'kv',
+      'deadlock_victim_selected',
+      'Select Client B as victim (MODEL POLICY)',
+      'TiCity selects the cycle-closing waiter for deterministic teaching. TiDB does not guarantee this general victim rule.',
+      {
+        status: 'failed',
+        source: detectorLeaderStoreId,
+        target: tidbB,
+        regionId: regions[0].id,
+        transactionId: transactionBId,
+        dependsOn: [detected.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'deadlock_state',
+            action: 'select_victim',
+            deadlockId,
+            cycleTransactionIds: cycle,
+            victimTransactionId: transactionBId,
+            selectionPolicy: 'cycle_closing_waiter_model_policy',
+            retryable: false,
+          },
+          {
+            kind: 'lock_transaction_status',
+            transactionId: transactionBId,
+            from: 'waiting',
+            to: 'victim',
+          },
+        ],
+        metadata: {
+          deadlockId,
+          victimTransactionId: transactionBId,
+          selectionPolicy: 'MODEL POLICY: cycle-closing waiter',
+          retryable: false,
+        },
+      },
+    )
+
+    const victim = actualTransaction(transactionBId)
+    victim.phase = 'rolled_back'
+    victim.conflict = true
+    const waiter = selectWaiterByStartTs(lockLab, resourceB)
+    if (waiter !== transactionAId) {
+      throw new Error('Lock Lab MODEL POLICY did not select the smallest start_ts.')
+    }
+    const victimRollback = addLockEvent(
+      'txn2pc',
+      'deadlock_victim_rollback',
+      'Roll back Client B and wake Client A',
+      'The whole classic-deadlock victim transaction ends. Releasing resource-b atomically applies TiCity’s smallest-start_ts MODEL POLICY so every published edge still names its current holder.',
+      {
+        status: 'failed',
+        source: tidbB,
+        target: regions[1].leaderStoreId,
+        regionId: regions[1].id,
+        transactionId: transactionBId,
+        dependsOn: [victimSelected.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'wait_for_edge',
+            action: 'remove',
+            edgeId: edgeBToA,
+            waiterTransactionId: transactionBId,
+            holderTransactionId: transactionAId,
+            resourceId: resourceA,
+            regionId: regions[0].id,
+          },
+          {
+            kind: 'lock_wait_queue',
+            action: 'dequeue',
+            resourceId: resourceA,
+            transactionId: transactionBId,
+            position: 0,
+          },
+          {
+            kind: 'wait_for_edge',
+            action: 'remove',
+            edgeId: edgeAToB,
+            waiterTransactionId: transactionAId,
+            holderTransactionId: transactionBId,
+            resourceId: resourceB,
+            regionId: regions[1].id,
+          },
+          {
+            kind: 'lock_wait_queue',
+            action: 'dequeue',
+            resourceId: resourceB,
+            transactionId: transactionAId,
+            position: 0,
+          },
+          {
+            kind: 'lock_owner',
+            action: 'release',
+            resourceId: resourceB,
+            regionId: regions[1].id,
+            transactionId: transactionBId,
+            leaderStoreId: regions[1].leaderStoreId,
+          },
+          {
+            kind: 'lock_owner',
+            action: 'acquire',
+            resourceId: resourceB,
+            regionId: regions[1].id,
+            transactionId: transactionAId,
+            leaderStoreId: regions[1].leaderStoreId,
+          },
+          {
+            kind: 'lock_transaction_status',
+            transactionId: transactionBId,
+            from: 'victim',
+            to: 'rolled_back',
+          },
+        ],
+        metadata: {
+          errorCode: 1213,
+          retryable: false,
+          releasedResourceId: resourceB,
+          wokenTransactionId: transactionAId,
+          wakePolicy: 'smallest_start_ts_model_policy',
+          raftIndexBefore: regions[1].commitIndex,
+          raftIndexAfter: regions[1].commitIndex,
+        },
+      },
+    )
+    state.metrics.rollbacks++
+
+    const resolved = addLockEvent(
+      'kv',
+      'deadlock_resolved',
+      'Break the wait-for cycle',
+      'Victim rollback removes both wait edges, transfers resource-b to Client A, and preserves the deadlock as diagnostic history.',
+      {
+        source: detectorLeaderStoreId,
+        target: regions[1].leaderStoreId,
+        transactionId: transactionBId,
+        dependsOn: [victimRollback.id],
+        branchId: 'deadlock-detector',
+        deltas: [{
+          kind: 'deadlock_state',
+          action: 'resolve',
+          deadlockId,
+          cycleTransactionIds: cycle,
+          victimTransactionId: transactionBId,
+          selectionPolicy: 'cycle_closing_waiter_model_policy',
+          retryable: false,
+        }],
+        metadata: {
+          deadlockId,
+          remainingWaitEdges: 0,
+        },
+      },
+    )
+
+    const error1213 = addLockEvent(
+      'return',
+      'deadlock_error_1213',
+      'Return Error 1213 to Client B',
+      'The non-retryable transaction boundary is complete. Any whole-transaction retry must begin in the application.',
+      {
+        status: 'failed',
+        source: tidbB,
+        target: clientB,
+        transactionId: transactionBId,
+        dependsOn: [victimRollback.id],
+        branchId: clientB,
+        metadata: {
+          errorCode: 1213,
+          retryable: false,
+          transactionRolledBack: true,
+          retryBoundary: 'application',
+        },
+      },
+    )
+
+    const retryBackoff = addLockEvent(
+      'client',
+      'application_retry_backoff',
+      'Application schedules a fixed retry backoff',
+      `Client B waits a representative ${retryBackoffMs} ms before starting a new whole transaction.`,
+      {
+        status: 'warning',
+        source: clientB,
+        target: clientB,
+        transactionId: transactionBId,
+        dependsOn: [error1213.id],
+        branchId: clientB,
+        durationMs: retryBackoffMs,
+        deltas: [{
+          kind: 'application_retry',
+          action: 'schedule',
+          clientId: clientB,
+          retryOfTransactionId: transactionBId,
+          fixedBackoffMs: retryBackoffMs,
+          newTransactionId: null,
+        }],
+        metadata: {
+          retrySource: 'application',
+          fixedBackoffMs: retryBackoffMs,
+          automaticTiDBRetry: false,
+        },
+      },
+    )
+
+    const wakeA = addLockEvent(
+      'kv',
+      'lock_waiter_woken',
+      'Wake Client A by TiCity MODEL POLICY',
+      'The atomic victim-release transition selected Client A by deterministic smallest start_ts and transferred resource-b in leader memory; this is not a TiDB fairness guarantee.',
+      {
+        source: regions[1].leaderStoreId,
+        target: tidbA,
+        regionId: regions[1].id,
+        transactionId: transactionAId,
+        dependsOn: [resolved.id],
+        branchId: clientA,
+        metadata: {
+          resourceId: resourceB,
+          wakePolicy: 'smallest_start_ts_model_policy',
+          selectedStartTs: startTsA,
+          raftIndexBefore: regions[1].commitIndex,
+          raftIndexAfter: regions[1].commitIndex,
+        },
+      },
+    )
+
+    const handoffA = addLockEvent(
+      'txn2pc',
+      'commit_handoff',
+      'Hand Client A to the commit model',
+      'Lock Lab stops at the commit boundary; the detailed 2PC/Raft/MVCC mechanism remains the cross-Region Transaction Lab contract.',
+      {
+        source: tidbA,
+        target: regions[0].leaderStoreId,
+        transactionId: transactionAId,
+        dependsOn: [wakeA.id],
+        branchId: clientA,
+        deltas: [{
+          kind: 'lock_transaction_status',
+          transactionId: transactionAId,
+          from: 'active',
+          to: 'commit_handoff',
+        }],
+        metadata: {
+          commitMechanism: 'summary_boundary',
+          detailedScenario: 'cross-region-transaction',
+          raftModeledHere: false,
+        },
+      },
+    )
+
+    const commitTsA = allocateTs()
+    const transactionA = actualTransaction(transactionAId)
+    transactionA.phase = 'committed'
+    transactionA.commitTs = commitTsA
+    const summaryA = addLockEvent(
+      'txn2pc',
+      'commit_summary',
+      'Client A commit completed',
+      'The summary records a successful handoff without replaying the detailed commit internals.',
+      {
+        source: regions[0].leaderStoreId,
+        target: tidbA,
+        transactionId: transactionAId,
+        dependsOn: [handoffA.id],
+        branchId: clientA,
+        deltas: [
+          {
+            kind: 'tso_allocate',
+            purpose: 'commit_ts',
+            timestamp: commitTsA,
+          },
+          {
+            kind: 'lock_transaction_status',
+            transactionId: transactionAId,
+            from: 'commit_handoff',
+            to: 'completed',
+            commitTs: commitTsA,
+          },
+        ],
+        metadata: {
+          committed: true,
+          commitTs: commitTsA,
+          commitMechanism: 'summary_boundary',
+        },
+      },
+    )
+    state.metrics.commits++
+
+    const releaseA = addLockEvent(
+      'kv',
+      'lock_release_after_commit',
+      'Release Client A locks after commit',
+      'Both synthetic leader-memory resources become available after the commit summary.',
+      {
+        source: tidbA,
+        target: regions[1].leaderStoreId,
+        transactionId: transactionAId,
+        dependsOn: [summaryA.id],
+        branchId: clientA,
+        deltas: [
+          {
+            kind: 'lock_owner',
+            action: 'release',
+            resourceId: resourceA,
+            regionId: regions[0].id,
+            transactionId: transactionAId,
+            leaderStoreId: regions[0].leaderStoreId,
+          },
+          {
+            kind: 'lock_owner',
+            action: 'release',
+            resourceId: resourceB,
+            regionId: regions[1].id,
+            transactionId: transactionAId,
+            leaderStoreId: regions[1].leaderStoreId,
+          },
+        ],
+        metadata: {
+          releasedResources: 2,
+          raftModeledHere: false,
+        },
+      },
+    )
+
+    const retryTransactionId = `txn-${++transactionCounter}`
+    const retryStartTs = allocateTs()
+    state.transactions.push({
+      id: retryTransactionId,
+      mode: 'pessimistic',
+      protocol: '2pc',
+      startTs: retryStartTs,
+      commitTs: null,
+      regionIds: regions.map((region) => region.id),
+      primaryRegionId: regions[0].id,
+      phase: 'active',
+      conflict: false,
+      clientId: clientB,
+      attempt: 2,
+      retryOfTransactionId: transactionBId,
+    })
+    const retryBegin = addLockEvent(
+      'tso',
+      'application_retry_begin',
+      'Client B starts a new transaction',
+      `Application attempt 2 receives a fresh transaction ID and start_ts ${retryStartTs}.`,
+      {
+        source: tidbB,
+        target: 'pd-1',
+        transactionId: retryTransactionId,
+        dependsOn: [retryBackoff.id, releaseA.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'tso_allocate',
+            purpose: 'start_ts',
+            timestamp: retryStartTs,
+          },
+          {
+            kind: 'application_retry',
+            action: 'begin',
+            clientId: clientB,
+            retryOfTransactionId: transactionBId,
+            fixedBackoffMs: retryBackoffMs,
+            newTransactionId: retryTransactionId,
+          },
+          {
+            kind: 'lock_transaction_begin',
+            clientId: clientB,
+            transactionId: retryTransactionId,
+            attempt: 2,
+            retryOfTransactionId: transactionBId,
+            startTs: retryStartTs,
+          },
+        ],
+        metadata: {
+          retrySource: 'application',
+          attempt: 2,
+          retryOfTransactionId: transactionBId,
+          freshTransactionId: true,
+          startTs: retryStartTs,
+        },
+      },
+    )
+    state.metrics.retries++
+
+    const retryAcquireA = addLockEvent(
+      'kv',
+      'retry_lock_acquired',
+      'Retry acquired resource-a first',
+      'Attempt 2 uses the same canonical A → B resource order as Client A.',
+      {
+        source: tidbB,
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        transactionId: retryTransactionId,
+        dependsOn: [retryBegin.id],
+        branchId: clientB,
+        deltas: [{
+          kind: 'lock_owner',
+          action: 'acquire',
+          resourceId: resourceA,
+          regionId: regions[0].id,
+          transactionId: retryTransactionId,
+          leaderStoreId: regions[0].leaderStoreId,
+        }],
+        metadata: {
+          resourceId: resourceA,
+          acquisitionOrder: 1,
+          storage: 'leader_memory',
+          raftIndexBefore: regions[0].commitIndex,
+          raftIndexAfter: regions[0].commitIndex,
+        },
+      },
+    )
+
+    const retryAcquireB = addLockEvent(
+      'kv',
+      'retry_lock_acquired',
+      'Retry acquired resource-b second',
+      'The consistent resource order introduces no wait-for edge or cycle.',
+      {
+        source: tidbB,
+        target: regions[1].leaderStoreId,
+        regionId: regions[1].id,
+        transactionId: retryTransactionId,
+        dependsOn: [retryAcquireA.id],
+        branchId: clientB,
+        deltas: [{
+          kind: 'lock_owner',
+          action: 'acquire',
+          resourceId: resourceB,
+          regionId: regions[1].id,
+          transactionId: retryTransactionId,
+          leaderStoreId: regions[1].leaderStoreId,
+        }],
+        metadata: {
+          resourceId: resourceB,
+          acquisitionOrder: 2,
+          storage: 'leader_memory',
+          raftIndexBefore: regions[1].commitIndex,
+          raftIndexAfter: regions[1].commitIndex,
+        },
+      },
+    )
+
+    const retryHandoff = addLockEvent(
+      'txn2pc',
+      'commit_handoff',
+      'Hand retry attempt to the commit model',
+      'The Lock Lab again records only the explicit summary boundary.',
+      {
+        source: tidbB,
+        target: regions[0].leaderStoreId,
+        transactionId: retryTransactionId,
+        dependsOn: [retryAcquireB.id],
+        branchId: clientB,
+        deltas: [{
+          kind: 'lock_transaction_status',
+          transactionId: retryTransactionId,
+          from: 'active',
+          to: 'commit_handoff',
+        }],
+        metadata: {
+          attempt: 2,
+          commitMechanism: 'summary_boundary',
+          detailedScenario: 'cross-region-transaction',
+          raftModeledHere: false,
+        },
+      },
+    )
+
+    const retryCommitTs = allocateTs()
+    const retryTransaction = actualTransaction(retryTransactionId)
+    retryTransaction.phase = 'committed'
+    retryTransaction.commitTs = retryCommitTs
+    const retrySummary = addLockEvent(
+      'txn2pc',
+      'commit_summary',
+      'Application retry commit completed',
+      'Attempt 2 completed after acquiring both resources in a consistent order.',
+      {
+        source: regions[0].leaderStoreId,
+        target: tidbB,
+        transactionId: retryTransactionId,
+        dependsOn: [retryHandoff.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'tso_allocate',
+            purpose: 'commit_ts',
+            timestamp: retryCommitTs,
+          },
+          {
+            kind: 'lock_transaction_status',
+            transactionId: retryTransactionId,
+            from: 'commit_handoff',
+            to: 'completed',
+            commitTs: retryCommitTs,
+          },
+        ],
+        metadata: {
+          committed: true,
+          attempt: 2,
+          commitTs: retryCommitTs,
+          commitMechanism: 'summary_boundary',
+        },
+      },
+    )
+    state.metrics.commits++
+
+    const retryRelease = addLockEvent(
+      'kv',
+      'lock_release_after_commit',
+      'Release retry locks after commit',
+      'The retry leaves no synthetic owner, waiter, or wait-for edge.',
+      {
+        source: tidbB,
+        target: regions[1].leaderStoreId,
+        transactionId: retryTransactionId,
+        dependsOn: [retrySummary.id],
+        branchId: clientB,
+        deltas: [
+          {
+            kind: 'lock_owner',
+            action: 'release',
+            resourceId: resourceA,
+            regionId: regions[0].id,
+            transactionId: retryTransactionId,
+            leaderStoreId: regions[0].leaderStoreId,
+          },
+          {
+            kind: 'lock_owner',
+            action: 'release',
+            resourceId: resourceB,
+            regionId: regions[1].id,
+            transactionId: retryTransactionId,
+            leaderStoreId: regions[1].leaderStoreId,
+          },
+        ],
+        metadata: {
+          releasedResources: 2,
+          attempt: 2,
+          raftModeledHere: false,
+        },
+      },
+    )
+
+    addLockEvent(
+      'return',
+      'lock_lab_summary',
+      'Lock Lab completed',
+      'One victim rolled back, Client A completed, and Client B completed as a fresh application retry.',
+      {
+        source: tidbB,
+        target: 'client',
+        transactionId: retryTransactionId,
+        dependsOn: [retryRelease.id],
+        branchId: clientB,
+        deltas: [{
+          kind: 'application_retry',
+          action: 'complete',
+          clientId: clientB,
+          retryOfTransactionId: transactionBId,
+          fixedBackoffMs: retryBackoffMs,
+          newTransactionId: retryTransactionId,
+        }],
+        metadata: {
+          committedTransactions: 2,
+          rolledBackTransactions: 1,
+          remainingLocks: 0,
+          remainingWaitEdges: 0,
+          retrySource: 'application',
+        },
+      },
+    )
+
+    for (const region of regions) {
+      const initial = initialRaftIndexes.get(region.id)
+      if (
+        !initial ||
+        region.commitIndex !== initial.commitIndex ||
+        region.appliedIndex !== initial.appliedIndex
+      ) {
+        throw new Error(`Lock Lab unexpectedly advanced Region ${region.id} Raft indexes.`)
+      }
+    }
+    state.metrics.statements += 3
+    state.metrics.writes += 3
+    trimTransactions()
+    advanceGc()
+    return recordReceipt(
+      id,
+      'lock-deadlock',
+      analysis,
+      null,
+      null,
+      'succeeded',
+      null,
+      builder,
+      warnings,
+    )
+  }
+
   function traceWrite(
     id: string,
     request: TraceRequest,
@@ -2443,7 +3506,10 @@ export function createTiDBSimulation(
     let regions = regionIds
       .map((regionId) => state.regions.find((region) => region.id === regionId))
       .filter((region): region is RegionState => Boolean(region))
-    if (scenarioId === 'cross-region-transaction' && regions.length > 0) {
+    if (
+      (scenarioId === 'cross-region-transaction' || scenarioId === 'lock-deadlock') &&
+      regions.length > 0
+    ) {
       const first = regions[0]
       const second = regions.find((region) =>
         region.id !== first.id && region.leaderStoreId !== first.leaderStoreId,
@@ -2472,6 +3538,19 @@ export function createTiDBSimulation(
     }
     if (analysis.readOnly) {
       return traceRead(id, analysis, scenarioId, regions, builder, warnings)
+    }
+    if (
+      scenarioId === 'lock-deadlock' &&
+      regions.length === 2 &&
+      state.controls.transactionMode === 'pessimistic'
+    ) {
+      return traceLockDeadlockScenario(
+        id,
+        analysis,
+        [regions[0], regions[1]],
+        builder,
+        warnings,
+      )
     }
     if (
       scenarioId === 'cross-region-transaction' &&

@@ -49,6 +49,16 @@ export const TIDB_SCENARIOS: readonly TiDBScenarioDefinition[] = [
     forceConflict: true,
   },
   {
+    id: 'lock-deadlock',
+    name: 'Pessimistic lock deadlock and retry',
+    description: 'Inspect leader-memory lock queues, a wait-for cycle, victim rollback, and an application retry.',
+    sql: 'UPDATE inventory SET stock = stock - 1 WHERE sku = "LOCK-LAB-425"',
+    controls: { transactionMode: 'pessimistic', commitProtocol: '2pc' },
+    /* Two synthetic resources on Regions with different leaders. */
+    regionIds: [6, 7],
+    forceProtocol: '2pc',
+  },
+  {
     id: 'commit-protocols',
     name: '1PC, Async Commit, and 2PC',
     description: 'Compare 1PC, Async Commit, and classic 2PC without conflating them with Region Raft.',

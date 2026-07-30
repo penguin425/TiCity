@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-2'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-3'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -22,6 +22,7 @@ export type ScenarioId =
   | 'point-read'
   | 'cross-region-transaction'
   | 'optimistic-conflict'
+  | 'lock-deadlock'
   | 'commit-protocols'
   | 'hotspot-split'
   | 'tikv-failover'
@@ -112,6 +113,12 @@ export interface TransactionState {
   primaryRegionId: number
   phase: TransactionPhase
   conflict: boolean
+  /** Present for composite teaching scenarios with multiple client attempts. */
+  clientId?: string
+  /** One-based application attempt number. */
+  attempt?: number
+  /** The failed transaction replaced by this application retry. */
+  retryOfTransactionId?: string
 }
 
 export interface GcState {
@@ -142,6 +149,9 @@ export interface TiDBMetrics {
   regionSplits: number
   leaderElections: number
   gcRuns: number
+  lockWaits: number
+  deadlocks: number
+  retries: number
 }
 
 export type TraceDomain =
@@ -185,6 +195,8 @@ export interface TraceTransactionSnapshot {
 export interface TracePessimisticLockSnapshot {
   transactionId: string
   leaderStoreId: StoreId
+  /** Synthetic identifier only; never a real encoded TiKV key. */
+  resourceId?: string
   /** TiDB v8.5's normal in-memory pessimistic-lock path is leader-local. */
   storage: 'leader_memory'
   replicated: false
@@ -225,6 +237,80 @@ export interface TraceRegionSnapshot {
   mvcc: TraceMvccSnapshot
 }
 
+export type TraceLockTransactionStatus =
+  | 'active'
+  | 'waiting'
+  | 'victim'
+  | 'rolled_back'
+  | 'commit_handoff'
+  | 'completed'
+
+export interface TraceLockTransactionSnapshot {
+  clientId: string
+  transactionId: string
+  attempt: number
+  retryOfTransactionId: string | null
+  startTs: number
+  commitTs: number | null
+  status: TraceLockTransactionStatus
+  heldResourceIds: readonly string[]
+  waitingForResourceId: string | null
+}
+
+export interface TraceLockResourceSnapshot {
+  /** Synthetic resource label such as resource-a; never an encoded row key. */
+  id: string
+  regionId: number
+  leaderStoreId: StoreId
+  holderTransactionId: string | null
+  waiterTransactionIds: readonly string[]
+  /** Deterministic TiCity teaching policy, not a TiDB fairness guarantee. */
+  wakePolicy: 'smallest_start_ts_model_policy'
+  storage: 'leader_memory'
+}
+
+export interface TraceWaitForEdgeSnapshot {
+  id: string
+  /** DATA_LOCK_WAITS direction: blocked waiter to current lock holder. */
+  waiterTransactionId: string
+  holderTransactionId: string
+  resourceId: string
+  regionId: number
+}
+
+export interface TraceDeadlockSnapshot {
+  id: string
+  /** Ordered cycle with the first transaction repeated at the end. */
+  cycleTransactionIds: readonly string[]
+  victimTransactionId: string | null
+  /**
+   * A deterministic TiCity policy, not a TiDB victim-selection guarantee.
+   * The request that closes the cycle is selected for this teaching trace.
+   */
+  selectionPolicy: 'cycle_closing_waiter_model_policy'
+  retryable: false
+  resolution: 'detected' | 'rolling_back' | 'resolved'
+}
+
+export interface TraceApplicationRetrySnapshot {
+  source: 'application'
+  clientId: string
+  retryOfTransactionId: string
+  fixedBackoffMs: number
+  status: 'backoff' | 'started' | 'completed'
+  newTransactionId: string | null
+}
+
+export interface TraceLockLabSnapshot {
+  detectorScope: 'cluster_wide'
+  detectorLeaderStoreId: StoreId
+  transactions: readonly TraceLockTransactionSnapshot[]
+  resources: readonly TraceLockResourceSnapshot[]
+  waitForEdges: readonly TraceWaitForEdgeSnapshot[]
+  deadlock: TraceDeadlockSnapshot | null
+  applicationRetry: TraceApplicationRetrySnapshot | null
+}
+
 /**
  * A renderer-safe projection immediately after one detailed model event.
  * It contains only synthetic teaching state and never SQL text or row values.
@@ -234,6 +320,8 @@ export interface TraceStateSnapshot {
   tsoLastAllocated: number
   transaction: TraceTransactionSnapshot | null
   regions: readonly TraceRegionSnapshot[]
+  /** Present only for the composite model-3 Lock Lab scenario. */
+  lockLab?: TraceLockLabSnapshot
 }
 
 export type TraceStateDelta =
@@ -288,6 +376,62 @@ export type TraceStateDelta =
   | Readonly<{
     kind: 'client_response'
     committed: boolean
+  }>
+  | Readonly<{
+    kind: 'lock_transaction_begin'
+    clientId: string
+    transactionId: string
+    attempt: number
+    retryOfTransactionId: string | null
+    startTs: number
+  }>
+  | Readonly<{
+    kind: 'lock_transaction_status'
+    transactionId: string
+    from: TraceLockTransactionStatus
+    to: TraceLockTransactionStatus
+    commitTs?: number
+  }>
+  | Readonly<{
+    kind: 'lock_owner'
+    action: 'acquire' | 'release'
+    resourceId: string
+    regionId: number
+    transactionId: string
+    leaderStoreId: StoreId
+  }>
+  | Readonly<{
+    kind: 'lock_wait_queue'
+    action: 'enqueue' | 'dequeue'
+    resourceId: string
+    transactionId: string
+    position: number
+  }>
+  | Readonly<{
+    kind: 'wait_for_edge'
+    action: 'add' | 'remove'
+    edgeId: string
+    waiterTransactionId: string
+    holderTransactionId: string
+    resourceId: string
+    regionId: number
+  }>
+  | Readonly<{
+    kind: 'deadlock_state'
+    action: 'detect' | 'select_victim' | 'resolve'
+    deadlockId: string
+    cycleTransactionIds: readonly string[]
+    victimTransactionId: string | null
+    selectionPolicy: 'cycle_closing_waiter_model_policy'
+    retryable: false
+  }>
+  | Readonly<{
+    kind: 'application_retry'
+    action: 'schedule' | 'begin' | 'complete'
+    clientId: string
+    retryOfTransactionId: string
+    fixedBackoffMs: number
+    newTransactionId: string | null
   }>
 
 export interface TraceEvent {

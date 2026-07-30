@@ -4,6 +4,22 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.5.0-alpha.1] — 2026-07-31
+
+- Introduce the model-3 `lock-deadlock` scenario with two explicit
+  pessimistic transactions, two synthetic lock resources, immutable wait
+  queues, and waiter-to-holder wait-for edges.
+- Model a classic non-retryable two-transaction cycle, a TiKV-side detector
+  handoff, a visibly labeled deterministic TiCity victim policy, Error 1213,
+  full victim rollback, survivor wake-up, and an application-originated retry
+  with a new transaction ID and `start_ts`.
+- Keep leader-memory lock, wait, rollback, and retry operations separate from
+  Region Raft indexes and use an explicit handoff for the already-documented
+  transaction commit pipeline.
+- Deep-freeze every Lock Lab projection and typed delta, retain no SQL text,
+  literal, real key, or value, and distinguish whole-transaction application
+  retry from TiDB's retryable statement-deadlock path and lock-wait timeout.
+
 ## [0.4.0] — 2026-07-31
 
 - Complete the first Transaction Lab vertical slice: one deterministic

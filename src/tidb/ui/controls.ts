@@ -41,6 +41,7 @@ interface ControlCopy {
   pointRead: string
   crossRegionTransaction: string
   optimisticConflict: string
+  lockDeadlock: string
   commitProtocols: string
   hotspotSplit: string
   tikvFailover: string
@@ -70,6 +71,7 @@ export const CONTROL_COPY: Record<Locale, ControlCopy> = {
     pointRead: 'Point read',
     crossRegionTransaction: 'Cross-Region transaction',
     optimisticConflict: 'Optimistic conflict',
+    lockDeadlock: 'Lock wait / deadlock',
     commitProtocols: '1PC / Async / 2PC',
     hotspotSplit: 'Hotspot → split',
     tikvFailover: 'TiKV failover',
@@ -97,6 +99,7 @@ export const CONTROL_COPY: Record<Locale, ControlCopy> = {
     pointRead: 'Point read',
     crossRegionTransaction: 'Cross-Region transaction',
     optimisticConflict: 'Optimistic conflict',
+    lockDeadlock: 'Lock wait / deadlock',
     commitProtocols: '1PC / Async / 2PC',
     hotspotSplit: 'Hotspot → split',
     tikvFailover: 'TiKV failover',
@@ -109,6 +112,7 @@ const SCENARIO_COPY_KEYS: Record<ScenarioId, keyof ControlCopy> = {
   'point-read': 'pointRead',
   'cross-region-transaction': 'crossRegionTransaction',
   'optimistic-conflict': 'optimisticConflict',
+  'lock-deadlock': 'lockDeadlock',
   'commit-protocols': 'commitProtocols',
   'hotspot-split': 'hotspotSplit',
   'tikv-failover': 'tikvFailover',

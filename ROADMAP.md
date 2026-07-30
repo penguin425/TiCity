@@ -54,6 +54,15 @@
 - Causal fork/join rendering in Machine and shared selected-event URLs with Diagnose
 - Bilingual, accessible, reduced-motion, fixed-capacity presentation and release gates
 
+## v0.5
+
+- A model-3 Lock Lab with explicit lock owners, wait queues, and wait-for edges
+- Deterministic two-transaction deadlock detection and a visibly labeled model victim policy
+- Error 1213, full victim rollback, survivor wake-up, and application-originated retry
+- A fixed-capacity 3D contention cutaway and event-time Machine/Diagnose projections
+- Explicit separation of non-retryable deadlock, retryable statement deadlock,
+  lock-wait timeout, transaction 2PC, and Region Raft
+
 ## Deliberately outside the current offline model
 
 - Connecting to or changing a live TiDB cluster
