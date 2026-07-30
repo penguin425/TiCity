@@ -4,6 +4,64 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.6.0] — 2026-07-31
+
+- Complete the model-4 Raft Failure Lab vertical slice across exact-event
+  City, Machine, and Diagnose views, with every surface reading the same
+  selected snapshot from one 27-event immutable receipt.
+- Keep the cached old-leader attempt, process-unreachable failure, TiDB
+  backoff/cache invalidation, Pre-Vote, Vote, leader confirmation, PD
+  observation/routing, same-logical-request retry, and background follower
+  apply boundaries explicit.
+- Document and visibly label the deterministic 13-tick elapsed and candidate
+  selection as TiCity model policies within the configured 10–20 tick window,
+  not live timing or TiDB winner guarantees.
+- Add the bilingual release documentation and Raft Lab screenshot to the
+  release archive, with deterministic, accessibility, responsive,
+  fixed-capacity, privacy, and production-build gates.
+
+## [0.6.0-beta.1] — 2026-07-31
+
+- Extend Machine with a separate Pre-Vote/Vote semantic graph and peer
+  role, health, term, vote, log, commit, apply, policy, PD, and retry state
+  without turning election messages into causal dependencies.
+- Extend Diagnose with exact-event failure, election, leader-confirmation,
+  routing, retry, severity, and completion projections.
+- Preserve the selected `scenario` and exact `event` among City, Machine, and
+  Diagnose for all 27 snapshots, including the client response and background
+  follower apply.
+- Keep PD observer/routing-only and the same logical Region request's
+  TiDB-internal retry distinct from application retry and client-visible error.
+
+## [0.6.0-alpha.2] — 2026-07-31
+
+- Add a fixed-capacity 3D Raft Failure Lab cutaway and accessible bilingual DOM
+  inspector synchronized with the City Trace Dock and exact selected event.
+- Project three peers with role, health, term, vote, log, commit, and apply
+  state; distinguish failure, Pre-Vote, Vote, no-op, PD, routing, and retry
+  phases with redundant shape and text cues.
+- Keep Transaction, Lock, and Raft Labs mutually exclusive while sharing the
+  authored cutaway location, Inspect focus, theme, reduced-motion, replay,
+  looping, responsive layout, and disposal lifecycle.
+- Reuse the same immutable 27-event receipt without re-running the request or
+  producing a different election outcome when playback loops.
+
+## [0.6.0-alpha.1] — 2026-07-31
+
+- Introduce the model-4 `tikv-failover` vertical slice with 27 immutable
+  events spanning a cached old-leader request, TiKV process loss,
+  TiDB-internal backoff/cache invalidation, election, route refresh, and
+  recovery of the same logical point read.
+- Model a configured 10–20 tick election window, deterministic 13-tick
+  elapsed/candidate policy, separate Pre-Vote and Vote 2-of-3 quorums, and a
+  new leader current-term no-op that is persisted, committed, and applied
+  before serving.
+- Keep PD limited to observing elected leader metadata and serving routing
+  information; it does not select a candidate, grant votes, or elect a leader.
+- Record no SQL text, key, value, or result row; the read creates no user-data
+  Raft entry, the retry is internal rather than application-originated, and
+  no transient failure is client-visible in this deterministic trace.
+
 ## [0.5.0] — 2026-07-31
 
 - Complete the Lock Lab vertical slice across City, Machine, and Diagnose,
