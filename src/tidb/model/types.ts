@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-5'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-6'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -470,6 +470,136 @@ export interface TraceProtocolLabSnapshot {
   ]
 }
 
+export type TraceGcLabRound = 1 | 2
+
+export type TraceGcLabPhase =
+  | 'idle'
+  | 'preparing'
+  | 'safe_point_bounded'
+  | 'resolving_locks'
+  | 'caching_safe_point'
+  | 'deleting_ranges'
+  | 'publishing_safe_point'
+  | 'tikv_observing'
+  | 'compacting'
+  | 'between_rounds'
+  | 'complete'
+
+export type TraceGcVersionWriteType =
+  | 'put'
+  | 'delete'
+  | 'rollback'
+  | 'lock'
+
+export type TraceGcVersionState =
+  | 'present'
+  | 'retained_anchor'
+  | 'filtered'
+
+export interface TraceGcVersionSnapshot {
+  /** Synthetic version label only; never a real or encoded TiKV key. */
+  id: string
+  commitTs: number
+  writeType: TraceGcVersionWriteType
+  valueStorage: 'write_cf_only' | 'write_cf_inline' | 'write_and_default_cf'
+  state: TraceGcVersionState
+}
+
+export interface TraceGcKeyChainSnapshot {
+  /** Synthetic chain label only; the model retains no key bytes or values. */
+  id: string
+  regionId: number
+  versions: readonly TraceGcVersionSnapshot[]
+}
+
+export interface TraceGcLockSnapshot {
+  id: string
+  regionId: number
+  startTs: number
+  primaryStatus: 'committed' | 'rolled_back'
+  status: 'pending' | 'resolved_commit' | 'resolved_rollback'
+}
+
+export interface TraceGcDeleteRangeSnapshot {
+  id: string
+  dropTs: number
+  status: 'pending' | 'eligible' | 'deleted'
+}
+
+export interface TraceGcStoreSnapshot {
+  storeId: StoreId
+  detectedSafePoint: number
+  compaction:
+    | 'idle'
+    | 'eligible'
+    | 'running'
+    | 'complete'
+  /**
+   * Activity is per store, while the version-board counts below are one
+   * logical projection and are deliberately not multiplied by replicas.
+   */
+  filterActive: boolean
+}
+
+/**
+ * Model-6 GC/Storage Lab. It pins the TiDB v8.5.0 default Compaction Filter
+ * path and projects synthetic aggregate MVCC chains, never real keys/values.
+ */
+export interface TraceGcLabSnapshot {
+  phase: TraceGcLabPhase
+  round: TraceGcLabRound
+  configuration: Readonly<{
+    gcEnabled: true
+    runIntervalSeconds: 600
+    lifeTimeSeconds: 600
+    maxWaitTimeSeconds: 86400
+    minStartTsReportIntervalSeconds: 30
+    scanLockImplementation: 'REGION_SCAN_LOCK'
+    scanLockModeVariableUsed: false
+    physicalScanLockAvailable: false
+    distributedGc: true
+    compactionFilterEnabled: true
+    compactionFilterRatioThreshold: 1.1
+    raftstoreMode: 'v1_classic'
+  }>
+  safePoint: Readonly<{
+    previous: number
+    candidate: number | null
+    globalMinStartTs: number | null
+    activeTransactionBound: number | null
+    serviceSafePoint: number | null
+    staged: number
+    visibilitySaved: number
+    published: number
+    blocked: boolean
+  }>
+  blocker: Readonly<{
+    transactionId: string
+    startTs: number
+    status: 'active' | 'completed'
+    reportedByTiDB: true
+    withinMaxWaitTime: true
+  }>
+  resolveLocks: Readonly<{
+    implementation: 'REGION_SCAN_LOCK'
+    scannedRegionIds: readonly number[]
+    locks: readonly TraceGcLockSnapshot[]
+  }>
+  deleteRanges: readonly TraceGcDeleteRangeSnapshot[]
+  stores: readonly TraceGcStoreSnapshot[]
+  keyChains: readonly TraceGcKeyChainSnapshot[]
+  storage: Readonly<{
+    representation: 'logical_chains_counted_once'
+    compactionLevel: 'bottommost_model_fixture'
+    initialVersionCount: number
+    filteredVersionCount: number
+    retainedAnchorCount: number
+    presentVersionCount: number
+    deletedDefaultCfValues: number
+    compactionRaftEntriesCreated: 0
+  }>
+}
+
 export type TraceLockTransactionStatus =
   | 'active'
   | 'waiting'
@@ -562,6 +692,8 @@ export interface TraceStateSnapshot {
   raftLab?: TraceRaftLabSnapshot
   /** Present only for the model-5 commit-protocol comparison. */
   protocolLab?: TraceProtocolLabSnapshot
+  /** Present only for the model-6 GC/Storage vertical slice. */
+  gcLab?: TraceGcLabSnapshot
 }
 
 export type TraceStateDelta =
@@ -799,6 +931,74 @@ export type TraceStateDelta =
   | Readonly<{
     kind: 'protocol_background_complete'
     laneId: TraceProtocolLaneId
+  }>
+  | Readonly<{
+    kind: 'gc_phase'
+    round: TraceGcLabRound
+    from: TraceGcLabPhase
+    to: TraceGcLabPhase
+  }>
+  | Readonly<{
+    kind: 'gc_safe_point_candidate'
+    round: TraceGcLabRound
+    previous: number
+    candidate: number
+  }>
+  | Readonly<{
+    kind: 'gc_safe_point_bound'
+    round: TraceGcLabRound
+    globalMinStartTs: number | null
+    activeTransactionBound: number | null
+    serviceSafePoint: number
+    blocked: boolean
+  }>
+  | Readonly<{
+    kind: 'gc_blocker_state'
+    from: 'active'
+    to: 'completed'
+  }>
+  | Readonly<{
+    kind: 'gc_resolve_lock_scan'
+    regionId: number
+  }>
+  | Readonly<{
+    kind: 'gc_resolve_lock'
+    lockId: string
+    action: 'commit' | 'rollback'
+  }>
+  | Readonly<{
+    kind: 'gc_delete_range'
+    rangeId: string
+    action: 'mark_eligible' | 'delete'
+  }>
+  | Readonly<{
+    kind: 'gc_safe_point_stage'
+    safePoint: number
+  }>
+  | Readonly<{
+    kind: 'gc_visibility_safe_point_save'
+    safePoint: number
+  }>
+  | Readonly<{
+    kind: 'gc_safe_point_publish'
+    safePoint: number
+  }>
+  | Readonly<{
+    kind: 'gc_store_safe_point'
+    storeId: StoreId
+    safePoint: number
+  }>
+  | Readonly<{
+    kind: 'gc_compaction_state'
+    storeId: StoreId
+    from: TraceGcStoreSnapshot['compaction']
+    to: TraceGcStoreSnapshot['compaction']
+  }>
+  | Readonly<{
+    kind: 'gc_compaction_filter'
+    safePoint: number
+    filteredVersionIds: readonly string[]
+    retainedAnchorIds: readonly string[]
   }>
 
 export interface TraceEvent {

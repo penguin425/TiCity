@@ -1,7 +1,7 @@
 {
   "name": "ticity",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.8.0-alpha.1",
   "type": "module",
   "license": "Apache-2.0",
   "description": "An independent, deterministic 3D educational model of TiDB architecture and distributed SQL flows.",

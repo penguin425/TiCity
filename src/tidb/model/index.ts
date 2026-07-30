@@ -39,6 +39,20 @@ export type {
   ProtocolLabRegionDefinition,
 } from './protocol-lab'
 export {
+  createGcLabState,
+  freezeGcLabSnapshot,
+  isGcLabDelta,
+  reduceGcLabState,
+} from './gc-lab'
+export type {
+  GcLabDefinition,
+  GcLabDeleteRangeDefinition,
+  GcLabDelta,
+  GcLabKeyChainDefinition,
+  GcLabLockDefinition,
+  GcLabVersionDefinition,
+} from './gc-lab'
+export {
   createTiDBSimulation,
   DEFAULT_TIDB_CONTROLS,
 } from './simulation'
@@ -80,6 +94,16 @@ export type {
   TraceDomain,
   TraceEvent,
   TraceEventStatus,
+  TraceGcDeleteRangeSnapshot,
+  TraceGcKeyChainSnapshot,
+  TraceGcLabPhase,
+  TraceGcLabRound,
+  TraceGcLabSnapshot,
+  TraceGcLockSnapshot,
+  TraceGcStoreSnapshot,
+  TraceGcVersionSnapshot,
+  TraceGcVersionState,
+  TraceGcVersionWriteType,
   TraceApplicationRetrySnapshot,
   TraceDeadlockSnapshot,
   TraceLockLabSnapshot,

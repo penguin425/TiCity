@@ -185,20 +185,26 @@ describe('transactions, Raft, GC, and TiFlash', () => {
     expect(receipt.events.some((event) => event.kind === 'point_get')).toBe(false)
   })
 
-  it('holds the GC safe point behind an active old transaction', () => {
+  it('runs the detailed blocked and released GC rounds to completion', () => {
     const sim = createTiDBSimulation()
-    sim.runScenario('gc-safe-point')
-    const blocked = sim.state.gc.safePoint
-    expect(sim.state.gc.blockedByStartTs).not.toBeNull()
-    expect(sim.state.gc.backlog).toBeGreaterThan(0)
-    expect(sim.state.lastTrace?.events.some((event) =>
-      event.kind === 'gc_safe_point_blocked' &&
-      event.metadata.gcMaxWaitSeconds === 86_400,
-    )).toBe(true)
+    const receipt = sim.runScenario('gc-safe-point')
+    const bounded = receipt.events.find((event) =>
+      event.kind === 'gc_min_start_ts_bound')
+    const released = receipt.events.find((event) =>
+      event.kind === 'gc_min_start_ts_clear')
 
-    sim.update(sim.state.controls.gcLifetimeSeconds + 2)
-
-    expect(sim.state.gc.safePoint).toBe(blocked)
+    expect(bounded?.snapshot?.gcLab?.safePoint).toMatchObject({
+      blocked: true,
+      globalMinStartTs: 1_000_080_000,
+      activeTransactionBound: 1_000_079_999,
+    })
+    expect(released?.snapshot?.gcLab?.safePoint.blocked).toBe(false)
+    expect(receipt.events.at(-1)?.snapshot?.gcLab?.phase).toBe('complete')
+    expect(sim.state.gc.blockedByStartTs).toBeNull()
+    expect(sim.state.gc.backlog).toBe(0)
+    expect(sim.state.gc.safePoint).toBe(1_000_220_000)
+    expect(sim.state.gc.collectedVersions).toBe(6)
+    expect(sim.state.metrics.gcRuns).toBe(2)
   })
 
   it('makes TiFlash visibility lag deterministic and never models direct TiFlash writes', () => {
@@ -263,7 +269,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-5')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-6')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))

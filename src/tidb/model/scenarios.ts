@@ -85,10 +85,10 @@ export const TIDB_SCENARIOS: readonly TiDBScenarioDefinition[] = [
   },
   {
     id: 'gc-safe-point',
-    name: 'Long transaction and GC safe point',
-    description: 'An old start_ts holds the safe point while obsolete versions accumulate.',
+    name: 'GC safe point and storage compaction',
+    description: 'Follow two GC rounds from a start_ts bound through locks, ranges, PD, and TiKV Compaction Filters.',
     sql: 'UPDATE orders SET status = "archived" WHERE id = 425',
-    controls: { gcLifetimeSeconds: 10, transactionMode: 'pessimistic' },
+    controls: { gcLifetimeSeconds: 600, transactionMode: 'pessimistic' },
     regionIds: [8, 20],
     forceProtocol: '2pc',
   },
