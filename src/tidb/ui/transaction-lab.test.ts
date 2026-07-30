@@ -177,6 +177,18 @@ describe('Transaction Lab accessible projection', () => {
     expect(panel.root.textContent).toContain('Leaderメモリ上の悲観ロック')
   })
 
+  it('stays hidden while a GC/Storage Lab snapshot owns the cutaway', () => {
+    installTestDom()
+    const panel = createTransactionLabPanel('en')
+    const gcEvent = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+      .events.find((event) => event.snapshot?.gcLab)
+
+    expect(gcEvent).toBeDefined()
+    panel.update(gcEvent!)
+    expect(panel.root.hidden).toBe(true)
+  })
+
   it('is mutually exclusive with Lock Lab and keeps DOM nodes stable across loops', () => {
     installTestDom()
     const transactionPanel = createTransactionLabPanel('en')

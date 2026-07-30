@@ -11,6 +11,7 @@ import {
   DATA_PATHS,
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
+  GC_STORAGE_LAB_ORIGIN,
   HTAP_PATHS,
   LOCK_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
@@ -32,6 +33,8 @@ import { createRaftLab } from './raft-lab'
 import type { RaftLab } from './raft-lab'
 import { createProtocolLab } from './protocol-lab'
 import type { ProtocolLab } from './protocol-lab'
+import { createGcStorageLab } from './gc-storage-lab'
+import type { GcStorageLab } from './gc-storage-lab'
 
 export type CityComponentKind =
   | 'client'
@@ -93,6 +96,7 @@ export interface TiDBSceneGraph {
   readonly lockLab: LockLab
   readonly raftLab: RaftLab
   readonly protocolLab: ProtocolLab
+  readonly gcStorageLab: GcStorageLab
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
@@ -479,6 +483,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   protocolLab.object.position.set(...PROTOCOL_LAB_ORIGIN)
   protocolLab.object.scale.setScalar(0.92)
   root.add(protocolLab.object)
+  const gcStorageLab = createGcStorageLab()
+  gcStorageLab.object.position.set(...GC_STORAGE_LAB_ORIGIN)
+  gcStorageLab.object.scale.setScalar(0.92)
+  root.add(gcStorageLab.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
@@ -1095,6 +1103,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     lockLab,
     raftLab,
     protocolLab,
+    gcStorageLab,
     getAnchor(id: string, out: THREE.Vector3): boolean {
       const component = registry.get(id)
       if (component) {
@@ -1121,6 +1130,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       lockLab.setTheme(next)
       raftLab.setTheme(next)
       protocolLab.setTheme(next)
+      gcStorageLab.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -1138,6 +1148,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       lockLab.dispose()
       raftLab.dispose()
       protocolLab.dispose()
+      gcStorageLab.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()

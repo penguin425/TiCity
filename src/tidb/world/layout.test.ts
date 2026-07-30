@@ -10,6 +10,7 @@ import {
   DATA_PATHS,
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
+  GC_STORAGE_LAB_ORIGIN,
   HTAP_PATHS,
   LOCK_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
@@ -87,11 +88,14 @@ describe('TiCity layout', () => {
     expect(FOCUS_ANCHORS['lock.lab']).toBe(LOCK_LAB_ORIGIN)
     expect(FOCUS_ANCHORS['raft.lab']).toBe(RAFT_LAB_ORIGIN)
     expect(FOCUS_ANCHORS['protocol.lab']).toBe(PROTOCOL_LAB_ORIGIN)
+    expect(FOCUS_ANCHORS['gc.lab']).toBe(GC_STORAGE_LAB_ORIGIN)
     expect(LOCK_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(RAFT_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(PROTOCOL_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
+    expect(GC_STORAGE_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(LOCK_LAB_ORIGIN[1]).toBeGreaterThan(0)
     expect(RAFT_LAB_ORIGIN[1]).toBeGreaterThan(0)
     expect(PROTOCOL_LAB_ORIGIN[1]).toBeGreaterThan(0)
+    expect(GC_STORAGE_LAB_ORIGIN[1]).toBeGreaterThan(0)
   })
 })

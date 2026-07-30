@@ -190,9 +190,18 @@ describe('model-6 GC/Storage Lab trace', () => {
     expect(bounded).toEqual(immutableBounded)
   })
 
-  it('keeps Resolve Locks, cached visibility, Delete Ranges, and PD publication ordered', () => {
+  it('keeps Resolve Locks, saved visibility, Delete Ranges, and PD publication ordered', () => {
     const receipt = runGcLab()
 
+    expect(labAt(receipt, 1).configuration).toMatchObject({
+      gcLeaderLeaseStore: 'mysql.tidb',
+      scanLockImplementation: 'REGION_SCAN_LOCK',
+      resolveLockRaftDetailModeled: false,
+      visibilityCacheBarrierSeconds: 100,
+      raftstoreMode: 'v1_classic',
+      deleteRangeRequest: 'UnsafeDestroyRange',
+      deleteRangeBypassesRaft: true,
+    })
     expect(labAt(receipt, 8).resolveLocks.locks).toEqual([
       expect.objectContaining({
         id: 'stale-lock-a',

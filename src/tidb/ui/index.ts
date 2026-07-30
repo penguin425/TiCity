@@ -53,6 +53,10 @@ export {
   type ProtocolLabPanel,
 } from './protocol-lab'
 export {
+  createGcStorageLabPanel,
+  type GcStorageLabPanel,
+} from './gc-storage-lab'
+export {
   CONTROL_COPY,
   DEFAULT_CITY_CONTROLS,
   SCENARIOS,

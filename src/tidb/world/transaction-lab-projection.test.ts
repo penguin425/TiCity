@@ -157,5 +157,14 @@ describe('Transaction Lab model-to-world projection', () => {
       inspect: true,
       reducedMotion: false,
     })).toBeNull()
+
+    const gcEvent = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+      .events.find((candidate) => candidate.snapshot?.gcLab)
+    expect(gcEvent).toBeDefined()
+    expect(projectTransactionLab(gcEvent!, {
+      inspect: true,
+      reducedMotion: false,
+    })).toBeNull()
   })
 })

@@ -557,7 +557,12 @@ export interface TraceGcLabSnapshot {
     scanLockImplementation: 'REGION_SCAN_LOCK'
     scanLockModeVariableUsed: false
     physicalScanLockAvailable: false
+    resolveLockRaftDetailModeled: false
+    visibilityCacheBarrierSeconds: 100
+    gcLeaderLeaseStore: 'mysql.tidb'
     distributedGc: true
+    deleteRangeRequest: 'UnsafeDestroyRange'
+    deleteRangeBypassesRaft: true
     compactionFilterEnabled: true
     compactionFilterRatioThreshold: 1.1
     raftstoreMode: 'v1_classic'
