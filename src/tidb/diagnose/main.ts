@@ -53,6 +53,7 @@ function projectionAtEvent(
     ...(snapshot.protocolLab === undefined
       ? {}
       : { protocolLab: snapshot.protocolLab }),
+    ...(snapshot.gcLab === undefined ? {} : { gcLab: snapshot.gcLab }),
     regions: finalState.regions.map((region) => {
       const detail = detailedRegions.get(region.id)
       if (!detail) return region

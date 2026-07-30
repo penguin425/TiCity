@@ -68,6 +68,27 @@ describe('Diagnose page copy', () => {
     }
   })
 
+  it('keeps all 43 GC deep-link options exact, numbered, and localized', () => {
+    const events = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+      .events
+    expect(events).toHaveLength(43)
+    for (const [index, candidate] of events.entries()) {
+      const cursor: DiagnoseCursor = {
+        event: candidate,
+        snapshot: candidate.snapshot ?? null,
+        snapshotEvent: candidate.snapshot ? candidate : null,
+        resolution: candidate.snapshot ? 'exact' : 'scenario-start',
+      }
+      expect(cursor.resolution).toBe('exact')
+      expect(diagnoseEventName('ja', candidate)).not.toBe(candidate.label)
+      expect(diagnoseEventOptionLabel('ja', candidate, index, cursor))
+        .toMatch(new RegExp(`^${index + 1}\\. `))
+      expect(diagnoseEventOptionLabel('en', candidate, index, cursor))
+        .toBe(`${index + 1}. ${candidate.label}`)
+    }
+  })
+
   it('marks snapshotless event options and explains the cursor rule visibly', () => {
     const cursor: DiagnoseCursor = {
       event,

@@ -647,6 +647,181 @@ describe('TiDB diagnostic projections', () => {
     }
   })
 
+  it('projects the exact GC coordinator, storage, and MVCC state without identifiers', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('gc-safe-point')
+    expect(receipt.events).toHaveLength(43)
+
+    const at = (oneBasedIndex: number) => {
+      const gcLab = receipt.events[oneBasedIndex - 1]?.snapshot?.gcLab
+      expect(gcLab).toBeDefined()
+      return projectDiagnostics({ gcLab })
+    }
+    const rows = (
+      projections: ReturnType<typeof projectDiagnostics>,
+      id: (typeof DIAGNOSE_SECTIONS)[number],
+    ) => projections.find((projection) => projection.id === id)?.rows ?? []
+
+    const bounded = at(3)
+    expect(rows(bounded, 'gc-safe-point-stores')).toEqual([
+      expect.objectContaining({
+        round: '1',
+        candidateSafePoint: '1000180000',
+        globalMinStartTs: '1000080000',
+        transactionBound: '1000079999',
+        serviceSafePoint: '1000079999',
+        mysqlStagedSafePoint: '1000000000',
+        visibilitySafePoint: '1000000000',
+        pdGlobalSafePoint: '1000000000',
+        cacheBarrier: '100 s · implementation barrier',
+        gcLeaderLeaseStore: 'mysql.tidb',
+      }),
+    ])
+    expect(rows(bounded, 'gc-coordinator-path').map((row) => row.order))
+      .toEqual(['0', '1', '2', '3', '4'])
+    expect(rows(bounded, 'gc-coordinator-path').map((row) =>
+      row.pipelineState)).toEqual([
+      'pending',
+      'pending',
+      'pending',
+      'pending',
+      'pending',
+    ])
+
+    const locksResolved = at(10)
+    expect(rows(locksResolved, 'gc-resolve-locks')).toEqual([
+      expect.objectContaining({
+        implementation: 'REGION_SCAN_LOCK',
+        region: '8',
+        scanState: 'scanned',
+        pendingLocks: '0',
+        resolvedCommit: '1',
+        resolvedRollback: '0',
+        command: 'normal_tikv_write_command',
+        raftBoundary: 'resolve_lock_raft_detail_outside_slice',
+      }),
+      expect.objectContaining({
+        region: '20',
+        scanState: 'scanned',
+        pendingLocks: '0',
+        resolvedCommit: '0',
+        resolvedRollback: '1',
+      }),
+    ])
+    expect(JSON.stringify(rows(locksResolved, 'gc-resolve-locks')))
+      .not.toMatch(/no.?raft/i)
+
+    const visibilitySaved = at(11)
+    expect(rows(visibilitySaved, 'gc-coordinator-path')[2]).toMatchObject({
+      order: '2',
+      pipelineState: 'complete',
+      stateStore: '/tidb/store/gcworker/saved_safe_point',
+      semanticBoundary: 'saved_after_resolve_locks_before_delete_ranges',
+    })
+
+    const directFanout = at(13)
+    expect(rows(directFanout, 'gc-delete-ranges')).toHaveLength(3)
+    expect(rows(directFanout, 'gc-delete-ranges')[0]).toMatchObject({
+      rangeSlot: 'synthetic-ddl-range-1',
+      rangeStatus: 'eligible',
+      request: 'UnsafeDestroyRange',
+      fanout: 'every_relevant_store',
+      raftstoreMode: 'v1_classic',
+      raftBoundary: 'unsafe_destroy_range_bypasses_region_raft',
+      privacyBoundary: 'no_range_boundaries_retained',
+    })
+
+    const published = at(17)
+    expect(rows(published, 'gc-store-compaction').map((row) =>
+      row.detectionState)).toEqual(['pending', 'pending', 'pending'])
+    expect(rows(at(18), 'gc-store-compaction').map((row) =>
+      row.detectionState)).toEqual(['observed', 'pending', 'pending'])
+
+    const filtered = at(22)
+    expect(rows(filtered, 'gc-store-compaction')).toEqual([
+      expect.objectContaining({
+        compaction: 'running',
+        filterActive: 'true',
+        legacyRegionGc: 'not_scheduled_when_compaction_filter_enabled',
+        raftBoundary: 'compaction_filter_creates_no_raft_entry',
+      }),
+      expect.objectContaining({ compaction: 'running', filterActive: 'true' }),
+      expect.objectContaining({ compaction: 'running', filterActive: 'true' }),
+    ])
+    expect(rows(filtered, 'gc-mvcc-chains').map((row) => Number(row.filtered))
+      .reduce((total, count) => total + count, 0)).toBe(4)
+
+    const final = at(43)
+    expect(rows(final, 'gc-safe-point-stores')[0]).toMatchObject({
+      blockerStatus: 'completed',
+      maxWaitBoundary: 'fixture_completed_not_max_wait_or_kill',
+    })
+    const finalChains = rows(final, 'gc-mvcc-chains')
+    expect(finalChains.map((row) => Number(row.filtered))
+      .reduce((total, count) => total + count, 0)).toBe(6)
+    expect(finalChains.map((row) => Number(row.anchors))
+      .reduce((total, count) => total + count, 0)).toBe(3)
+    expect(finalChains.map((row) => Number(row.defaultCfDeletes))
+      .reduce((total, count) => total + count, 0)).toBe(3)
+
+    for (const event of receipt.events) {
+      const projected = JSON.stringify(projectDiagnostics({
+        gcLab: event.snapshot?.gcLab,
+      }))
+      expect(projected).not.toMatch(
+        /txn-gc-blocker|stale-lock|dropped-range|[abcd]-v\d|select\s|update\s/i,
+      )
+    }
+  })
+
+  it('renders a privacy-marked GC overlay from an exact compaction event', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('gc-safe-point')
+    const event = receipt.events[21]
+    expect(event.kind).toBe('gc_compaction_filter_apply')
+    const dom = installTestDom()
+    const root = dom.mount('gc-diagnose')
+    mountDiagnose(root as unknown as HTMLElement, {
+      locale: 'en',
+      snapshot: { gcLab: event.snapshot?.gcLab },
+    })
+
+    expect(root.dataset.activeLab).toBe('gc-storage')
+    expect(root.querySelectorAll(
+      '[data-privacy-boundary="synthetic-aggregate-only"]',
+    )).toHaveLength(6)
+    expect(root.querySelectorAll(
+      '[data-table-section="gc-safe-point-stores"] tbody tr',
+    )).toHaveLength(1)
+    expect(root.querySelectorAll(
+      '[data-table-section="gc-coordinator-path"] tbody tr',
+    )).toHaveLength(5)
+    expect(root.querySelectorAll(
+      '[data-table-section="gc-resolve-locks"] tbody tr',
+    )).toHaveLength(2)
+    expect(root.querySelectorAll(
+      '[data-table-section="gc-delete-ranges"] tbody tr',
+    )).toHaveLength(3)
+    expect(root.querySelectorAll(
+      '[data-table-section="gc-store-compaction"] tbody tr',
+    )).toHaveLength(3)
+    expect(root.querySelectorAll(
+      '[data-table-section="gc-mvcc-chains"] tbody tr',
+    )).toHaveLength(4)
+    expect(root.textContent).toContain(
+      'ResolveLock Raft detail is outside this slice; this is not a no-Raft claim',
+    )
+    expect(root.textContent).toContain(
+      'UnsafeDestroyRange bypasses Region Raft in this classic fixture',
+    )
+    expect(root.textContent).toContain(
+      'Compaction Filter itself creates no Raft entry',
+    )
+    expect(root.textContent).not.toMatch(
+      /txn-gc-blocker|stale-lock|dropped-range|[abcd]-v\d/i,
+    )
+  })
+
   it('projects event-time transaction, Raft, lock, and MVCC detail', () => {
     const projections = projectDiagnostics({
       transaction: {
@@ -753,6 +928,10 @@ describe('TiDB diagnostic projections', () => {
     expect(DIAGNOSE_CSS).toContain('"protocol-selection protocol-selection"')
     expect(DIAGNOSE_CSS).toContain('"protocol-client-path protocol-client-path"')
     expect(DIAGNOSE_CSS).toContain('"protocol-region-state protocol-region-state"')
+    expect(DIAGNOSE_CSS).toContain('"gc-safe-point gc-safe-point"')
+    expect(DIAGNOSE_CSS).toContain('"gc-coordinator gc-coordinator"')
+    expect(DIAGNOSE_CSS).toContain('"gc-store-compaction gc-store-compaction"')
+    expect(DIAGNOSE_CSS).toContain('"gc-mvcc-chains gc-mvcc-chains"')
     expect(DIAGNOSE_CSS).toContain('td[data-column="lockWaitTimeout"]')
   })
 })
