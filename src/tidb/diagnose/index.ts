@@ -317,12 +317,18 @@ function clusterRows(state: Record<string, unknown>): DiagnosticRow[] {
 }
 
 function transactionRows(state: Record<string, unknown>): DiagnosticRow[] {
-  return array(state.transactions).map((entry) => {
+  const listed = array(state.transactions)
+  const transactions = listed.length > 0
+    ? listed
+    : Object.keys(record(state.transaction)).length > 0
+      ? [state.transaction]
+      : []
+  return transactions.map((entry) => {
     const transaction = record(entry)
     return {
       id: value(transaction.id),
       mode: value(transaction.mode),
-      phase: value(pick(transaction, 'phase', 'state')),
+      phase: value(pick(transaction, 'phase', 'stage', 'state')),
       protocol: value(transaction.protocol),
       startTs: value(transaction.startTs),
       commitTs: value(transaction.commitTs),
@@ -360,7 +366,7 @@ function regionRows(state: Record<string, unknown>): DiagnosticRow[] {
     const range = region.startKey !== undefined || region.endKey !== undefined
       ? `[${value(region.startKey)}, ${value(region.endKey)})`
       : '—'
-    return {
+    const row: Record<string, string> = {
       id: value(region.id),
       range,
       leader: value(pick(region, 'leaderStoreId', 'leader')),
@@ -371,6 +377,27 @@ function regionRows(state: Record<string, unknown>): DiagnosticRow[] {
       epoch: value(region.epoch),
       health: value(region.health),
     }
+    const mvcc = record(region.mvcc)
+    const pessimisticLock = record(region.pessimisticLock)
+    if (
+      region.proposedIndex !== undefined ||
+      region.acknowledgements !== undefined ||
+      Object.keys(mvcc).length > 0 ||
+      region.pessimisticLock !== undefined
+    ) {
+      row.proposedIndex = value(region.proposedIndex)
+      row.raftAcks = region.acknowledgements === undefined
+        ? '—'
+        : `${value(region.acknowledgements)}/${value(region.quorum)}`
+      row.pessimisticLock = region.pessimisticLock === null
+        ? 'none'
+        : value(pick(pessimisticLock, 'storage'))
+      row.cfLock = value(mvcc.lockCf)
+      row.cfDefault = value(mvcc.defaultCf)
+      row.cfWrite = value(mvcc.writeCf)
+      row.primary = value(mvcc.primary)
+    }
+    return row
   })
 }
 

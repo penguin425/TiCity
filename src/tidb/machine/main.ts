@@ -64,6 +64,10 @@ function boot(): void {
   const simulation = createTiDBSimulation({ seed: 425 })
   const scenario = selectedScenario()
   const receipt = simulation.runScenario(scenario)
+  const requestedEvent = new URLSearchParams(location.search).get('event')
+  const initialEventIndex = requestedEvent === null
+    ? 0
+    : Math.max(0, receipt.events.findIndex((event) => event.id === requestedEvent))
 
   root.className = 'tidb-page'
   const top = document.createElement('div')
@@ -88,6 +92,7 @@ function boot(): void {
     const url = new URL(location.href)
     url.searchParams.set('scenario', select.value)
     url.searchParams.set('lang', locale)
+    url.searchParams.delete('event')
     location.assign(url)
   })
   label.append(select)
@@ -98,8 +103,14 @@ function boot(): void {
   mountMachine(content, {
     locale,
     receipt,
-    initialIndex: 0,
+    initialIndex: initialEventIndex,
     stepIntervalMs: 650,
+    onSeek(event) {
+      const url = new URL(location.href)
+      if (event) url.searchParams.set('event', event.id)
+      else url.searchParams.delete('event')
+      history.replaceState(null, '', url)
+    },
   })
 
   root.replaceChildren(top, controls, content)

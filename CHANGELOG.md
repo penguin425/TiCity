@@ -4,6 +4,16 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.4.0-beta.1] — 2026-07-31
+
+- Make Machine draw explicit causal fork/join edges instead of inventing a
+  serial predecessor chain, with dashed background-cleanup paths.
+- Let Machine and Diagnose share a stable `scenario` + `event` URL cursor.
+- Project event-time transaction, Raft, leader-memory lock, and MVCC state in
+  Diagnose while retaining the final-state view.
+- Add browser coverage for the detailed cutaway, dynamic event counts, shared
+  event URLs, transport controls, accessibility, and immutable looping.
+
 ## [0.4.0-alpha.2] — 2026-07-31
 
 - Add an Inspect-mode Transaction Lab cutaway with a TiDB coordinator,

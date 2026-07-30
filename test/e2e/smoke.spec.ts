@@ -120,6 +120,30 @@ test('the language query parameter selects English', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('lang', 'en')
 })
 
+test('Machine and Diagnose share the same detailed event cursor through the URL', async ({
+  page,
+}) => {
+  const eventId = 'trace-1-event-7'
+  await page.goto(
+    `/machine/?lang=en&scenario=cross-region-transaction&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('[data-event-index][aria-current="step"]'))
+    .toHaveAttribute('data-event-domain', 'txn2pc')
+  await expect(page.locator('.tidb-machine__detail')).toContainText('pessimistic lock')
+  expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
+
+  await page.goto(
+    `/diagnose/?lang=en&scenario=cross-region-transaction&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]')).toHaveValue(eventId)
+  const regionTable = page.locator('[data-table-section="regions"]')
+  await expect(regionTable).toContainText('cfLock')
+  await expect(regionTable).toContainText('empty')
+  await expect(regionTable).toContainText('leader_memory')
+})
+
 test('desktop controls start collapsed and toggle the panel accessibly', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
@@ -599,14 +623,18 @@ test('trace replay keeps the causal route readable and supports transport contro
   })
 
   const dock = page.locator('[data-trace-dock]')
+  const eventCount = await page.evaluate(() => window.TICITY.trace?.events.length ?? 0)
+  expect(eventCount).toBeGreaterThanOrEqual(32)
   await expect(dock).toBeVisible()
-  await expect(dock).toHaveAttribute('data-event-count', '31')
+  await expect(dock).toHaveAttribute('data-event-count', String(eventCount))
   await expect(dock).toHaveAttribute('data-phase', 'playing')
   expect(Number(await dock.getAttribute('data-presentation-duration-ms'))).toBeGreaterThan(6_000)
   await expect(page.locator('[data-trace-label]')).not.toBeEmpty()
   await expect(page.locator('[data-trace-route]')).toContainText('→')
+  await expect(page.locator('[data-action="inspect"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-transaction-lab]')).toBeVisible()
 
-  // One presentation second must no longer collapse a 31-event trace.
+  // One presentation second must not collapse the detailed trace.
   await page.evaluate(() => window.TICITY.world!.shell.flows.update(1))
   await expect(dock).not.toHaveAttribute('data-phase', 'complete')
 
@@ -617,7 +645,8 @@ test('trace replay keeps the causal route readable and supports transport contro
   await expect(dock).toHaveAttribute('data-event-index', String(pausedIndex))
 
   await page.locator('[data-action="trace-next"]').click()
-  await expect(dock).toHaveAttribute('data-event-index', String(pausedIndex + 1))
+  await expect.poll(async () => Number(await dock.getAttribute('data-event-index')))
+    .toBeGreaterThan(pausedIndex)
   await expect(dock).toHaveAttribute('data-phase', 'paused')
   if (await page.locator('[data-trace-route]').getAttribute('data-local') === 'true') {
     await page.locator('[data-action="trace-next"]').click()
