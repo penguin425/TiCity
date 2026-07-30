@@ -15,6 +15,8 @@ export interface WorldOptions {
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
   readonly autoStart?: boolean
+  readonly inspectLab?: boolean
+  /** @deprecated Use `inspectLab`. */
   readonly inspectTransactionLab?: boolean
   readonly onSelect?: (component: CityComponent | null) => void
 }
@@ -26,6 +28,8 @@ export interface WorldHandle {
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
+  setLabInspect(enabled: boolean): void
+  /** @deprecated Use `setLabInspect`. */
   setTransactionLabInspect(enabled: boolean): void
   setHudExpanded(expanded: boolean): void
   resize(): void
@@ -57,6 +61,9 @@ export function createTiDBWorld(
     },
     setMode(mode: CityViewMode): void {
       shell.setMode(mode)
+    },
+    setLabInspect(enabled: boolean): void {
+      shell.setLabInspect(enabled)
     },
     setTransactionLabInspect(enabled: boolean): void {
       shell.setTransactionLabInspect(enabled)
@@ -95,4 +102,16 @@ export type {
   TransactionLabProjection,
   TransactionLabRegionProjection,
 } from './transaction-lab'
+export {
+  createLockLab,
+  EMPTY_LOCK_LAB_PROJECTION,
+} from './lock-lab'
+export { projectLockLab } from './lock-lab-projection'
+export type {
+  LockLab,
+  LockLabProjection,
+  LockLabResourceProjection,
+  LockLabTransactionProjection,
+  LockLabWaitForEdgeProjection,
+} from './lock-lab'
 export type { CityTheme, SemanticDomain } from './palette'

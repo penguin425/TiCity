@@ -578,6 +578,8 @@ describe('model-3 Lock Lab deadlock and application retry', () => {
       victimTransactionId: null,
       retryable: false,
       resolution: 'detected',
+      clientErrorCode: null,
+      clientErrorTransactionId: null,
     })
     const victim = lockEvent(receipt.events, 'deadlock_victim_selected')
     expect(victim.transactionId).toBe(transactionBId)
@@ -637,6 +639,14 @@ describe('model-3 Lock Lab deadlock and application retry', () => {
       retryable: false,
       transactionRolledBack: true,
       retryBoundary: 'application',
+    })
+    expect(rollback.snapshot?.lockLab?.deadlock).toMatchObject({
+      clientErrorCode: null,
+      clientErrorTransactionId: null,
+    })
+    expect(error.snapshot?.lockLab?.deadlock).toMatchObject({
+      clientErrorCode: 1213,
+      clientErrorTransactionId: error.transactionId,
     })
     expect(backoff.dependsOn).toEqual([error.id])
     expect(backoff.durationMs).toBe(120)

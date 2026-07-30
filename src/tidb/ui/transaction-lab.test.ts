@@ -3,7 +3,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { installTestDom } from '../../../test/dom'
+import { createTiDBSimulation } from '../model'
 import type { TraceEvent } from '../model/types'
+import { createLockLabPanel } from './lock-lab'
 import { createTransactionLabPanel } from './transaction-lab'
 
 function detailedEvent(): TraceEvent {
@@ -173,5 +175,45 @@ describe('Transaction Lab accessible projection', () => {
     expect(panel.root.hidden).toBe(false)
     expect(panel.root.textContent).toContain('Transaction Lab 内部断面')
     expect(panel.root.textContent).toContain('Leaderメモリ上の悲観ロック')
+  })
+
+  it('is mutually exclusive with Lock Lab and keeps DOM nodes stable across loops', () => {
+    installTestDom()
+    const transactionPanel = createTransactionLabPanel('en')
+    const lockPanel = createLockLabPanel('en')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('lock-deadlock')
+    const lockEvent = receipt.events.find((event) =>
+      event.kind === 'deadlock_detected')
+    if (!lockEvent) throw new Error('Expected the Lock Lab deadlock event.')
+
+    transactionPanel.update(lockEvent, [lockEvent])
+    lockPanel.update(lockEvent, [lockEvent])
+    expect(transactionPanel.root.hidden).toBe(true)
+    expect(lockPanel.root.hidden).toBe(false)
+    expect([
+      transactionPanel.root,
+      lockPanel.root,
+    ].filter((root) => !root.hidden)).toHaveLength(1)
+
+    const lockHeading = lockPanel.root.firstElementChild
+    // A later loop iteration reuses the immutable event snapshot.
+    transactionPanel.update(lockEvent, [...[lockEvent]])
+    lockPanel.update(lockEvent, [...[lockEvent]])
+    expect(lockPanel.root.firstElementChild).toBe(lockHeading)
+
+    const transactionEvent = detailedEvent()
+    transactionPanel.update(transactionEvent, [transactionEvent])
+    lockPanel.update(transactionEvent, [transactionEvent])
+    expect(transactionPanel.root.hidden).toBe(false)
+    expect(lockPanel.root.hidden).toBe(true)
+    expect([
+      transactionPanel.root,
+      lockPanel.root,
+    ].filter((root) => !root.hidden)).toHaveLength(1)
+
+    const transactionHeading = transactionPanel.root.firstElementChild
+    transactionPanel.update(transactionEvent, [...[transactionEvent]])
+    expect(transactionPanel.root.firstElementChild).toBe(transactionHeading)
   })
 })

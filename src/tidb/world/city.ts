@@ -12,6 +12,7 @@ import {
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
   HTAP_PATHS,
+  LOCK_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
   TIKV_BOUNDS,
@@ -23,6 +24,8 @@ import { SEMANTIC_COLORS, createCityMaterials } from './palette'
 import type { CityMaterials, CityTheme, SemanticDomain } from './palette'
 import { createTransactionLab } from './transaction-lab'
 import type { TransactionLab } from './transaction-lab'
+import { createLockLab } from './lock-lab'
+import type { LockLab } from './lock-lab'
 
 export type CityComponentKind =
   | 'client'
@@ -81,6 +84,7 @@ export interface TiDBSceneGraph {
   readonly networks: readonly CityNetwork[]
   readonly materials: CityMaterials
   readonly transactionLab: TransactionLab
+  readonly lockLab: LockLab
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
@@ -455,6 +459,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   transactionLab.object.position.set(...TRANSACTION_LAB_ORIGIN)
   transactionLab.object.scale.setScalar(0.92)
   root.add(transactionLab.object)
+  const lockLab = createLockLab()
+  lockLab.object.position.set(...LOCK_LAB_ORIGIN)
+  lockLab.object.scale.setScalar(0.92)
+  root.add(lockLab.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
@@ -1068,6 +1076,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     networks,
     materials,
     transactionLab,
+    lockLab,
     getAnchor(id: string, out: THREE.Vector3): boolean {
       const component = registry.get(id)
       if (component) {
@@ -1091,6 +1100,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       materials.apply(next)
       environment.setTheme(next)
       transactionLab.setTheme(next)
+      lockLab.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -1105,6 +1115,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     dispose(): void {
       environment.dispose()
       transactionLab.dispose()
+      lockLab.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()

@@ -64,7 +64,9 @@ describe('TiCity controls', () => {
     expect(calls).toContain('scenario:point-read')
     expect(calls).toContain('control:qps:900')
     expect(calls).toContain('playback:step')
-    expect(root.querySelectorAll('[data-scenario]')).toHaveLength(8)
+    expect(root.querySelectorAll('[data-scenario]')).toHaveLength(9)
+    root.querySelector<HTMLButtonElement>('[data-scenario="lock-deadlock"]')!.click()
+    expect(calls).toContain('scenario:lock-deadlock')
   })
 
   it('provides Machine, Diagnose, and source navigation', () => {

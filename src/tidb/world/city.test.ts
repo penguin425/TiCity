@@ -7,7 +7,11 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { createCollisionMap } from '../engine/collision'
 import { createTiDBSimulation } from '../model'
-import { COMPONENT_ANCHORS, TICITY_LAYOUT } from './layout'
+import {
+  COMPONENT_ANCHORS,
+  LOCK_LAB_ORIGIN,
+  TICITY_LAYOUT,
+} from './layout'
 import { createTiDBSceneGraph } from './city'
 
 describe('TiCity scene graph', () => {
@@ -38,6 +42,20 @@ describe('TiCity scene graph', () => {
     ).geometry.getAttribute('position')
     expect(positions.count / 2).toBe(TICITY_LAYOUT.regionCount * 3)
     city.dispose()
+  })
+
+  it('mounts the fixed Lock Lab on its focus stage and owns its lifecycle', () => {
+    const city = createTiDBSceneGraph()
+    const focus = new THREE.Vector3()
+
+    expect(city.lockLab.object.parent).toBe(city.root)
+    expect(city.lockLab.object.visible).toBe(false)
+    expect(city.getAnchor('lock.lab', focus)).toBe(true)
+    expect(focus.toArray()).toEqual([...LOCK_LAB_ORIGIN])
+
+    city.setTheme('day')
+    city.dispose()
+    expect(city.lockLab.debug.disposed).toBe(true)
   })
 
   it('keeps PD out of every data-network segment', () => {
@@ -160,7 +178,7 @@ describe('TiCity scene graph', () => {
     // still fails clearly.
     expect(drawables).toBeLessThanOrEqual(225)
     expect(geometries.size).toBeLessThanOrEqual(225)
-    expect(materials.size).toBeLessThanOrEqual(45)
+    expect(materials.size).toBeLessThanOrEqual(52)
     expect(shadowCasters).toBeLessThanOrEqual(55)
     expect(instancedMeshes).toBeGreaterThanOrEqual(30)
     expect(instances).toBeGreaterThanOrEqual(1_000)

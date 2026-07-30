@@ -6,6 +6,7 @@ import type {
   TraceEvent,
   TraceRegionSnapshot,
 } from '../model/types'
+import { createTiDBSimulation } from '../model/simulation'
 import { projectTransactionLab } from './transaction-lab-projection'
 
 function region(
@@ -144,6 +145,15 @@ describe('Transaction Lab model-to-world projection', () => {
       },
     }
     expect(projectTransactionLab(oneRegion, {
+      inspect: true,
+      reducedMotion: false,
+    })).toBeNull()
+
+    const lockEvent = createTiDBSimulation({ seed: 425 })
+      .runScenario('lock-deadlock')
+      .events.find((candidate) => candidate.snapshot?.lockLab)
+    expect(lockEvent).toBeDefined()
+    expect(projectTransactionLab(lockEvent!, {
       inspect: true,
       reducedMotion: false,
     })).toBeNull()

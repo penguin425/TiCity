@@ -27,6 +27,7 @@ export type LockLabDelta = Extract<
       | 'lock_wait_queue'
       | 'wait_for_edge'
       | 'deadlock_state'
+      | 'deadlock_client_error'
       | 'application_retry'
   }
 >
@@ -48,6 +49,7 @@ export function isLockLabDelta(delta: TraceStateDelta): delta is LockLabDelta {
     delta.kind === 'lock_wait_queue' ||
     delta.kind === 'wait_for_edge' ||
     delta.kind === 'deadlock_state' ||
+    delta.kind === 'deadlock_client_error' ||
     delta.kind === 'application_retry'
 }
 
@@ -515,6 +517,8 @@ export function reduceLockLabState(
         selectionPolicy: delta.selectionPolicy,
         retryable: false,
         resolution: 'detected',
+        clientErrorCode: null,
+        clientErrorTransactionId: null,
       }
     } else {
       invariant(deadlock?.id === delta.deadlockId, 'deadlock id mismatch')
@@ -535,6 +539,19 @@ export function reduceLockLabState(
           resolution: 'resolved',
         }
       }
+    }
+  } else if (delta.kind === 'deadlock_client_error') {
+    invariant(deadlock?.id === delta.deadlockId, 'deadlock id mismatch')
+    invariant(deadlock.resolution === 'resolved', 'client error requires a resolved deadlock')
+    invariant(deadlock.victimTransactionId === delta.transactionId, 'client error must target the victim')
+    invariant(deadlock.clientErrorCode === null, 'client error was already returned')
+    invariant(delta.errorCode === 1213 && delta.retryable === false, 'deadlock client error must be non-retryable Error 1213')
+    const victim = transactionById(state, delta.transactionId)
+    invariant(victim.status === 'rolled_back', 'client error requires a rolled-back victim')
+    deadlock = {
+      ...deadlock,
+      clientErrorCode: delta.errorCode,
+      clientErrorTransactionId: delta.transactionId,
     }
   } else if (delta.kind === 'application_retry') {
     if (delta.action === 'schedule') {

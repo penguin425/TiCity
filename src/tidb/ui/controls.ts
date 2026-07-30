@@ -13,6 +13,7 @@ export const SCENARIOS: readonly ScenarioId[] = [
   'point-read',
   'cross-region-transaction',
   'optimistic-conflict',
+  'lock-deadlock',
   'commit-protocols',
   'hotspot-split',
   'tikv-failover',
