@@ -38,6 +38,9 @@ import type { ProtocolLabProjection } from '../world/protocol-lab'
 import { projectGcStorageLab } from '../world/gc-storage-lab-projection'
 import { EMPTY_GC_STORAGE_LAB_PROJECTION } from '../world/gc-storage-lab'
 import type { GcStorageLabProjection } from '../world/gc-storage-lab'
+import { projectTiFlashMppLab } from '../world/tiflash-mpp-lab-projection'
+import { EMPTY_TIFLASH_MPP_LAB_PROJECTION } from '../world/tiflash-mpp-lab'
+import type { TiFlashMppLabProjection } from '../world/tiflash-mpp-lab'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
@@ -105,6 +108,7 @@ export interface CityLabProjections {
   readonly raft: RaftLabProjection
   readonly protocol: ProtocolLabProjection
   readonly gcStorage: GcStorageLabProjection
+  readonly tiflashMpp: TiFlashMppLabProjection
 }
 
 function hiddenTransactionLab(reducedMotion: boolean): TransactionLabProjection {
@@ -139,6 +143,14 @@ function hiddenGcStorageLab(
     : { ...EMPTY_GC_STORAGE_LAB_PROJECTION, reducedMotion }
 }
 
+function hiddenTiFlashMppLab(
+  reducedMotion: boolean,
+): TiFlashMppLabProjection {
+  return reducedMotion === EMPTY_TIFLASH_MPP_LAB_PROJECTION.reducedMotion
+    ? EMPTY_TIFLASH_MPP_LAB_PROJECTION
+    : { ...EMPTY_TIFLASH_MPP_LAB_PROJECTION, reducedMotion }
+}
+
 /**
  * Projects exactly one detailed 3D lab from the event-owned discriminator.
  * Lock and Raft snapshots retain shared Region summaries, so their explicit
@@ -155,6 +167,7 @@ export function projectCityLabs(
   const hiddenRaft = hiddenRaftLab(reducedMotion)
   const hiddenProtocol = hiddenProtocolLab(reducedMotion)
   const hiddenGcStorage = hiddenGcStorageLab(reducedMotion)
+  const hiddenTiFlashMpp = hiddenTiFlashMppLab(reducedMotion)
   if (!inspect || !event?.snapshot) {
     return {
       transaction: hiddenTransaction,
@@ -162,6 +175,21 @@ export function projectCityLabs(
       raft: hiddenRaft,
       protocol: hiddenProtocol,
       gcStorage: hiddenGcStorage,
+      tiflashMpp: hiddenTiFlashMpp,
+    }
+  }
+  if (event.snapshot.tiflashMppLab) {
+    return {
+      transaction: hiddenTransaction,
+      lock: hiddenLock,
+      raft: hiddenRaft,
+      protocol: hiddenProtocol,
+      gcStorage: hiddenGcStorage,
+      tiflashMpp: projectTiFlashMppLab(event, {
+        inspect: true,
+        reducedMotion,
+        pulse,
+      }) ?? hiddenTiFlashMpp,
     }
   }
   if (event.snapshot.gcLab) {
@@ -175,6 +203,7 @@ export function projectCityLabs(
         reducedMotion,
         pulse,
       }) ?? hiddenGcStorage,
+      tiflashMpp: hiddenTiFlashMpp,
     }
   }
   if (event.snapshot.protocolLab) {
@@ -188,6 +217,7 @@ export function projectCityLabs(
         pulse,
       }) ?? hiddenProtocol,
       gcStorage: hiddenGcStorage,
+      tiflashMpp: hiddenTiFlashMpp,
     }
   }
   if (event.snapshot.raftLab) {
@@ -201,6 +231,7 @@ export function projectCityLabs(
       }) ?? hiddenRaft,
       protocol: hiddenProtocol,
       gcStorage: hiddenGcStorage,
+      tiflashMpp: hiddenTiFlashMpp,
     }
   }
   if (event.snapshot.lockLab) {
@@ -214,6 +245,7 @@ export function projectCityLabs(
       raft: hiddenRaft,
       protocol: hiddenProtocol,
       gcStorage: hiddenGcStorage,
+      tiflashMpp: hiddenTiFlashMpp,
     }
   }
   if (event.snapshot.transaction) {
@@ -227,6 +259,7 @@ export function projectCityLabs(
       raft: hiddenRaft,
       protocol: hiddenProtocol,
       gcStorage: hiddenGcStorage,
+      tiflashMpp: hiddenTiFlashMpp,
     }
   }
   return {
@@ -235,6 +268,7 @@ export function projectCityLabs(
     raft: hiddenRaft,
     protocol: hiddenProtocol,
     gcStorage: hiddenGcStorage,
+    tiflashMpp: hiddenTiFlashMpp,
   }
 }
 
@@ -377,10 +411,14 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   function syncDetailedLabs(): void {
     const playback = flows.playback
     const event = playback.event
+    const labPulse = playback.motion === 'reduced'
+      ? 0.5
+      : Math.round(playback.eventProgress * 60) / 60
     const key = [
       labInspect ? 'inspect' : 'hidden',
       playback.motion,
       event?.id ?? '',
+      String(labPulse),
     ].join('|')
     if (key === labProjectionKey) return
     labProjectionKey = key
@@ -388,13 +426,14 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       event,
       labInspect,
       playback.motion === 'reduced',
-      0.72,
+      labPulse,
     )
     city.transactionLab.update(projection.transaction)
     city.lockLab.update(projection.lock)
     city.raftLab.update(projection.raft)
     city.protocolLab.update(projection.protocol)
     city.gcStorageLab.update(projection.gcStorage)
+    city.tiflashMppLab.update(projection.tiflashMpp)
   }
 
   function setTheme(next: CityTheme): void {

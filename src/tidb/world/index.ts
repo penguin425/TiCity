@@ -97,6 +97,7 @@ export {
   GC_STORAGE_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
+  TIFLASH_MPP_LAB_ORIGIN,
   TICITY_LAYOUT,
   regionPeerPosition,
 } from './layout'
@@ -146,6 +147,24 @@ export type {
   GcStorageLab,
   GcStorageLabProjection,
 } from './gc-storage-lab'
+export {
+  createTiFlashMppLab,
+  EMPTY_TIFLASH_MPP_LAB_PROJECTION,
+  TIFLASH_MPP_LAB_FRAGMENT_CAPACITY,
+  TIFLASH_MPP_LAB_LEARNER_CAPACITY,
+  TIFLASH_MPP_LAB_PACKET_CAPACITY,
+  TIFLASH_MPP_LAB_STORE_CAPACITY,
+  TIFLASH_MPP_LAB_TASK_CAPACITY,
+  TIFLASH_MPP_LAB_TUNNEL_CAPACITY,
+} from './tiflash-mpp-lab'
+export { projectTiFlashMppLab } from './tiflash-mpp-lab-projection'
+export type {
+  TiFlashMppLab,
+  TiFlashMppLabLearnerProjection,
+  TiFlashMppLabProjection,
+  TiFlashMppLabTaskProjection,
+  TiFlashMppLabTunnelProjection,
+} from './tiflash-mpp-lab'
 export { projectRaftLab } from './raft-lab-projection'
 export type {
   RaftLab,

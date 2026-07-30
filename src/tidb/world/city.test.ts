@@ -13,6 +13,7 @@ import {
   LOCK_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
+  TIFLASH_MPP_LAB_ORIGIN,
   TICITY_LAYOUT,
 } from './layout'
 import { createTiDBSceneGraph } from './city'
@@ -110,6 +111,23 @@ describe('TiCity scene graph', () => {
     city.setTheme('day')
     city.dispose()
     expect(city.gcStorageLab.debug.disposed).toBe(true)
+  })
+
+  it('mounts the fixed TiFlash MPP Lab on the shared focus stage and owns its lifecycle', () => {
+    const city = createTiDBSceneGraph()
+    const focus = new THREE.Vector3()
+
+    expect(city.tiflashMppLab.object.parent).toBe(city.root)
+    expect(city.tiflashMppLab.object.visible).toBe(false)
+    expect(city.getAnchor('tiflash.lab', focus)).toBe(true)
+    expect(focus.toArray()).toEqual([...TIFLASH_MPP_LAB_ORIGIN])
+    expect(city.tiflashMppLab.object.userData.boundary).toContain(
+      'learners are non-voters',
+    )
+
+    city.setTheme('day')
+    city.dispose()
+    expect(city.tiflashMppLab.debug.disposed).toBe(true)
   })
 
   it('keeps PD out of every data-network segment', () => {
@@ -234,9 +252,13 @@ describe('TiCity scene graph', () => {
      * Detailed labs share one mutually exclusive cutaway stage and use fixed
      * capacity meshes rather than allocating per Region, event, or frame.
      */
-    expect(drawables).toBeLessThanOrEqual(260)
+    /*
+     * Model-7 adds one bounded ten-draw-call TiFlash Lab. Its six exchange
+     * rails and packet slots remain instanced rather than allocating per event.
+     */
+    expect(drawables).toBeLessThanOrEqual(270)
     expect(geometries.size).toBeLessThanOrEqual(225)
-    expect(materials.size).toBeLessThanOrEqual(64)
+    expect(materials.size).toBeLessThanOrEqual(68)
     expect(shadowCasters).toBeLessThanOrEqual(55)
     expect(instancedMeshes).toBeGreaterThanOrEqual(30)
     expect(instances).toBeGreaterThanOrEqual(1_000)

@@ -29,6 +29,7 @@ import { createLockLabPanel } from './ui/lock-lab'
 import { createProtocolLabPanel } from './ui/protocol-lab'
 import { createRaftLabPanel } from './ui/raft-lab'
 import { createGcStorageLabPanel } from './ui/gc-storage-lab'
+import { createTiFlashMppLabPanel } from './ui/tiflash-mpp-lab'
 import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTransactionLabPanel } from './ui/transaction-lab'
 import { createTiDBWorld, type WorldHandle } from './world'
@@ -175,7 +176,13 @@ function initialScenario(): ScenarioId {
     : 'point-read'
 }
 
-type DetailLab = 'transaction' | 'lock' | 'raft' | 'protocol' | 'gc-storage'
+type DetailLab =
+  | 'transaction'
+  | 'lock'
+  | 'raft'
+  | 'protocol'
+  | 'gc-storage'
+  | 'tiflash-mpp'
 
 const DETAIL_LAB_FOCUS = {
   transaction: 'transaction.lab',
@@ -183,12 +190,16 @@ const DETAIL_LAB_FOCUS = {
   raft: 'raft.lab',
   protocol: 'protocol.lab',
   'gc-storage': 'gc.lab',
+  'tiflash-mpp': 'tiflash.lab',
 } as const satisfies Readonly<Record<DetailLab, string>>
 
 function detailLabForTrace(trace: TraceReceipt | null): DetailLab | null {
   const snapshots = (trace?.events ?? [])
     .map((event) => event.snapshot)
     .filter((snapshot) => snapshot !== undefined)
+  if (snapshots.some((snapshot) => snapshot.tiflashMppLab !== undefined)) {
+    return 'tiflash-mpp'
+  }
   if (snapshots.some((snapshot) => snapshot.gcLab !== undefined)) {
     return 'gc-storage'
   }
@@ -558,12 +569,14 @@ function boot(): void {
   const raftLabPanel = createRaftLabPanel(locale)
   const protocolLabPanel = createProtocolLabPanel(locale)
   const gcStorageLabPanel = createGcStorageLabPanel(locale)
+  const tiflashMppLabPanel = createTiFlashMppLabPanel(locale)
   worldHost.append(
     transactionLabPanel.root,
     lockLabPanel.root,
     raftLabPanel.root,
     protocolLabPanel.root,
     gcStorageLabPanel.root,
+    tiflashMppLabPanel.root,
   )
 
   const traceDock = createTracePlaybackDock(locale, {
@@ -808,6 +821,7 @@ function boot(): void {
       raftLabPanel.setLocale(next)
       protocolLabPanel.setLocale(next)
       gcStorageLabPanel.setLocale(next)
+      tiflashMppLabPanel.setLocale(next)
       movementPad.setLocale(next)
       hint.textContent = copy[next].hint[currentView]
       surfaceLinkKey = ''
@@ -857,11 +871,17 @@ function boot(): void {
         const activeEvents = activeEventIds
           .map((id) => byId.get(id))
           .filter((event): event is NonNullable<typeof event> => event !== undefined)
-        transactionLabPanel.update(playback.event, activeEvents)
+        transactionLabPanel.update(
+          playback.event?.snapshot?.tiflashMppLab
+            ? null
+            : playback.event,
+          activeEvents,
+        )
         lockLabPanel.update(playback.event, activeEvents)
         raftLabPanel.update(playback.event, activeEvents)
         protocolLabPanel.update(playback.event, activeEvents)
         gcStorageLabPanel.update(playback.event, activeEvents)
+        tiflashMppLabPanel.update(playback.event, activeEvents)
       }
     }
 
@@ -923,6 +943,7 @@ function boot(): void {
     raftLabPanel.update(null)
     protocolLabPanel.update(null)
     gcStorageLabPanel.update(null)
+    tiflashMppLabPanel.update(null)
     syncSurfaceLinks(null)
     world?.update(simulation.state, null)
   }
@@ -971,6 +992,7 @@ function boot(): void {
     raftLabPanel.dispose()
     protocolLabPanel.dispose()
     gcStorageLabPanel.dispose()
+    tiflashMppLabPanel.dispose()
     movementPad.dispose()
     world?.dispose()
   }, { once: true })

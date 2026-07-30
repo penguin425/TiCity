@@ -16,6 +16,7 @@ import {
   LOCK_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
+  TIFLASH_MPP_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
   TIKV_BOUNDS,
@@ -35,6 +36,8 @@ import { createProtocolLab } from './protocol-lab'
 import type { ProtocolLab } from './protocol-lab'
 import { createGcStorageLab } from './gc-storage-lab'
 import type { GcStorageLab } from './gc-storage-lab'
+import { createTiFlashMppLab } from './tiflash-mpp-lab'
+import type { TiFlashMppLab } from './tiflash-mpp-lab'
 
 export type CityComponentKind =
   | 'client'
@@ -97,6 +100,7 @@ export interface TiDBSceneGraph {
   readonly raftLab: RaftLab
   readonly protocolLab: ProtocolLab
   readonly gcStorageLab: GcStorageLab
+  readonly tiflashMppLab: TiFlashMppLab
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
@@ -487,6 +491,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   gcStorageLab.object.position.set(...GC_STORAGE_LAB_ORIGIN)
   gcStorageLab.object.scale.setScalar(0.92)
   root.add(gcStorageLab.object)
+  const tiflashMppLab = createTiFlashMppLab()
+  tiflashMppLab.object.position.set(...TIFLASH_MPP_LAB_ORIGIN)
+  tiflashMppLab.object.scale.setScalar(0.92)
+  root.add(tiflashMppLab.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
@@ -1104,7 +1112,36 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     raftLab,
     protocolLab,
     gcStorageLab,
+    tiflashMppLab,
     getAnchor(id: string, out: THREE.Vector3): boolean {
+      const tiflashLabAnchor =
+        id === 'tiflash.lab.store.0' ? tiflashMppLab.storeAnchors[0]
+          : id === 'tiflash.lab.store.1' ? tiflashMppLab.storeAnchors[1]
+            : id === 'tiflash.lab.learner.0'
+              ? tiflashMppLab.learnerAnchors[0]
+              : id === 'tiflash.lab.learner.1'
+                ? tiflashMppLab.learnerAnchors[1]
+                : id === 'tiflash.lab.learner.2'
+                  ? tiflashMppLab.learnerAnchors[2]
+                  : id === 'tiflash.lab.fragment.scan'
+                    ? tiflashMppLab.fragmentAnchors[0]
+                    : id === 'tiflash.lab.fragment.final'
+                      ? tiflashMppLab.fragmentAnchors[1]
+                      : id === 'tiflash.lab.task.0'
+                        ? tiflashMppLab.taskAnchors[0]
+                        : id === 'tiflash.lab.task.1'
+                          ? tiflashMppLab.taskAnchors[1]
+                          : id === 'tiflash.lab.task.2'
+                            ? tiflashMppLab.taskAnchors[2]
+                            : id === 'tiflash.lab.task.3'
+                              ? tiflashMppLab.taskAnchors[3]
+                              : id === 'tiflash.lab.root'
+                                ? tiflashMppLab.rootAnchor
+                                : undefined
+      if (tiflashLabAnchor) {
+        tiflashLabAnchor.getWorldPosition(out)
+        return true
+      }
       const component = registry.get(id)
       if (component) {
         out.copy(component.anchor)
@@ -1131,6 +1168,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       raftLab.setTheme(next)
       protocolLab.setTheme(next)
       gcStorageLab.setTheme(next)
+      tiflashMppLab.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -1149,6 +1187,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       raftLab.dispose()
       protocolLab.dispose()
       gcStorageLab.dispose()
+      tiflashMppLab.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()

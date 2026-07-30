@@ -84,6 +84,13 @@ export const PROTOCOL_LAB_ORIGIN: Point3 = [0, 48, 18]
  */
 export const GC_STORAGE_LAB_ORIGIN: Point3 = [0, 48, 18]
 
+/**
+ * TiFlash MPP Lab reuses the detailed cutaway stage. Its model-7 event
+ * discriminator keeps learner replication and per-query exchange geometry
+ * exclusive with all earlier Labs.
+ */
+export const TIFLASH_MPP_LAB_ORIGIN: Point3 = [0, 48, 18]
+
 export const COMPONENT_ANCHORS = {
   'client.terminal': [0, 3, -288],
   'tiproxy.0': [-34, 7, -220],
@@ -116,6 +123,7 @@ export const FOCUS_ANCHORS = {
   'raft.lab': RAFT_LAB_ORIGIN,
   'protocol.lab': PROTOCOL_LAB_ORIGIN,
   'gc.lab': GC_STORAGE_LAB_ORIGIN,
+  'tiflash.lab': TIFLASH_MPP_LAB_ORIGIN,
   'tikv.raft': COMPONENT_ANCHORS['tikv.1'],
   'pd.scheduler': COMPONENT_ANCHORS['pd.control'],
   'gc.yard': COMPONENT_ANCHORS['gc.yard'],
