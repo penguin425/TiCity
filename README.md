@@ -13,16 +13,26 @@ English.
 
 Live site: <https://penguin425.github.io/TiCity/>
 
-![Trace Dock showing the active Transaction 2PC route in TiCity's 3D city](docs/screenshot.png)
+![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.3.4 is a static, offline model targeting TiDB v8.5 LTS. It does not
+> TiCity v0.4.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
 > execute SQL or return real data or invented result rows. A single SQL
 > statement entered by the user is classified entirely in the browser, and
 > only a modeled route and explanation are generated.
 
 ## What you can inspect
 
+- A Transaction Lab cutaway for one detailed two-Region pessimistic
+  transaction, opened with **Inspect**
+- Leader-memory pessimistic locks, parallel prewrite branches, independent
+  2-of-3 Raft quorums, apply, and conceptual MVCC `LOCK`, `DEFAULT`, and
+  `WRITE` column-family state
+- A causal event graph with immutable post-event snapshots, explicit
+  fork/join dependencies, a client-response boundary, and background
+  secondary cleanup
+- The same scenario and event cursor across the 3D City, Machine, and
+  Diagnose views through shareable URLs
 - A default topology containing TiProxy, TiDB Server, PD, TiKV, and TiFlash
 - PD TSO, Region ranges and Leaders, three voters, Raft replication, and quorum
 - Pessimistic and optimistic transactions, prewrite and commit, 1PC, Async Commit, and 2PC
@@ -37,9 +47,13 @@ The application has three views:
 
 | URL | Purpose |
 |---|---|
-| `/` | 3D City, scenarios, SQL routes, and guided tours |
-| `/machine/` | A 2D state machine following the same processing flow |
-| `/diagnose/` | Diagnostics for model state, Regions, quorum, lag, and history |
+| `/?scenario=cross-region-transaction` | 3D City and the detailed Transaction Lab |
+| `/machine/?scenario=cross-region-transaction&event=…` | A causal 2D state machine at the selected event |
+| `/diagnose/?scenario=cross-region-transaction&event=…` | Event-time transaction, Raft, lock, and MVCC diagnostics |
+
+Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
+through the same immutable receipt; looping reuses that receipt and never
+re-executes a transaction.
 
 ## Representative scenarios
 
@@ -91,10 +105,16 @@ src/tidb/
 - The 3D World does not mutate `TiCityState`.
 - 2PC and Raft have separate state machines, colors, and `TraceEvent.domain` values.
 - Given the same seed and fixed step, the state and `TraceReceipt` are identical.
+- In the model-2 detailed transaction, parallel branches may overlap on the
+  teaching clock, while explicit dependencies determine their causal order.
 - The initial 36 Regions are representative educational values. Additional
   Regions created by splits appear in the 2D diagnostics, while the 3D City
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
+
+The detailed mechanism-level projection currently applies to the
+cross-Region transaction scenario. The other seven scenarios remain compact
+teaching traces and do not yet claim the same Raft/MVCC depth.
 
 The `window.TICITY` object in the browser console exposes the model, playback,
 scenarios, and latest immutable trace for inspection and control.

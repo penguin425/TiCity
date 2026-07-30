@@ -4,6 +4,20 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.4.0] — 2026-07-31
+
+- Complete the first Transaction Lab vertical slice: one deterministic
+  two-Region pessimistic transaction can be inspected from coordinator
+  routing through parallel prewrite, per-Region Raft quorum/apply, conceptual
+  MVCC state, primary response, and background secondary cleanup.
+- Keep the 3D cutaway, Trace Dock, Machine causal graph, and Diagnose
+  event-time projection synchronized to the same immutable event cursor.
+- Add bilingual and accessible Inspect controls, shareable event URLs,
+  fixed-capacity rendering, reduced-motion behavior, release documentation,
+  and a current Transaction Lab screenshot.
+- Preserve compact traces for the other seven scenarios and explicitly bound
+  their current level of detail.
+
 ## [0.4.0-beta.1] — 2026-07-31
 
 - Make Machine draw explicit causal fork/join edges instead of inventing a

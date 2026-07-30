@@ -79,4 +79,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.3.x.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.4.x.

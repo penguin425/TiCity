@@ -11,15 +11,23 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 
 公開先: <https://penguin425.github.io/TiCity/>
 
-![TiCityの3D都市でTransaction 2PCの現在経路を示すTrace Dock](docs/screenshot.png)
+![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.3.4はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.4.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 
 ## 観察できるもの
 
+- **内部**（Inspect）で開く、2つのRegionにまたがる悲観トランザクションの
+  詳細なTransaction Labカットアウェイ
+- Leaderメモリ上の悲観ロック、並列prewrite、Regionごとに独立した2-of-3
+  Raft quorum、apply、概念上のMVCC `LOCK`／`DEFAULT`／`WRITE` column family
+- 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
+  応答後のsecondary cleanupを持つ因果イベントグラフ
+- 共有可能なURLにより、3D City、Machine、Diagnoseで一致するscenarioと
+  event cursor
 - TiProxy、TiDB Server、PD、TiKV、TiFlashからなる既定トポロジ
 - PDのTSO、Regionの範囲・Leader・3 voter、Raft複製とquorum
 - 悲観／楽観トランザクション、prewriteとcommit、1PC／Async Commit／2PC
@@ -34,9 +42,12 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 
 | URL | 内容 |
 |---|---|
-| `/` | 3D City、シナリオ、SQL経路、ツアー |
-| `/machine/` | 同じ処理を追跡する2Dステートマシン |
-| `/diagnose/` | モデル状態、Region、quorum、lag、履歴の診断 |
+| `/?scenario=cross-region-transaction` | 3D Cityと詳細なTransaction Lab |
+| `/machine/?scenario=cross-region-transaction&event=…` | 選択イベント時点の因果2Dステートマシン |
+| `/diagnose/?scenario=cross-region-transaction&event=…` | イベント時点のtransaction、Raft、lock、MVCC診断 |
+
+3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
+不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。
 
 ## 代表シナリオ
 
@@ -87,9 +98,15 @@ src/tidb/
 - 3D Worldは`TiCityState`を変更しません。
 - 2PCとRaftは別々の状態機械、色、`TraceEvent.domain`を持ちます。
 - seedと固定stepが同じなら、状態と`TraceReceipt`も同じになります。
+- model-2の詳細トランザクションでは、並列branchは教育用clock上で重なり得ますが、
+  因果順序は明示的な依存関係で決まります。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
+
+機構レベルの詳細projectionは、現時点では複数Regionトランザクションの
+scenarioに適用されています。ほかの7 scenarioは簡潔な教育用traceのままで、
+同じRaft／MVCC深度をまだ主張しません。
 
 ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。
