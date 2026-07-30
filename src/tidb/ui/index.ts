@@ -45,6 +45,10 @@ export {
   type LockLabPanel,
 } from './lock-lab'
 export {
+  createRaftLabPanel,
+  type RaftLabPanel,
+} from './raft-lab'
+export {
   CONTROL_COPY,
   DEFAULT_CITY_CONTROLS,
   SCENARIOS,

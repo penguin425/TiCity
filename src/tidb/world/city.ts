@@ -13,6 +13,7 @@ import {
   FOCUS_ANCHORS,
   HTAP_PATHS,
   LOCK_LAB_ORIGIN,
+  RAFT_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
   TIKV_BOUNDS,
@@ -26,6 +27,8 @@ import { createTransactionLab } from './transaction-lab'
 import type { TransactionLab } from './transaction-lab'
 import { createLockLab } from './lock-lab'
 import type { LockLab } from './lock-lab'
+import { createRaftLab } from './raft-lab'
+import type { RaftLab } from './raft-lab'
 
 export type CityComponentKind =
   | 'client'
@@ -85,6 +88,7 @@ export interface TiDBSceneGraph {
   readonly materials: CityMaterials
   readonly transactionLab: TransactionLab
   readonly lockLab: LockLab
+  readonly raftLab: RaftLab
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
@@ -463,6 +467,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   lockLab.object.position.set(...LOCK_LAB_ORIGIN)
   lockLab.object.scale.setScalar(0.92)
   root.add(lockLab.object)
+  const raftLab = createRaftLab()
+  raftLab.object.position.set(...RAFT_LAB_ORIGIN)
+  raftLab.object.scale.setScalar(0.92)
+  root.add(raftLab.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
@@ -1077,6 +1085,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     materials,
     transactionLab,
     lockLab,
+    raftLab,
     getAnchor(id: string, out: THREE.Vector3): boolean {
       const component = registry.get(id)
       if (component) {
@@ -1101,6 +1110,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       environment.setTheme(next)
       transactionLab.setTheme(next)
       lockLab.setTheme(next)
+      raftLab.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -1116,6 +1126,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       environment.dispose()
       transactionLab.dispose()
       lockLab.dispose()
+      raftLab.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()
