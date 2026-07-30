@@ -67,6 +67,25 @@
 - Visible TiCity model-policy labels for cycle-closing victim selection and
   smallest-`start_ts` wake priority
 
+## v0.6
+
+- A model-4 Raft Failure Lab with one representative Region expanded across
+  27 deterministic, immutable events
+- A cached old-leader request, process-unreachable failure, TiDB-internal
+  backoff and Region-cache invalidation, and same-logical-request recovery
+- Three voter peers with explicit role, health, term, vote, log, commit, and
+  apply state across separate Pre-Vote and Vote 2-of-3 quorums
+- A configured 10–20 tick election window kept separate from the deterministic
+  13-tick elapsed and candidate-selection TiCity model policies
+- A current-term leader no-op persisted, committed, and leader-applied before
+  route refresh and retry, with follower apply marked as background work
+- PD limited to observing elected leader metadata and serving routing
+  information, never choosing a candidate, voting, or electing a Region leader
+- Exact-event City, Machine, and Diagnose projections over the same snapshot,
+  with fixed-capacity, bilingual, accessible, and immutable-loop presentation
+- Explicit boundaries for a read with no user-data entry, no application
+  retry, no client-visible transient error, and no live timing guarantee
+
 ## Deliberately outside the current offline model
 
 - Connecting to or changing a live TiDB cluster

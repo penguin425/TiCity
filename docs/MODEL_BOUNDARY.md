@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity model-3 targets **TiDB v8.5 LTS**. This document records which visible
+TiCity model-4 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
 which capabilities are not implemented. TiCity is a deterministic educational
 model, not a TiDB emulator or a live-cluster observation tool.
@@ -22,6 +22,11 @@ model, not a TiDB emulator or a live-cluster observation tool.
 | Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
 | TiFlash is an asynchronously replicated Raft learner for HTAP | It never counts toward TiKV voter quorum and has visible catch-up lag | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview) |
 | Raft Engine stores Raft logs by default in this target line | The TiKV inspector names Raft Engine, not the older RaftDB default | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file) |
+| A Region's Raft leader replicates logs and requires a majority of replicas for a successful write | Raft Failure Lab has three configured voters and independent 2-of-3 Pre-Vote, Vote, and no-op persistence quorums | [TiDB storage and Raft](https://docs.pingcap.com/tidb/v8.5/tidb-storage) |
+| TiKV enables Pre-Vote by default; its default election timeout is 10 ticks and a zero maximum resolves to twice that value | The configured window is shown as 10–20 ticks, separately from the deterministic 13-tick elapsed and candidate-selection model policies | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file) |
+| TiDB can back off and retry transient TiKV, not-leader, and timeout failures before exposing an error to the client | The modeled transport failure remains client-pending, invalidates the Region route, and retries the same logical request internally without an application retry | [TiDB troubleshooting map](https://docs.pingcap.com/tidb/v8.5/tidb-troubleshooting-map), [TiDB error codes](https://docs.pingcap.com/tidb/v8.5/error-codes) |
+| TiKV peers perform Region leader election while PD maintains Region metadata used for routing | PD observes the completed election and answers a route lookup; it never selects the candidate, grants Pre-Votes or Votes, or elects the leader | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture), [TiDB storage and Raft](https://docs.pingcap.com/tidb/v8.5/tidb-storage), [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
+| Real Region, Raft, and apply state must be inspected from a cluster | TiCity's peer log, commit, and apply indexes are labeled model snapshots rather than `tikv-ctl` observations | [TiKV Control User Guide](https://docs.pingcap.com/tidb/v8.5/tikv-control) |
 | Active transaction `start_ts` can hold the GC safe point, subject to `tidb_gc_max_wait_time` | The GC scenario shows a short-horizon blocker and names the 86,400-second default; it does not fast-forward the teaching clock by a day | [GC configuration](https://docs.pingcap.com/tidb/v8.5/garbage-collection-configuration) |
 
 ## Representative values
@@ -102,10 +107,50 @@ rather than reconstructing independent state. Exact-event navigation and
 looping move a cursor over the same immutable `TraceReceipt`; they do not
 re-run the transactions or create a new detector outcome.
 
-The other seven scenarios retain compact teaching traces in this model
-revision. They use the same causal dependency field but do not yet claim the
-detailed concurrency-control or Raft/MVCC projection depth of these two
-vertical slices.
+The model-4 `tikv-failover` scenario is a separate Region Raft failure vertical
+slice. Its 27 immutable events follow one logical point read: TiDB first uses a
+cached route to the old Region leader; that TiKV process becomes unreachable;
+TiDB keeps the client response pending, invalidates the stale leader route, and
+enters an internal teaching backoff. The failed process affects its peers in
+all modeled Regions, while this detailed slice expands only representative
+Region 0.
+
+The two live peers then proceed through distinct Pre-Vote and Vote phases, each
+reaching a 2-of-3 quorum. TiKV's configured default election timeout is 10
+ticks, and a zero maximum resolves to 20 ticks. The exact 13-tick elapsed value
+and choice of the lowest live, up-to-date store ID as candidate are
+deterministic **TiCity model policies**. They are not measurements, scheduler
+predictions, live failover timing, or TiDB guarantees about which peer wins.
+
+After election, the new leader appends one modeled current-term no-op. The two
+live voters persist it, it commits at quorum, and the leader applies it before
+the recovery path continues. The point read itself creates no user-data Raft
+entry and no modeled result row. This sequence is a deterministic educational
+mechanism contract, not a packet-, byte-, implementation-, or timing-accurate
+emulation of TiKV.
+
+Only after the peers complete election and the leader applies the no-op does PD
+observe the new leader metadata. PD then answers TiDB's routing lookup; it does
+not choose the candidate, grant a Pre-Vote or Vote, or elect the Region leader.
+TiDB refreshes its Region cache and issues attempt 2 with the same synthetic
+logical request ID. This is a TiDB-internal Region-request retry, not an
+application retry, and this bounded trace completes without a client-visible
+error. After the response, the surviving follower applies the committed no-op
+as explicitly marked background work; the failed peer remains behind.
+
+Every Raft Failure Lab event publishes a deeply frozen snapshot of peer role,
+health, term, vote, log, commit and apply state, election policy, PD state, and
+request state. The 3D City cutaway and semantic inspector, Machine's acyclic
+causal DAG and separate Pre-Vote/Vote graph, and Diagnose all read the exact
+same selected snapshot. Exact-event navigation and looping only move a cursor
+over that receipt; they do not resend the request, rerun the election, or
+choose a different winner. The snapshots retain no SQL text, literal, key,
+value, or result row and have `MODEL / SIMULATED` provenance.
+
+The other six scenarios retain compact teaching traces in this model revision.
+They use the same causal dependency field but do not yet claim the detailed
+transaction, concurrency-control, or Region-election projection depth of these
+three vertical slices.
 
 ## SQL boundary
 
@@ -121,4 +166,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.5.x.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.6.x.

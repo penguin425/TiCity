@@ -15,7 +15,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 ![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.5.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.6.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 
@@ -31,11 +31,17 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 - TiKV上のクラスタ全体deadlock detector leaderと、そのleaderの場所だけを
   検索するPD。決定的なvictim／wake規則はTiDBの保証ではなく
   **TiCity MODEL POLICY**と明示
+- 代表する1つのRegionを、cache上の旧Leaderへの要求、TiKV processの到達不能、
+  TiDB内部backoffとcache無効化、選出、route更新、read復旧まで27個の不変な
+  eventで展開するRaft Failure Lab
+- role、health、term、vote、log、commit、applyを明示した3 voter peer。
+  Pre-VoteとVoteはそれぞれ2-of-3へ達し、新Leaderのcurrent-term no-opを
+  persist、commit、applyします
 - 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
   応答後のsecondary cleanupを持つ因果イベントグラフ
 - 3D City、Machine、Diagnoseへ投影される1つの不変なreceipt。Lock Labの
-  意味上のwait-for graphは因果依存graphとは分離され、循環を因果依存として
-  扱いません
+  意味上のwait-for graphとRaft Failure Labの意味上の選出graphは、どちらも
+  因果依存graphとは分離されます
 - 3画面の間を移動してもscenarioと選択eventを引き継ぐ安定したlink
 - TiProxy、TiDB Server、PD、TiKV、TiFlashからなる既定トポロジ
 - PDのTSO、Regionの範囲・Leader・3 voter、Raft複製とquorum
@@ -51,9 +57,9 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 
 | URL | 内容 |
 |---|---|
-| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D Cityとscenarioで選択した詳細Lab |
-| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | 因果event DAGと、Lock Labでは分離された意味上のwait-for graph |
-| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | event時点のtransaction、Raft、MVCC、lock wait、deadlock、retry診断 |
+| [`…/TiCity/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/?scenario=tikv-failover&event=trace-1-event-16) | exact event時点の3D Cityとscenarioで選択した詳細Lab |
+| [`…/machine/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/machine/?scenario=tikv-failover&event=trace-1-event-16) | 因果event DAGと、分離されたLock wait-forまたはRaft Pre-Vote／Vote意味graph |
+| [`…/diagnose/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/diagnose/?scenario=tikv-failover&event=trace-1-event-16) | exact event時点のtransaction、Raft選出、MVCC、lock wait、deadlock、retry診断 |
 
 3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
 不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。
@@ -65,6 +71,24 @@ Error 1213であり、別経路のlock-wait timeoutであるError 1205ではあ�
 retryとして見せず、新しいtransaction IDと`start_ts`を作ります。
 
 ![2トランザクションのwait-for cycleで停止したTiCity Lock Lab](docs/lock-lab.png)
+
+[`tikv-failover` scenario](https://penguin425.github.io/TiCity/?scenario=tikv-failover)
+からRaft Failure Labを直接開けます。27 eventのreceiptは、1つのlogical point
+readについて、cache上の旧Leaderへの試行からprocess停止、TiDB内部backoffと
+Region cache無効化、Pre-VoteとVote、Leader確認、route更新、retryまでを
+追跡します。設定上の10–20 tick選出windowは対象TiKVのconfigurationに由来します。
+正確な経過13 tickと、稼働中でlogが最新のstore IDが最小のcandidateを選ぶ規則は、
+実環境の時間やwinnerの保証ではなく、決定論的な**TiCity MODEL POLICY**です。
+PDは選出済みLeaderを観測してrouting metadataを返しますが、candidate選択、
+Pre-Vote／Vote付与、Leader選出は行いません。
+
+このモデル上のreadはuser-data Raft entryを作りません。新Leaderのモデル化された
+current-term no-opを2-of-3 voterがpersistし、commitしてLeaderがapplyした後に、
+TiDBがrouteを更新して同じlogical requestをretryします。これはapplication retry
+ではなくTiDB内部のrequest retryで、このtraceでは一時的なerrorはclientへ見えません。
+surviving followerによるno-op applyは応答後のbackground workです。
+
+![2-of-3の選出と復旧中のTiCity Raft Failure Lab](docs/raft-lab.png)
 
 ## 代表シナリオ
 
@@ -121,15 +145,20 @@ src/tidb/
 - model-3 Lock Labのwait-for edgeは、waiterから現在のholderへ向きます。
   cycleを閉じたwaiterを決定的なmodel victimとし、最小の`start_ts`を決定的な
   wake優先順位とします。どちらもTiDBの選択保証ではなくTiCityのmodel policyです。
+- model-4 Raft Failure Labでは、TiKVに設定された選出windowと、モデル上の
+  決定論的な13 tick経過値／candidate policyを分けて表示します。PDは
+  observer／routing限定で、retryはapplication retryではなく、同じlogical
+  Region requestに対するTiDB内部処理です。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-機構レベルの詳細projectionは、現時点では複数RegionトランザクションとLock
-Labのscenarioに適用されています。前者はtransaction 2PC、RegionごとのRaft、
-概念上のMVCCを展開します。後者はLeaderメモリ上のlock競合を展開し、同じ処理を
-重複させないようcommit経路を前者のpipelineへ明示的にhandoffします。ほかの
-7 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
+機構レベルの詳細projectionは、現時点では3 scenarioに適用されています。
+複数Regionトランザクションはtransaction 2PC、RegionごとのRaft、概念上のMVCCを
+展開します。Lock LabはLeaderメモリ上のlock競合を展開し、commit経路を前者の
+pipelineへhandoffします。Raft Failure Labは1 Regionの選出、current-term
+Leader no-op、PDの観測とrouting、TiDB内部request復旧を展開します。ほかの
+6 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
 
 ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。

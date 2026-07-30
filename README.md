@@ -16,7 +16,7 @@ Live site: <https://penguin425.github.io/TiCity/>
 ![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.5.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
+> TiCity v0.6.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
 > execute SQL or return real data or invented result rows. A single SQL
 > statement entered by the user is classified entirely in the browser, and
 > only a modeled route and explanation are generated.
@@ -34,12 +34,18 @@ Live site: <https://penguin425.github.io/TiCity/>
 - A cluster-wide deadlock detector leader on TiKV, with PD used only to locate
   that leader; deterministic victim and wake rules are visibly labeled
   **TiCity MODEL POLICY**, not TiDB guarantees
+- A Raft Failure Lab that expands one representative Region into 27 immutable
+  events: a cached old-leader request, unreachable TiKV process, TiDB-internal
+  backoff and cache invalidation, election, route refresh, and recovered read
+- Three voter peers with explicit role, health, term, vote, log, commit, and
+  apply state; separate Pre-Vote and Vote phases both reach 2-of-3 before the
+  new leader's current-term no-op is persisted, committed, and applied
 - A causal event graph with immutable post-event snapshots, explicit
   fork/join dependencies, a client-response boundary, and background
   secondary cleanup
 - One immutable receipt projected across the 3D City, Machine, and Diagnose;
-  the Lock Lab adds a separate semantic wait-for graph without turning its
-  cycle into a causal dependency cycle
+  Lock Lab adds a semantic wait-for graph and Raft Failure Lab adds a semantic
+  election graph without turning either into causal dependencies
 - Stable cross-view links that carry the scenario and selected event among all
   three views
 - A default topology containing TiProxy, TiDB Server, PD, TiKV, and TiFlash
@@ -56,9 +62,9 @@ The application has three views:
 
 | URL | Purpose |
 |---|---|
-| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D City and the scenario-selected detailed Lab |
-| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | Causal event DAG and, for Lock Lab, the separate semantic wait-for graph |
-| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | Event-time transaction, Raft, MVCC, lock-wait, deadlock, and retry diagnostics |
+| [`…/TiCity/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/?scenario=tikv-failover&event=trace-1-event-16) | 3D City and the scenario-selected detailed Lab at an exact event |
+| [`…/machine/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/machine/?scenario=tikv-failover&event=trace-1-event-16) | Causal event DAG plus separate Lock wait-for or Raft Pre-Vote/Vote semantic graph |
+| [`…/diagnose/?scenario=tikv-failover&event=trace-1-event-16`](https://penguin425.github.io/TiCity/diagnose/?scenario=tikv-failover&event=trace-1-event-16) | Exact-event transaction, Raft election, MVCC, lock-wait, deadlock, and retry diagnostics |
 
 Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
 through the same immutable receipt; looping reuses that receipt and never
@@ -72,6 +78,26 @@ the application retry creates a new transaction ID and `start_ts` instead of
 being presented as an internal TiDB retry.
 
 ![TiCity Lock Lab stopped at a two-transaction wait-for cycle](docs/lock-lab.png)
+
+Open the Raft Failure Lab directly with the
+[`tikv-failover` scenario](https://penguin425.github.io/TiCity/?scenario=tikv-failover).
+Its 27-event receipt follows one logical point read from its cached old-leader
+attempt through process loss, TiDB-internal backoff and Region-cache
+invalidation, Pre-Vote and Vote, leader confirmation, route refresh, and retry.
+The configured 10–20 tick election window comes from the target TiKV
+configuration; the exact elapsed 13 ticks and lowest live up-to-date store-ID
+candidate are deterministic **TiCity MODEL POLICY**, not a live timing or
+winner guarantee. PD observes the elected leader and answers routing metadata;
+it does not choose the candidate, grant a vote, or elect the leader.
+
+This modeled read creates no user-data Raft entry. The newly elected leader's
+modeled current-term no-op must be persisted by 2-of-3 voters, committed, and
+applied by the leader before TiDB refreshes its route and retries the same
+logical request. That is an internal TiDB request retry, not an application
+retry, and no transient error becomes client-visible in this trace. The
+surviving follower applies the no-op as background work after the response.
+
+![TiCity Raft Failure Lab during the 2-of-3 election and recovery](docs/raft-lab.png)
 
 ## Representative scenarios
 
@@ -130,17 +156,22 @@ src/tidb/
   The cycle-closing waiter is the deterministic model victim, and the smallest
   `start_ts` is the deterministic wake priority. Both are TiCity model
   policies, not claimed TiDB selection guarantees.
+- In the model-4 Raft Failure Lab, TiKV's configured election window is shown
+  separately from the model's deterministic 13-tick elapsed value and
+  candidate policy. PD is observer/routing-only, and the retry remains inside
+  TiDB as the same logical Region request with no application retry.
 - The initial 36 Regions are representative educational values. Additional
   Regions created by splits appear in the 2D diagnostics, while the 3D City
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
 
-Detailed mechanism-level projections currently apply to the cross-Region
-transaction and Lock Lab scenarios. The former expands transaction 2PC,
-per-Region Raft, and conceptual MVCC; the latter expands leader-memory lock
-contention and deliberately hands off its commit path instead of duplicating
-that pipeline. The other seven scenarios remain compact teaching traces and
-do not yet claim the same mechanism depth.
+Detailed mechanism-level projections currently apply to three scenarios. The
+cross-Region transaction expands transaction 2PC, per-Region Raft, and
+conceptual MVCC. Lock Lab expands leader-memory lock contention and hands off
+its commit path instead of duplicating that pipeline. Raft Failure Lab expands
+one Region's election, current-term leader no-op, PD observation and routing,
+and TiDB-internal request recovery. The other six scenarios remain compact
+teaching traces and do not yet claim the same mechanism depth.
 
 The `window.TICITY` object in the browser console exposes the model, playback,
 scenarios, and latest immutable trace for inspection and control.
