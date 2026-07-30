@@ -5,16 +5,17 @@
 **TiDBの分散SQLアーキテクチャを、歩いて観察できる決定論的な3Dモデル。**
 
 [PGSimCity](https://github.com/NikolayS/PGSimCity)から派生した、
-Apache-2.0ライセンスの独立した教育プロジェクトです。TiCityはTiDB、
-TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主要な処理の境界と
-順序を理解するための縮尺モデルです。既定の説明は日本語で、英語へ切り替えられます。
+Apache-2.0ライセンスの独立した教育プロジェクトです。TiCityはTiDBの
+エミュレータ、TiDB／TiKV／TiFlashの実装そのもの、接続済みクラスタではなく、
+主要な処理の境界と順序を理解するための教育用縮尺モデルです。既定の説明は
+日本語で、英語へ切り替えられます。
 
 公開先: <https://penguin425.github.io/TiCity/>
 
 ![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.4.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.5.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 
@@ -24,10 +25,18 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
   詳細なTransaction Labカットアウェイ
 - Leaderメモリ上の悲観ロック、並列prewrite、Regionごとに独立した2-of-3
   Raft quorum、apply、概念上のMVCC `LOCK`／`DEFAULT`／`WRITE` column family
+- 2つの明示的な悲観トランザクションと2つの不透明なresourceを扱い、lock
+  owner、wait queue、waiterからholderへのedge、2トランザクションcycle、
+  victimの完全rollback、application retryを示す独立したLock Labカットアウェイ
+- TiKV上のクラスタ全体deadlock detector leaderと、そのleaderの場所だけを
+  検索するPD。決定的なvictim／wake規則はTiDBの保証ではなく
+  **TiCity MODEL POLICY**と明示
 - 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
   応答後のsecondary cleanupを持つ因果イベントグラフ
-- 3D City、Machine、Diagnoseへ投影される1つの不変なreceiptと、Machineと
-  Diagnoseの間で選択scenario／eventを共有する安定したURL
+- 3D City、Machine、Diagnoseへ投影される1つの不変なreceipt。Lock Labの
+  意味上のwait-for graphは因果依存graphとは分離され、循環を因果依存として
+  扱いません
+- 3画面の間を移動してもscenarioと選択eventを引き継ぐ安定したlink
 - TiProxy、TiDB Server、PD、TiKV、TiFlashからなる既定トポロジ
 - PDのTSO、Regionの範囲・Leader・3 voter、Raft複製とquorum
 - 悲観／楽観トランザクション、prewriteとcommit、1PC／Async Commit／2PC
@@ -42,23 +51,32 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 
 | URL | 内容 |
 |---|---|
-| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D Cityと詳細なTransaction Lab |
-| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | 選択eventを共有できる因果2Dステートマシン |
-| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | event時点のtransaction、Raft、lock、MVCC診断 |
+| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D Cityとscenarioで選択した詳細Lab |
+| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | 因果event DAGと、Lock Labでは分離された意味上のwait-for graph |
+| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | event時点のtransaction、Raft、MVCC、lock wait、deadlock、retry診断 |
 
 3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
 不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。
+
+[`lock-deadlock` scenario](https://penguin425.github.io/TiCity/?scenario=lock-deadlock)
+からLock Labを直接開けます。この古典的なretry不可deadlockが返すのは
+Error 1213であり、別経路のlock-wait timeoutであるError 1205ではありません。
+失敗したトランザクションを完全にrollbackし、application retryではTiDB内部の
+retryとして見せず、新しいtransaction IDと`start_ts`を作ります。
+
+![2トランザクションのwait-for cycleで停止したTiCity Lock Lab](docs/lock-lab.png)
 
 ## 代表シナリオ
 
 1. Point Readとルーティング
 2. 複数Regionをまたぐ悲観トランザクション
-3. 楽観トランザクションの競合
-4. 1PC／Async Commit／通常2PCの比較
-5. 連番キーhotspotとRegion split
-6. TiKV障害とleader election
-7. 長時間トランザクションとGC safe point
-8. TiFlash catch-upとMPP集約
+3. 悲観lock wait、deadlock、rollback、application retry
+4. 楽観トランザクションの競合
+5. 1PC／Async Commit／通常2PCの比較
+6. 連番キーhotspotとRegion split
+7. TiKV障害とleader election
+8. 長時間トランザクションとGC safe point
+9. TiFlash catch-upとMPP集約
 
 ## ローカル実行
 
@@ -100,13 +118,18 @@ src/tidb/
 - seedと固定stepが同じなら、状態と`TraceReceipt`も同じになります。
 - model-2の詳細トランザクションでは、並列branchは教育用clock上で重なり得ますが、
   因果順序は明示的な依存関係で決まります。
+- model-3 Lock Labのwait-for edgeは、waiterから現在のholderへ向きます。
+  cycleを閉じたwaiterを決定的なmodel victimとし、最小の`start_ts`を決定的な
+  wake優先順位とします。どちらもTiDBの選択保証ではなくTiCityのmodel policyです。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-機構レベルの詳細projectionは、現時点では複数Regionトランザクションの
-scenarioに適用されています。ほかの7 scenarioは簡潔な教育用traceのままで、
-同じRaft／MVCC深度をまだ主張しません。
+機構レベルの詳細projectionは、現時点では複数RegionトランザクションとLock
+Labのscenarioに適用されています。前者はtransaction 2PC、RegionごとのRaft、
+概念上のMVCCを展開します。後者はLeaderメモリ上のlock競合を展開し、同じ処理を
+重複させないようcommit経路を前者のpipelineへ明示的にhandoffします。ほかの
+7 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
 
 ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。

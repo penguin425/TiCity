@@ -60,8 +60,12 @@
 - Deterministic two-transaction deadlock detection and a visibly labeled model victim policy
 - Error 1213, full victim rollback, survivor wake-up, and application-originated retry
 - A fixed-capacity 3D contention cutaway and event-time Machine/Diagnose projections
+- The same immutable event snapshot across City, Machine, and Diagnose, with
+  exact-event URLs and same-receipt looping
 - Explicit separation of non-retryable deadlock, retryable statement deadlock,
   lock-wait timeout, transaction 2PC, and Region Raft
+- Visible TiCity model-policy labels for cycle-closing victim selection and
+  smallest-`start_ts` wake priority
 
 ## Deliberately outside the current offline model
 

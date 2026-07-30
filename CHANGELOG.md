@@ -4,6 +4,46 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.5.0] — 2026-07-31
+
+- Complete the Lock Lab vertical slice across City, Machine, and Diagnose,
+  with every surface reading the same immutable event-time model snapshots.
+- Teach a non-retryable pessimistic deadlock without conflating it with
+  lock-wait timeout Error 1205, retryable single-statement deadlocks,
+  transaction 2PC, or Region Raft.
+- Keep exact-event URLs, same-receipt looping, bilingual accessibility,
+  reduced-motion behavior, privacy boundaries, and fixed-capacity rendering
+  under deterministic unit, browser, and production-build gates.
+- Document the TiKV detector-leader and PD lookup boundary and label the
+  deterministic cycle-closing victim and smallest-`start_ts` wake rules as
+  TiCity model policies rather than TiDB guarantees.
+
+## [0.5.0-beta.1] — 2026-07-31
+
+- Extend Machine with the Lock Lab event-time state and a cyclic semantic
+  waiter-to-holder graph kept separate from its acyclic causal event DAG.
+- Extend Diagnose with separate active lock-wait, retained deadlock-history,
+  and application-retry projections, including detector scope, Error 1213,
+  whole-transaction rollback, and the new retry transaction.
+- Preserve the selected `scenario` and exact `event` when navigating among
+  City, Machine, and Diagnose, including parallel causal siblings.
+- Add responsive, accessibility, privacy, event-cursor, and immutable-loop
+  regression coverage for the new vertical slice.
+
+## [0.5.0-alpha.2] — 2026-07-31
+
+- Add a fixed-capacity 3D Lock Lab cutaway with three transaction slots for
+  the two original transactions and the retry, two opaque resources,
+  lock-owner and wait-queue state, directed wait edges, detector state,
+  deadlock history, rollback, survivor wake-up, and retry.
+- Project each immutable Lock Lab snapshot into an accessible bilingual DOM
+  inspector synchronized with the City Trace Dock and exact selected event.
+- Keep Transaction Lab and Lock Lab mutually exclusive while sharing the same
+  authored cutaway location, Inspect focus, theme, reduced-motion, replay,
+  looping, and disposal lifecycle.
+- Show resource identity without keys or values and visibly distinguish
+  TiCity victim/wake model policies from TiDB behavior guarantees.
+
 ## [0.5.0-alpha.1] — 2026-07-31
 
 - Introduce the model-3 `lock-deadlock` scenario with two explicit

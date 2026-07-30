@@ -5,18 +5,18 @@ English | [日本語](README.ja.md)
 **A deterministic 3D model of TiDB's distributed SQL architecture that you can walk through and inspect.**
 
 TiCity is an independent Apache-2.0 educational project derived from
-[PGSimCity](https://github.com/NikolayS/PGSimCity). It is neither an
-implementation of TiDB, TiKV, or TiFlash nor a client connected to a live
-cluster. It is a scale model for understanding the main processing boundaries
-and execution order. The interface defaults to Japanese and can be switched to
-English.
+[PGSimCity](https://github.com/NikolayS/PGSimCity). It is an educational
+scale model, not a TiDB emulator, an implementation of TiDB, TiKV, or TiFlash,
+or a client connected to a live cluster. It is designed for understanding the
+main processing boundaries and execution order. The interface defaults to
+Japanese and can be switched to English.
 
 Live site: <https://penguin425.github.io/TiCity/>
 
 ![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.4.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
+> TiCity v0.5.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
 > execute SQL or return real data or invented result rows. A single SQL
 > statement entered by the user is classified entirely in the browser, and
 > only a modeled route and explanation are generated.
@@ -28,12 +28,20 @@ Live site: <https://penguin425.github.io/TiCity/>
 - Leader-memory pessimistic locks, parallel prewrite branches, independent
   2-of-3 Raft quorums, apply, and conceptual MVCC `LOCK`, `DEFAULT`, and
   `WRITE` column-family state
+- A separate Lock Lab cutaway for two explicit pessimistic transactions and
+  two opaque resources, with lock owners, wait queues, waiter-to-holder edges,
+  a two-transaction cycle, full victim rollback, and application retry
+- A cluster-wide deadlock detector leader on TiKV, with PD used only to locate
+  that leader; deterministic victim and wake rules are visibly labeled
+  **TiCity MODEL POLICY**, not TiDB guarantees
 - A causal event graph with immutable post-event snapshots, explicit
   fork/join dependencies, a client-response boundary, and background
   secondary cleanup
-- One immutable receipt projected across the 3D City, Machine, and Diagnose,
-  with Machine and Diagnose sharing a selected scenario and event through
-  stable URLs
+- One immutable receipt projected across the 3D City, Machine, and Diagnose;
+  the Lock Lab adds a separate semantic wait-for graph without turning its
+  cycle into a causal dependency cycle
+- Stable cross-view links that carry the scenario and selected event among all
+  three views
 - A default topology containing TiProxy, TiDB Server, PD, TiKV, and TiFlash
 - PD TSO, Region ranges and Leaders, three voters, Raft replication, and quorum
 - Pessimistic and optimistic transactions, prewrite and commit, 1PC, Async Commit, and 2PC
@@ -48,24 +56,34 @@ The application has three views:
 
 | URL | Purpose |
 |---|---|
-| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D City and the detailed Transaction Lab |
-| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | A causal 2D state machine with a shareable selected-event URL |
-| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | Event-time transaction, Raft, lock, and MVCC diagnostics |
+| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D City and the scenario-selected detailed Lab |
+| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | Causal event DAG and, for Lock Lab, the separate semantic wait-for graph |
+| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | Event-time transaction, Raft, MVCC, lock-wait, deadlock, and retry diagnostics |
 
 Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
 through the same immutable receipt; looping reuses that receipt and never
 re-executes a transaction.
 
+Open the Lock Lab directly with the
+[`lock-deadlock` scenario](https://penguin425.github.io/TiCity/?scenario=lock-deadlock).
+Its classic non-retryable deadlock returns Error 1213, not the separate
+lock-wait timeout Error 1205. The failed transaction is rolled back in full;
+the application retry creates a new transaction ID and `start_ts` instead of
+being presented as an internal TiDB retry.
+
+![TiCity Lock Lab stopped at a two-transaction wait-for cycle](docs/lock-lab.png)
+
 ## Representative scenarios
 
 1. Point reads and routing
 2. A pessimistic transaction spanning multiple Regions
-3. An optimistic transaction conflict
-4. A comparison of 1PC, Async Commit, and regular 2PC
-5. A sequential-key hotspot and Region split
-6. A TiKV failure and leader election
-7. A long-running transaction and the GC safe point
-8. TiFlash catch-up and MPP aggregation
+3. Pessimistic lock wait, deadlock, rollback, and application retry
+4. An optimistic transaction conflict
+5. A comparison of 1PC, Async Commit, and regular 2PC
+6. A sequential-key hotspot and Region split
+7. A TiKV failure and leader election
+8. A long-running transaction and the GC safe point
+9. TiFlash catch-up and MPP aggregation
 
 ## Local development
 
@@ -108,14 +126,21 @@ src/tidb/
 - Given the same seed and fixed step, the state and `TraceReceipt` are identical.
 - In the model-2 detailed transaction, parallel branches may overlap on the
   teaching clock, while explicit dependencies determine their causal order.
+- In the model-3 Lock Lab, wait-for edges run from waiter to current holder.
+  The cycle-closing waiter is the deterministic model victim, and the smallest
+  `start_ts` is the deterministic wake priority. Both are TiCity model
+  policies, not claimed TiDB selection guarantees.
 - The initial 36 Regions are representative educational values. Additional
   Regions created by splits appear in the 2D diagnostics, while the 3D City
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
 
-The detailed mechanism-level projection currently applies to the
-cross-Region transaction scenario. The other seven scenarios remain compact
-teaching traces and do not yet claim the same Raft/MVCC depth.
+Detailed mechanism-level projections currently apply to the cross-Region
+transaction and Lock Lab scenarios. The former expands transaction 2PC,
+per-Region Raft, and conceptual MVCC; the latter expands leader-memory lock
+contention and deliberately hands off its commit path instead of duplicating
+that pipeline. The other seven scenarios remain compact teaching traces and
+do not yet claim the same mechanism depth.
 
 The `window.TICITY` object in the browser console exposes the model, playback,
 scenarios, and latest immutable trace for inspection and control.
