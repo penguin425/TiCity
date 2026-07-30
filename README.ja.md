@@ -14,7 +14,7 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 ![TiCityの3D都市でTransaction 2PCの現在経路を示すTrace Dock](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.3.3はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
+> TiCity v0.3.4はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
 > SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
 > ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
 

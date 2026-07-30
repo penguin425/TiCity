@@ -38,6 +38,12 @@
 - Hold-to-move Fly and Walk controls across touch layouts
 - Non-overlapping 44 px camera controls on short mobile viewports
 
+## v0.3.4
+
+- English-first repository documentation with a complete Japanese mirror
+- Reciprocal language navigation and bilingual GitHub Release archives
+- Documentation-only release with no simulation or runtime behavior changes
+
 ## Deliberately outside v0.3.x
 
 - Connecting to or changing a live TiDB cluster
