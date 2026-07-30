@@ -94,6 +94,7 @@ export type {
 export {
   COMPONENT_ANCHORS,
   DISTRICT_BOUNDS,
+  GC_STORAGE_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
   TICITY_LAYOUT,
@@ -136,6 +137,15 @@ export type {
   ProtocolLabProjection,
   ProtocolLabRegionProjection,
 } from './protocol-lab'
+export {
+  createGcStorageLab,
+  EMPTY_GC_STORAGE_LAB_PROJECTION,
+} from './gc-storage-lab'
+export { projectGcStorageLab } from './gc-storage-lab-projection'
+export type {
+  GcStorageLab,
+  GcStorageLabProjection,
+} from './gc-storage-lab'
 export { projectRaftLab } from './raft-lab-projection'
 export type {
   RaftLab,

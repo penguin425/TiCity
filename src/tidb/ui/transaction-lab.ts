@@ -198,7 +198,8 @@ export function createTransactionLabPanel(
     const snapshot =
       eventSnapshot?.lockLab === undefined &&
       eventSnapshot?.raftLab === undefined &&
-      eventSnapshot?.protocolLab === undefined
+      eventSnapshot?.protocolLab === undefined &&
+      eventSnapshot?.gcLab === undefined
       ? eventSnapshot
       : undefined
     const nextKey = snapshotKey(currentEvent, currentActive, locale)

@@ -9,6 +9,7 @@ import { createCollisionMap } from '../engine/collision'
 import { createTiDBSimulation } from '../model'
 import {
   COMPONENT_ANCHORS,
+  GC_STORAGE_LAB_ORIGIN,
   LOCK_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
@@ -92,6 +93,23 @@ describe('TiCity scene graph', () => {
     city.setTheme('day')
     city.dispose()
     expect(city.protocolLab.debug.disposed).toBe(true)
+  })
+
+  it('mounts the fixed GC/Storage Lab on the shared focus stage and owns its lifecycle', () => {
+    const city = createTiDBSceneGraph()
+    const focus = new THREE.Vector3()
+
+    expect(city.gcStorageLab.object.parent).toBe(city.root)
+    expect(city.gcStorageLab.object.visible).toBe(false)
+    expect(city.getAnchor('gc.lab', focus)).toBe(true)
+    expect(focus.toArray()).toEqual([...GC_STORAGE_LAB_ORIGIN])
+    expect(city.gcStorageLab.object.userData.boundary).toContain(
+      'physical compaction are distinct',
+    )
+
+    city.setTheme('day')
+    city.dispose()
+    expect(city.gcStorageLab.debug.disposed).toBe(true)
   })
 
   it('keeps PD out of every data-network segment', () => {
@@ -213,11 +231,10 @@ describe('TiCity scene graph', () => {
     // evolve, while an accidental mesh-per-window or shadow-per-detail change
     // still fails clearly.
     /*
-     * v0.6 adds one bounded, mutually exclusive Raft cutaway. Its detailed
-     * role/log/quorum geometry raises the authored ceiling without creating
-     * any mesh per Region, log event, or animation frame.
+     * Detailed labs share one mutually exclusive cutaway stage and use fixed
+     * capacity meshes rather than allocating per Region, event, or frame.
      */
-    expect(drawables).toBeLessThanOrEqual(250)
+    expect(drawables).toBeLessThanOrEqual(260)
     expect(geometries.size).toBeLessThanOrEqual(225)
     expect(materials.size).toBeLessThanOrEqual(64)
     expect(shadowCasters).toBeLessThanOrEqual(55)

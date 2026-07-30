@@ -77,6 +77,13 @@ export const RAFT_LAB_ORIGIN: Point3 = [0, 48, 18]
  */
 export const PROTOCOL_LAB_ORIGIN: Point3 = [0, 48, 18]
 
+/**
+ * GC/Storage Lab shares the authored cutaway stage. Its model-6 discriminator
+ * keeps it mutually exclusive with the transaction, lock, Raft, and protocol
+ * projections.
+ */
+export const GC_STORAGE_LAB_ORIGIN: Point3 = [0, 48, 18]
+
 export const COMPONENT_ANCHORS = {
   'client.terminal': [0, 3, -288],
   'tiproxy.0': [-34, 7, -220],
@@ -108,6 +115,7 @@ export const FOCUS_ANCHORS = {
   'lock.lab': LOCK_LAB_ORIGIN,
   'raft.lab': RAFT_LAB_ORIGIN,
   'protocol.lab': PROTOCOL_LAB_ORIGIN,
+  'gc.lab': GC_STORAGE_LAB_ORIGIN,
   'tikv.raft': COMPONENT_ANCHORS['tikv.1'],
   'pd.scheduler': COMPONENT_ANCHORS['pd.control'],
   'gc.yard': COMPONENT_ANCHORS['gc.yard'],
