@@ -263,7 +263,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-2')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-3')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))
@@ -464,12 +464,365 @@ describe('model-2 detailed cross-Region transaction', () => {
   })
 })
 
+describe('model-3 Lock Lab deadlock and application retry', () => {
+  function runLockLab(seed = 2026) {
+    const simulation = createTiDBSimulation({ seed })
+    return {
+      simulation,
+      receipt: simulation.runScenario('lock-deadlock'),
+    }
+  }
+
+  function lockEvent(
+    events: readonly TraceEvent[],
+    kind: string,
+    predicate: (candidate: TraceEvent) => boolean = () => true,
+  ): TraceEvent {
+    const found = events.find((candidate) =>
+      candidate.kind === kind && predicate(candidate))
+    if (!found) throw new Error(`Expected Lock Lab event ${kind}`)
+    return found
+  }
+
+  it('publishes a deterministic acyclic DAG with parallel initial lock acquisition', () => {
+    const first = runLockLab()
+    const second = runLockLab()
+
+    expect(first.receipt).toEqual(second.receipt)
+    expect(first.simulation.state).toEqual(second.simulation.state)
+
+    const byId = new Map(first.receipt.events.map((candidate) => [
+      candidate.id,
+      candidate,
+    ]))
+    const visiting = new Set<string>()
+    const visited = new Set<string>()
+    const visit = (candidate: TraceEvent): void => {
+      expect(visiting.has(candidate.id), `cycle at ${candidate.id}`).toBe(false)
+      if (visited.has(candidate.id)) return
+      visiting.add(candidate.id)
+      for (const dependencyId of candidate.dependsOn ?? []) {
+        const dependency = byId.get(dependencyId)
+        expect(dependency, `${candidate.id} -> ${dependencyId}`).toBeDefined()
+        if (!dependency) continue
+        expect(dependency.atMs + dependency.durationMs)
+          .toBeLessThanOrEqual(candidate.atMs)
+        visit(dependency)
+      }
+      visiting.delete(candidate.id)
+      visited.add(candidate.id)
+    }
+    for (const candidate of first.receipt.events) visit(candidate)
+    expect(visited.size).toBe(first.receipt.events.length)
+
+    const initialLocks = first.receipt.events.filter((candidate) =>
+      candidate.kind === 'lock_acquired')
+    expect(initialLocks).toHaveLength(2)
+    expect(new Set(initialLocks.map((candidate) => candidate.atMs)).size).toBe(1)
+    expect(initialLocks[0].dependsOn).toEqual(initialLocks[1].dependsOn)
+    expect(new Set(initialLocks.map((candidate) =>
+      candidate.metadata.resourceId))).toEqual(
+      new Set(['resource-a', 'resource-b']),
+    )
+
+    const firstWait = first.receipt.events.find((candidate) =>
+      candidate.kind === 'lock_wait_enqueued')
+    expect(new Set(firstWait?.dependsOn)).toEqual(
+      new Set(initialLocks.map((candidate) => candidate.id)),
+    )
+    for (const candidate of first.receipt.events) {
+      expect(candidate.snapshot, candidate.kind).toBeDefined()
+      expect(candidate.deltas, candidate.kind).toBeDefined()
+      expect(candidate.path).toBe('critical')
+    }
+  })
+
+  it('models waiter-to-holder edges, cycle detection, and explicitly labelled MODEL POLICY choices', () => {
+    const { receipt } = runLockLab()
+    const waits = receipt.events.filter((candidate) =>
+      candidate.kind === 'lock_wait_enqueued')
+    expect(waits).toHaveLength(2)
+    const [waitA, waitB] = waits
+    const transactionAId = String(waitA.metadata.waiterTransactionId)
+    const transactionBId = String(waitB.metadata.waiterTransactionId)
+
+    expect(waitA.snapshot?.lockLab?.waitForEdges).toEqual([
+      expect.objectContaining({
+        waiterTransactionId: transactionAId,
+        holderTransactionId: transactionBId,
+      }),
+    ])
+    expect(waitA.snapshot?.lockLab?.deadlock).toBeNull()
+    expect(waitB.snapshot?.lockLab?.waitForEdges).toEqual([
+      expect.objectContaining({
+        waiterTransactionId: transactionAId,
+        holderTransactionId: transactionBId,
+      }),
+      expect.objectContaining({
+        waiterTransactionId: transactionBId,
+        holderTransactionId: transactionAId,
+      }),
+    ])
+    expect(waitB.snapshot?.lockLab?.deadlock).toBeNull()
+
+    const lookup = lockEvent(receipt.events, 'deadlock_detector_lookup')
+    expect(lookup.metadata).toMatchObject({
+      detectorScope: 'cluster_wide',
+      detectorLeaderStoreId: 'tikv-3',
+      pdRole: 'leader_lookup_only',
+      rowData: false,
+    })
+    const detected = lockEvent(receipt.events, 'deadlock_detected')
+    expect(detected.snapshot?.lockLab?.deadlock).toMatchObject({
+      cycleTransactionIds: [transactionBId, transactionAId, transactionBId],
+      victimTransactionId: null,
+      retryable: false,
+      resolution: 'detected',
+    })
+    const victim = lockEvent(receipt.events, 'deadlock_victim_selected')
+    expect(victim.transactionId).toBe(transactionBId)
+    expect(victim.metadata.selectionPolicy)
+      .toBe('MODEL POLICY: cycle-closing waiter')
+    expect(victim.snapshot?.lockLab?.deadlock).toMatchObject({
+      victimTransactionId: transactionBId,
+      selectionPolicy: 'cycle_closing_waiter_model_policy',
+      retryable: false,
+      resolution: 'rolling_back',
+    })
+
+    const rollback = lockEvent(receipt.events, 'deadlock_victim_rollback')
+    const rolledBack = rollback.snapshot?.lockLab?.transactions.find(
+      (transaction) => transaction.transactionId === transactionBId,
+    )
+    expect(rolledBack).toMatchObject({
+      status: 'rolled_back',
+      heldResourceIds: [],
+      waitingForResourceId: null,
+    })
+    expect(rollback.snapshot?.lockLab?.resources.find((resource) =>
+      resource.id === 'resource-a')?.waiterTransactionIds).not.toContain(
+      transactionBId,
+    )
+    expect(rollback.snapshot?.lockLab?.waitForEdges.some((edge) =>
+      edge.waiterTransactionId === transactionBId ||
+      edge.holderTransactionId === transactionBId,
+    )).toBe(false)
+    expect(rollback.snapshot?.lockLab?.waitForEdges).toEqual([])
+    expect(rollback.snapshot?.lockLab?.resources.find((resource) =>
+      resource.id === 'resource-b')?.holderTransactionId).toBe(transactionAId)
+
+    const wake = lockEvent(receipt.events, 'lock_waiter_woken')
+    expect(wake.metadata.wakePolicy).toBe('smallest_start_ts_model_policy')
+    expect(wake.transactionId).toBe(transactionAId)
+    expect(wake.snapshot?.lockLab?.waitForEdges).toEqual([])
+    expect(wake.snapshot?.lockLab?.resources.find((resource) =>
+      resource.id === 'resource-b')?.holderTransactionId).toBe(transactionAId)
+  })
+
+  it('keeps Error 1213 separate from a joined whole-transaction application retry', () => {
+    const { receipt } = runLockLab()
+    const error = lockEvent(receipt.events, 'deadlock_error_1213')
+    const backoff = lockEvent(receipt.events, 'application_retry_backoff')
+    const releaseA = lockEvent(
+      receipt.events,
+      'lock_release_after_commit',
+      (candidate) => candidate.branchId === 'client-a',
+    )
+    const retryBegin = lockEvent(receipt.events, 'application_retry_begin')
+    const rollback = lockEvent(receipt.events, 'deadlock_victim_rollback')
+
+    expect(error.dependsOn).toEqual([rollback.id])
+    expect(error.metadata).toMatchObject({
+      errorCode: 1213,
+      retryable: false,
+      transactionRolledBack: true,
+      retryBoundary: 'application',
+    })
+    expect(backoff.dependsOn).toEqual([error.id])
+    expect(backoff.durationMs).toBe(120)
+    expect(backoff.snapshot?.lockLab?.applicationRetry).toMatchObject({
+      source: 'application',
+      status: 'backoff',
+      fixedBackoffMs: 120,
+    })
+    expect(new Set(retryBegin.dependsOn)).toEqual(
+      new Set([backoff.id, releaseA.id]),
+    )
+    expect(retryBegin.atMs).toBeGreaterThanOrEqual(
+      backoff.atMs + backoff.durationMs,
+    )
+    expect(retryBegin.atMs).toBeGreaterThanOrEqual(
+      releaseA.atMs + releaseA.durationMs,
+    )
+
+    const originalTransactionId = String(error.transactionId)
+    const retryTransactionId = String(retryBegin.transactionId)
+    expect(retryTransactionId).not.toBe(originalTransactionId)
+    const original = retryBegin.snapshot?.lockLab?.transactions.find(
+      (transaction) => transaction.transactionId === originalTransactionId,
+    )
+    const retry = retryBegin.snapshot?.lockLab?.transactions.find(
+      (transaction) => transaction.transactionId === retryTransactionId,
+    )
+    expect(original?.status).toBe('rolled_back')
+    expect(retry).toMatchObject({
+      clientId: 'client-b',
+      attempt: 2,
+      retryOfTransactionId: originalTransactionId,
+      status: 'active',
+    })
+    expect(retry?.startTs).toBeGreaterThan(original?.startTs ?? Number.MAX_SAFE_INTEGER)
+    expect(retryBegin.snapshot?.lockLab?.applicationRetry).toMatchObject({
+      source: 'application',
+      status: 'started',
+      newTransactionId: retryTransactionId,
+    })
+
+    const retryLocks = receipt.events.filter((candidate) =>
+      candidate.kind === 'retry_lock_acquired')
+    expect(retryLocks.map((candidate) => candidate.metadata.resourceId))
+      .toEqual(['resource-a', 'resource-b'])
+    expect(retryLocks.map((candidate) => candidate.metadata.acquisitionOrder))
+      .toEqual([1, 2])
+    expect(retryLocks.every((candidate) =>
+      candidate.snapshot?.lockLab?.waitForEdges.length === 0,
+    )).toBe(true)
+  })
+
+  it('uses commit handoff summaries, releases locks afterwards, and ends cleanly', () => {
+    const { simulation, receipt } = runLockLab()
+    const handoffs = receipt.events.filter((candidate) =>
+      candidate.kind === 'commit_handoff')
+    const summaries = receipt.events.filter((candidate) =>
+      candidate.kind === 'commit_summary')
+    const releases = receipt.events.filter((candidate) =>
+      candidate.kind === 'lock_release_after_commit')
+
+    expect(handoffs).toHaveLength(2)
+    expect(summaries).toHaveLength(2)
+    expect(releases).toHaveLength(2)
+    for (const summary of summaries) {
+      const release = releases.find((candidate) =>
+        candidate.transactionId === summary.transactionId)
+      expect(summary.metadata.commitMechanism).toBe('summary_boundary')
+      expect(release?.atMs).toBeGreaterThanOrEqual(
+        summary.atMs + summary.durationMs,
+      )
+    }
+    expect(receipt.events.some((candidate) => candidate.domain === 'raft')).toBe(false)
+    expect(receipt.events.flatMap((candidate) => candidate.deltas ?? [])
+      .some((delta) => delta.kind.startsWith('raft_'))).toBe(false)
+
+    const final = receipt.events.at(-1)?.snapshot?.lockLab
+    expect(final?.resources.every((resource) =>
+      resource.holderTransactionId === null &&
+      resource.waiterTransactionIds.length === 0,
+    )).toBe(true)
+    expect(final?.waitForEdges).toEqual([])
+    expect(final?.deadlock).toMatchObject({
+      retryable: false,
+      resolution: 'resolved',
+    })
+    expect(final?.applicationRetry).toMatchObject({
+      source: 'application',
+      status: 'completed',
+    })
+    expect(final?.transactions.map((transaction) => transaction.status))
+      .toEqual(['completed', 'rolled_back', 'completed'])
+    expect(simulation.state.transactions.map((transaction) => transaction.phase))
+      .toEqual(['committed', 'rolled_back', 'committed'])
+    expect(simulation.state.metrics).toMatchObject({
+      statements: 3,
+      writes: 3,
+      commits: 2,
+      rollbacks: 1,
+      conflicts: 1,
+      raftEntries: 0,
+      lockWaits: 2,
+      deadlocks: 1,
+      retries: 1,
+    })
+  })
+
+  it('never advances Raft indexes or exposes SQL literals and deeply freezes projections', () => {
+    const { receipt } = runLockLab()
+    const initialRegions = receipt.events[0].snapshot?.regions ?? []
+
+    for (const candidate of receipt.events) {
+      expect(candidate.snapshot?.regions.map((region) => ({
+        regionId: region.regionId,
+        commitIndex: region.commitIndex,
+        appliedIndex: region.appliedIndex,
+      }))).toEqual(initialRegions.map((region) => ({
+        regionId: region.regionId,
+        commitIndex: region.commitIndex,
+        appliedIndex: region.appliedIndex,
+      })))
+      for (const region of candidate.snapshot?.regions ?? []) {
+        expect(region.appliedIndex).toBeLessThanOrEqual(region.commitIndex)
+      }
+    }
+
+    expect(receipt).toMatchObject({
+      scenarioId: 'lock-deadlock',
+      startTs: null,
+      commitTs: null,
+      succeeded: true,
+      committed: false,
+      outcome: 'succeeded',
+      protocol: null,
+    })
+    expect(JSON.stringify(receipt)).not.toMatch(/LOCK-LAB-425|stock\s*=\s*stock|WHERE/i)
+    const final = receipt.events.at(-1)
+    expect(Object.isFrozen(receipt)).toBe(true)
+    expect(Object.isFrozen(final?.snapshot)).toBe(true)
+    expect(Object.isFrozen(final?.snapshot?.lockLab)).toBe(true)
+    expect(Object.isFrozen(final?.snapshot?.lockLab?.transactions)).toBe(true)
+    expect(Object.isFrozen(
+      final?.snapshot?.lockLab?.transactions[0]?.heldResourceIds,
+    )).toBe(true)
+    expect(Object.isFrozen(final?.snapshot?.lockLab?.resources)).toBe(true)
+    expect(Object.isFrozen(
+      final?.snapshot?.lockLab?.resources[0]?.waiterTransactionIds,
+    )).toBe(true)
+    expect(Object.isFrozen(
+      final?.snapshot?.lockLab?.deadlock?.cycleTransactionIds,
+    )).toBe(true)
+  })
+
+  it('keeps the existing optimistic prewrite conflict separate from Lock Lab', () => {
+    const simulation = createTiDBSimulation({ seed: 2026 })
+    const receipt = simulation.runScenario('optimistic-conflict')
+
+    expect(receipt.outcome).toBe('rolled_back')
+    expect(simulation.state.transactions).toHaveLength(1)
+    expect(simulation.state.transactions[0]).toMatchObject({
+      mode: 'optimistic',
+      phase: 'rolled_back',
+      conflict: true,
+    })
+    expect(receipt.events.some((candidate) =>
+      candidate.kind === 'write_conflict')).toBe(true)
+    expect(receipt.events.some((candidate) =>
+      candidate.kind === 'lock_wait_enqueued' ||
+      candidate.kind === 'deadlock_detected' ||
+      candidate.snapshot?.lockLab !== undefined,
+    )).toBe(false)
+    expect(simulation.state.metrics).toMatchObject({
+      lockWaits: 0,
+      deadlocks: 0,
+      retries: 0,
+    })
+  })
+})
+
 describe('guided scenarios', () => {
-  it('ships all eight decision-complete scenario receipts', () => {
+  it('ships all nine decision-complete scenario receipts', () => {
     const expected: ScenarioId[] = [
       'point-read',
       'cross-region-transaction',
       'optimistic-conflict',
+      'lock-deadlock',
       'commit-protocols',
       'hotspot-split',
       'tikv-failover',

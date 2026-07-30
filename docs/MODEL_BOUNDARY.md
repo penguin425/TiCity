@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity model-2 targets **TiDB v8.5 LTS**. This document records which visible
+TiCity model-3 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
 which capabilities are not implemented.
 
@@ -13,6 +13,9 @@ which capabilities are not implemented.
 | A Region covers a left-closed, right-open key range and normally has three replicas | Region ranges are contiguous; every Region has exactly three voter peers | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture) |
 | TiDB supports pessimistic and optimistic distributed transactions | Both modes have separate scenario paths and conflict behavior | [Transactions](https://docs.pingcap.com/tidb/v8.5/transaction-overview) |
 | In-memory pessimistic locks normally remain on the Region leader instead of being persisted or replicated through Raft | The detailed cross-Region scenario records leader-memory lock ownership and proves that acquisition does not advance any Raft index; prewrite later replaces it with a durable lock-CF entry | [Pessimistic transactions](https://docs.pingcap.com/tidb/v8.5/pessimistic-transaction) |
+| Lock View represents a blocked pessimistic transaction and its current lock holder | Lock Lab edges point from waiter to holder and use only opaque synthetic resource IDs | [DATA_LOCK_WAITS](https://docs.pingcap.com/tidb/v8.5/information-schema-data-lock-waits) |
+| A pessimistic deadlock is a cycle of transactions waiting for one another; a non-retryable deadlock terminates one transaction and returns Error 1213 | Lock Lab detects a two-edge cycle, rolls back its visibly labeled deterministic model victim, removes that victim's locks and edges, and wakes the survivor | [Pessimistic transactions](https://docs.pingcap.com/tidb/v8.5/pessimistic-transaction), [deadlock troubleshooting](https://docs.pingcap.com/tidb/v8.5/troubleshoot-lock-conflicts) |
+| TiKV uses a cluster-wide deadlock-detector leader and consults PD to locate it | The detector is shown on the TiKV side; PD participates only in detector-leader lookup and never becomes the detector | [TiKV v8.5 detector implementation](https://github.com/tikv/tikv/blob/v8.5.0/src/server/lock_manager/deadlock.rs#L611-L723) |
 | Optimistic distributed transactions use 2PC | Prewrite precedes commit; a modeled conflict moves the transaction to `rolled_back` without claiming a per-key lock inventory | [Optimistic transaction model](https://docs.pingcap.com/tidb/v8.5/optimistic-transaction) |
 | 1PC and Async Commit are transaction optimizations | They alter transaction events but never change Region Raft quorum. Async Commit returns after successful prewrite and shows commit-record resolution as background work; it has no normal Get-commit-ts/Commit phase on the client path | [Latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
 | Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
@@ -44,7 +47,7 @@ small enough for Async Commit when that mode is enabled. Real eligibility also
 depends on feature settings, mutation/key size limits, timestamp bounds, and
 other runtime conditions—not simply on the number of Regions.
 
-## Detailed transaction trace
+## Detailed mechanism traces
 
 The model-2 `cross-region-transaction` scenario is the first mechanism-level
 vertical slice. It uses two representative Regions with different leaders and
@@ -61,9 +64,34 @@ conceptual `default`, `lock`, and `write` column-family state. These projections
 are presentation contracts, not byte-accurate RocksDB snapshots. They contain no
 SQL text, literals, keys, values, result rows, or live-cluster observations.
 
-Other scenarios retain their compact teaching traces in this model revision.
-They use the same causal dependency field but do not yet claim the detailed
-Raft/MVCC projection depth of the cross-Region transaction.
+The model-3 `lock-deadlock` scenario is a separate concurrency-control vertical
+slice. Two explicit pessimistic transactions acquire two opaque resources in
+opposite order. Each wait adds a waiter-to-holder edge; the second edge closes
+the modeled cycle. The cycle-closing waiter is selected as the victim by a
+deterministic **TiCity model policy**, not by a claimed TiDB victim-selection
+guarantee. The non-retryable victim receives Error 1213 and is fully rolled
+back. Only after its leader-memory locks and wait edges are removed can the
+survivor wake and continue.
+
+The retry branch begins at an explicit application boundary after Error 1213.
+It creates a new transaction ID and `start_ts`; it is not presented as TiDB
+automatically retrying the failed transaction. TiDB's retryable
+single-statement deadlock path, which rolls back statement changes and can
+retry internally, is deliberately not combined with this scenario. Lock-wait
+timeout (Error 1205) is also a different path and is not simulated here.
+[DEADLOCKS](https://docs.pingcap.com/tidb/v8.5/information-schema-deadlocks)
+records that distinction.
+
+Lock Lab's commit handoff intentionally collapses the transaction 2PC/Raft/MVCC
+sequence already expanded by `cross-region-transaction`. Lock ownership, queue,
+deadlock, rollback, and application-retry events never advance Region Raft
+indexes. Their event-time projections contain no SQL text, literal, real key,
+value, result row, digest, or live-cluster observation.
+
+The other seven scenarios retain compact teaching traces in this model
+revision. They use the same causal dependency field but do not yet claim the
+detailed concurrency-control or Raft/MVCC projection depth of these two
+vertical slices.
 
 ## SQL boundary
 
@@ -79,4 +107,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.4.x.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.5.x.

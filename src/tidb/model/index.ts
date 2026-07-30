@@ -6,6 +6,18 @@ export { TIDB_SCENARIOS, getScenario } from './scenarios'
 export type { TiDBScenarioDefinition } from './scenarios'
 export { analyzeSql, MAX_SQL_BYTES } from './sql'
 export {
+  createLockLabState,
+  detectWaitForCycle,
+  freezeLockLabSnapshot,
+  isLockLabDelta,
+  reduceLockLabState,
+  selectWaiterByStartTs,
+} from './lock-lab'
+export type {
+  LockLabDelta,
+  LockLabResourceDefinition,
+} from './lock-lab'
+export {
   createTiDBSimulation,
   DEFAULT_TIDB_CONTROLS,
 } from './simulation'
@@ -47,6 +59,12 @@ export type {
   TraceDomain,
   TraceEvent,
   TraceEventStatus,
+  TraceApplicationRetrySnapshot,
+  TraceDeadlockSnapshot,
+  TraceLockLabSnapshot,
+  TraceLockResourceSnapshot,
+  TraceLockTransactionSnapshot,
+  TraceLockTransactionStatus,
   TraceMetadataValue,
   TraceOutcome,
   TracePath,
@@ -60,6 +78,7 @@ export type {
   TraceStateSnapshot,
   TraceTransactionSnapshot,
   TraceTransactionStage,
+  TraceWaitForEdgeSnapshot,
   TransactionMode,
   TransactionPhase,
   TransactionState,
