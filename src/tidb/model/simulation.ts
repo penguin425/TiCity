@@ -17,6 +17,12 @@ import {
   selectWaiterByStartTs,
 } from './lock-lab'
 import {
+  createRaftLabState,
+  freezeRaftLabSnapshot,
+  isRaftLabDelta,
+  reduceRaftLabState,
+} from './raft-lab'
+import {
   clonePeers,
   createRegions,
   createTopology,
@@ -48,6 +54,7 @@ import type {
   TraceMetadataValue,
   TraceOutcome,
   TracePath,
+  TraceRaftLabSnapshot,
   TraceRegionSnapshot,
   TraceReceipt,
   TraceRequest,
@@ -135,10 +142,18 @@ function freezeAnalysis(analysis: SqlAnalysis): SqlAnalysis {
 }
 
 function freezeTraceDelta(delta: TraceStateDelta): TraceStateDelta {
-  if (delta.kind === 'raft_persist') {
+  if (delta.kind === 'raft_persist' || delta.kind === 'raft_apply') {
     return Object.freeze({
       ...delta,
-      storeIds: Object.freeze([...delta.storeIds]),
+      ...(delta.storeIds
+        ? { storeIds: Object.freeze([...delta.storeIds]) }
+        : {}),
+    })
+  }
+  if (delta.kind === 'raft_leader_elected') {
+    return Object.freeze({
+      ...delta,
+      votesGranted: Object.freeze([...delta.votesGranted]),
     })
   }
   if (delta.kind === 'deadlock_state') {
@@ -170,6 +185,9 @@ function freezeTraceSnapshot(snapshot: TraceStateSnapshot): TraceStateSnapshot {
     }))),
     ...(snapshot.lockLab
       ? { lockLab: freezeLockLabSnapshot(snapshot.lockLab) }
+      : {}),
+    ...(snapshot.raftLab
+      ? { raftLab: freezeRaftLabSnapshot(snapshot.raftLab) }
       : {}),
   })
 }
@@ -1044,6 +1062,863 @@ export function createTiDBSimulation(
       startTs,
       null,
       warnings.length === 0 ? 'succeeded' : 'failed',
+      null,
+      builder,
+      warnings,
+    )
+  }
+
+  /**
+   * A model-4 vertical slice for one representative Region. The failed TiKV
+   * process affects every modeled peer on that store, while this receipt
+   * expands only Region 0's Raft election and the same logical Region request.
+   * The read itself creates no user-data Raft entry; the only entry below is
+   * the empty current-term entry appended by the newly elected leader.
+   */
+  function traceRaftFailoverScenario(
+    id: string,
+    analysis: SqlAnalysis,
+    region: RegionState,
+    builder: TraceBuilder,
+    warnings: string[],
+  ): TraceReceipt {
+    const proxyId = 'tiproxy-1'
+    const tidbId = 'tidb-1'
+    const pdId = 'pd-1'
+    const oldLeaderStoreId = region.leaderStoreId
+    const liveCandidates = region.peers
+      .filter((peer) => peer.storeId !== oldLeaderStoreId)
+      .sort((left, right) => left.storeId.localeCompare(right.storeId))
+    const candidateStoreId = liveCandidates[0]?.storeId
+    const voterStoreId = liveCandidates[1]?.storeId
+    if (!candidateStoreId || !voterStoreId) {
+      throw new Error('Raft Lab requires two follower voters.')
+    }
+
+    /*
+     * A non-zero baseline makes last-log, commit, and apply movement legible.
+     * These are representative teaching indexes, not values read from TiKV.
+     */
+    const baselineIndex = 42
+    const baselineTerm = Math.max(1, region.term)
+    region.term = baselineTerm
+    region.commitIndex = baselineIndex
+    region.appliedIndex = baselineIndex
+    for (const peer of region.peers) {
+      peer.healthy = true
+      peer.raftRole = peer.storeId === oldLeaderStoreId ? 'leader' : 'follower'
+      peer.matchIndex = baselineIndex
+      peer.appliedIndex = baselineIndex
+    }
+    updateRegionHealth(region)
+
+    const logicalRequestId = 'region-request-1'
+    const backoffMs = 80
+    let raftLab: TraceRaftLabSnapshot = createRaftLabState(
+      region.id,
+      oldLeaderStoreId,
+      region.peers.map((peer) => ({
+        storeId: peer.storeId,
+        lastLogIndex: baselineIndex,
+        lastLogTerm: baselineTerm,
+        commitIndex: baselineIndex,
+        appliedIndex: baselineIndex,
+      })),
+      logicalRequestId,
+      backoffMs,
+    )
+
+    function syncActualRegion(): void {
+      const labLeader = raftLab.leaderStoreId
+      region.leaderStoreId = labLeader ?? oldLeaderStoreId
+      region.term = Math.max(...raftLab.peers.map((peer) => peer.currentTerm))
+      const leader = labLeader === null
+        ? null
+        : raftLab.peers.find((peer) => peer.storeId === labLeader) ?? null
+      region.commitIndex = leader?.commitIndex ??
+        Math.max(...raftLab.peers.map((peer) => peer.commitIndex))
+      region.appliedIndex = leader?.appliedIndex ??
+        Math.max(...raftLab.peers.map((peer) => peer.appliedIndex))
+      for (const peer of region.peers) {
+        const projected = raftLab.peers.find((candidate) =>
+          candidate.storeId === peer.storeId)
+        if (!projected) continue
+        peer.healthy = projected.healthy
+        peer.raftRole = projected.role === 'leader' ? 'leader' : 'follower'
+        peer.matchIndex = projected.matchIndex
+        peer.appliedIndex = projected.appliedIndex
+      }
+      updateRegionHealth(region)
+    }
+
+    function projection(): TraceStateSnapshot {
+      const visibleLeader = raftLab.leaderStoreId ?? oldLeaderStoreId
+      const leaderPeer = raftLab.leaderStoreId === null
+        ? null
+        : raftLab.peers.find((peer) =>
+          peer.storeId === raftLab.leaderStoreId) ?? null
+      return freezeTraceSnapshot({
+        modelVersion: state.modelVersion,
+        tsoLastAllocated: state.tso.lastAllocated,
+        transaction: null,
+        regions: [{
+          regionId: region.id,
+          /*
+           * The legacy Region projection cannot encode a missing leader. Its
+           * exact nullable leader contract lives in raftLab.
+           */
+          leaderStoreId: visibleLeader,
+          term: Math.max(...raftLab.peers.map((peer) => peer.currentTerm)),
+          proposedIndex: raftLab.log.committed ? null : raftLab.log.index,
+          persistedStoreIds: [...raftLab.log.persistedStoreIds],
+          acknowledgements: raftLab.log.persistedStoreIds.length,
+          quorum: 2,
+          commitIndex: leaderPeer?.commitIndex ??
+            Math.max(...raftLab.peers.map((peer) => peer.commitIndex)),
+          appliedIndex: leaderPeer?.appliedIndex ??
+            Math.max(...raftLab.peers.map((peer) => peer.appliedIndex)),
+          peers: raftLab.peers.map((peer) => ({
+            storeId: peer.storeId,
+            raftRole: peer.role === 'leader' ? 'leader' : 'follower',
+            matchIndex: peer.matchIndex,
+            appliedIndex: peer.appliedIndex,
+            healthy: peer.healthy,
+          })),
+          pessimisticLock: null,
+          mvcc: {
+            defaultCf: 'empty',
+            lockCf: 'empty',
+            writeCf: 'empty',
+            startTs: null,
+            commitTs: null,
+            primary: true,
+          },
+        }],
+        raftLab,
+      })
+    }
+
+    function addRaftEvent(
+      domain: TraceDomain,
+      kind: string,
+      label: string,
+      detail: string,
+      options: EventOptions = {},
+    ): TraceEvent {
+      const deltas = options.deltas ?? []
+      for (const delta of deltas) {
+        if (delta.kind === 'raft_peer_health') {
+          markStoreDown(delta.storeId)
+        }
+        if (isRaftLabDelta(delta)) {
+          raftLab = reduceRaftLabState(raftLab, delta)
+        }
+        if (delta.kind === 'raft_leader_elected') {
+          state.metrics.leaderElections++
+        }
+        if (
+          delta.kind === 'raft_propose' &&
+          delta.operation === 'leader_noop'
+        ) {
+          state.metrics.raftEntries++
+        }
+      }
+      syncActualRegion()
+      return builder.add(domain, kind, label, detail, {
+        ...options,
+        path: options.path ?? 'critical',
+        snapshot: projection(),
+        deltas,
+      })
+    }
+
+    const root = addRaftEvent(
+      'client',
+      'raft_lab_start',
+      'Begin one logical Region request',
+      'The model retains only a point-read classification and a synthetic request ID; it stores no SQL text, key, value, or result row.',
+      {
+        source: 'client',
+        target: proxyId,
+        metadata: {
+          regionId: region.id,
+          voterCount: 3,
+          quorum: 2,
+          logicalRequestId,
+          representativeRegionOnly: true,
+        },
+      },
+    )
+    const routed = addRaftEvent(
+      'sql',
+      'route',
+      'TiProxy routed the session',
+      `${proxyId} selected stateless ${tidbId}.`,
+      {
+        source: proxyId,
+        target: tidbId,
+        dependsOn: [root.id],
+        metadata: { statelessSqlLayer: true },
+      },
+    )
+    const planned = addRaftEvent(
+      'sql',
+      'parse_optimize',
+      'Classify the point read',
+      analysis.explanation,
+      {
+        source: tidbId,
+        target: tidbId,
+        dependsOn: [routed.id],
+        metadata: {
+          statementKind: analysis.statementKind,
+          accessPath: analysis.accessPath,
+        },
+      },
+    )
+    const startTs = allocateTs()
+    const snapshotTs = addRaftEvent(
+      'tso',
+      'snapshot_ts',
+      'PD allocated a snapshot timestamp',
+      `The logical read uses synthetic start_ts ${startTs}.`,
+      {
+        source: tidbId,
+        target: pdId,
+        dependsOn: [planned.id],
+        deltas: [{
+          kind: 'tso_allocate',
+          purpose: 'start_ts',
+          timestamp: startTs,
+        }],
+        metadata: { startTs, pdRole: 'timestamp_only' },
+      },
+    )
+    const located = addRaftEvent(
+      'sql',
+      'locate_region',
+      'TiDB used its cached Region route',
+      `Region ${region.id} is cached with ${oldLeaderStoreId} as leader before the failure.`,
+      {
+        source: tidbId,
+        target: tidbId,
+        dependsOn: [snapshotTs.id],
+        metadata: {
+          regionId: region.id,
+          cachedLeaderStoreId: oldLeaderStoreId,
+          pdElectsRegionLeader: false,
+        },
+      },
+    )
+    const attemptOne = addRaftEvent(
+      'kv',
+      'region_request_attempt',
+      'Send attempt 1 to the cached leader',
+      `TiDB sends ${logicalRequestId} attempt 1 to ${oldLeaderStoreId}.`,
+      {
+        source: tidbId,
+        target: oldLeaderStoreId,
+        regionId: region.id,
+        dependsOn: [located.id],
+        branchId: 'region-request',
+        deltas: [{
+          kind: 'raft_region_request',
+          action: 'send',
+          regionId: region.id,
+          logicalRequestId,
+          attempt: 1,
+          targetStoreId: oldLeaderStoreId,
+          backoffMs,
+          source: 'tidb_internal',
+          clientVisibleError: false,
+        }],
+        metadata: {
+          logicalRequestId,
+          attempt: 1,
+          cachedLeaderStoreId: oldLeaderStoreId,
+        },
+      },
+    )
+    const failed = addRaftEvent(
+      'raft',
+      'tikv_process_unreachable',
+      'The old leader process becomes unreachable',
+      `${oldLeaderStoreId} stops before it can serve the read. Its peers in every modeled Region are marked down; this cutaway expands Region ${region.id}.`,
+      {
+        status: 'failed',
+        source: oldLeaderStoreId,
+        target: oldLeaderStoreId,
+        regionId: region.id,
+        dependsOn: [attemptOne.id],
+        branchId: 'raft-election',
+        deltas: [{
+          kind: 'raft_peer_health',
+          regionId: region.id,
+          storeId: oldLeaderStoreId,
+          from: 'up',
+          to: 'down',
+        }],
+        metadata: {
+          failureKind: 'process_unreachable',
+          networkPartitionModeled: false,
+          liveVoters: 2,
+          quorum: 2,
+        },
+      },
+    )
+    const transportError = addRaftEvent(
+      'kv',
+      'region_request_transport_error',
+      'TiDB catches a retryable Region transport error',
+      'The storage request did not reach a serving peer. TiDB keeps the client response pending and handles recovery inside its Region request path.',
+      {
+        status: 'warning',
+        source: oldLeaderStoreId,
+        target: tidbId,
+        regionId: region.id,
+        dependsOn: [failed.id],
+        branchId: 'region-request',
+        deltas: [{
+          kind: 'raft_region_request',
+          action: 'transport_error',
+          regionId: region.id,
+          logicalRequestId,
+          attempt: 1,
+          targetStoreId: oldLeaderStoreId,
+          backoffMs,
+          source: 'tidb_internal',
+          clientVisibleError: false,
+        }],
+        metadata: {
+          retryBoundary: 'tidb_internal_region_request',
+          applicationRetry: false,
+          clientVisibleError: false,
+        },
+      },
+    )
+    const backoff = addRaftEvent(
+      'kv',
+      'region_request_backoff',
+      'Invalidate the cached leader and back off',
+      `TiDB invalidates the stale Region leader route and waits a representative ${backoffMs} ms teaching backoff.`,
+      {
+        status: 'warning',
+        source: tidbId,
+        target: tidbId,
+        regionId: region.id,
+        dependsOn: [transportError.id],
+        branchId: 'region-request',
+        durationMs: backoffMs,
+        deltas: [{
+          kind: 'raft_region_request',
+          action: 'backoff',
+          regionId: region.id,
+          logicalRequestId,
+          attempt: 1,
+          targetStoreId: null,
+          backoffMs,
+          source: 'tidb_internal',
+          clientVisibleError: false,
+        }],
+        metadata: {
+          backoffMs,
+          modelValue: true,
+          regionCache: 'invalidated',
+        },
+      },
+    )
+    const timeout = addRaftEvent(
+      'raft',
+      'raft_election_timeout',
+      'A live follower reaches its election timeout',
+      `${candidateStoreId} reaches a representative 13-tick teaching timeout first. TiKV's configured base is 10 ticks and default maximum is 20 ticks; the exact winner and order are TiCity MODEL POLICY.`,
+      {
+        status: 'warning',
+        source: candidateStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [failed.id],
+        branchId: 'raft-election',
+        durationMs: 130,
+        deltas: [{
+          kind: 'raft_election_timeout',
+          regionId: region.id,
+          candidateStoreId,
+          configuredElectionTimeoutTicks: 10,
+          configuredMaxElectionTimeoutTicks: 20,
+          elapsedTicks: 13,
+          candidatePolicy: 'lowest_live_up_to_date_store_id_model_policy',
+        }],
+        metadata: {
+          configuredElectionTimeoutTicks: 10,
+          configuredMaxElectionTimeoutTicks: 20,
+          teachingElapsedTicks: 13,
+          selectionPolicy: 'MODEL POLICY: lowest live up-to-date store id',
+        },
+      },
+    )
+    const preVoteStart = addRaftEvent(
+      'raft',
+      'raft_pre_vote_start',
+      'Start pre-vote without advancing term',
+      `${candidateStoreId} becomes a pre-candidate for prospective term ${baselineTerm + 1}; current term remains ${baselineTerm}.`,
+      {
+        source: candidateStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [timeout.id],
+        branchId: 'raft-election',
+        deltas: [{
+          kind: 'raft_pre_vote',
+          action: 'start',
+          regionId: region.id,
+          candidateStoreId,
+          voterStoreId: candidateStoreId,
+          prospectiveTerm: baselineTerm + 1,
+        }],
+        metadata: {
+          prevoteEnabled: true,
+          currentTerm: baselineTerm,
+          prospectiveTerm: baselineTerm + 1,
+        },
+      },
+    )
+    const preVoteRequest = addRaftEvent(
+      'raft',
+      'raft_pre_vote_request',
+      'Ask the other live voter for pre-vote',
+      `${candidateStoreId} advertises last log (${baselineTerm}, ${baselineIndex}) to ${voterStoreId}.`,
+      {
+        source: candidateStoreId,
+        target: voterStoreId,
+        regionId: region.id,
+        dependsOn: [preVoteStart.id],
+        branchId: 'raft-election',
+        metadata: {
+          prospectiveTerm: baselineTerm + 1,
+          lastLogTerm: baselineTerm,
+          lastLogIndex: baselineIndex,
+        },
+      },
+    )
+    const preVoteGranted = addRaftEvent(
+      'raft',
+      'raft_pre_vote_granted',
+      'Pre-vote reaches 2-of-3',
+      `${voterStoreId} confirms that ${candidateStoreId}'s log is up to date. The two live voters form a pre-vote quorum.`,
+      {
+        source: voterStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [preVoteRequest.id],
+        branchId: 'raft-election',
+        deltas: [{
+          kind: 'raft_pre_vote',
+          action: 'grant',
+          regionId: region.id,
+          candidateStoreId,
+          voterStoreId,
+          prospectiveTerm: baselineTerm + 1,
+        }],
+        metadata: {
+          preVotesGranted: 2,
+          quorum: 2,
+          voterCount: 3,
+        },
+      },
+    )
+    const becameCandidate = addRaftEvent(
+      'raft',
+      'raft_candidate_term',
+      'Advance term and cast the candidate self-vote',
+      `${candidateStoreId} advances to term ${baselineTerm + 1}, becomes candidate, and records one vote for itself.`,
+      {
+        source: candidateStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [preVoteGranted.id],
+        branchId: 'raft-election',
+        deltas: [{
+          kind: 'raft_term_vote',
+          action: 'become_candidate',
+          regionId: region.id,
+          candidateStoreId,
+          voterStoreId: candidateStoreId,
+          term: baselineTerm + 1,
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          votedFor: candidateStoreId,
+          votesGranted: 1,
+        },
+      },
+    )
+    const voteRequest = addRaftEvent(
+      'raft',
+      'raft_vote_request',
+      'Request the second vote',
+      `${candidateStoreId} sends RequestVote for term ${baselineTerm + 1} to ${voterStoreId}.`,
+      {
+        source: candidateStoreId,
+        target: voterStoreId,
+        regionId: region.id,
+        dependsOn: [becameCandidate.id],
+        branchId: 'raft-election',
+        metadata: {
+          term: baselineTerm + 1,
+          lastLogTerm: baselineTerm,
+          lastLogIndex: baselineIndex,
+        },
+      },
+    )
+    const voteGranted = addRaftEvent(
+      'raft',
+      'raft_vote_granted',
+      'RequestVote reaches 2-of-3',
+      `${voterStoreId} records its one vote for ${candidateStoreId} in term ${baselineTerm + 1}.`,
+      {
+        source: voterStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [voteRequest.id],
+        branchId: 'raft-election',
+        deltas: [{
+          kind: 'raft_term_vote',
+          action: 'grant',
+          regionId: region.id,
+          candidateStoreId,
+          voterStoreId,
+          term: baselineTerm + 1,
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          votesGranted: 2,
+          quorum: 2,
+        },
+      },
+    )
+    const elected = addRaftEvent(
+      'raft',
+      'raft_leader_elected',
+      'The live quorum elects a new Region leader',
+      `${candidateStoreId} becomes Region ${region.id}'s leader in term ${baselineTerm + 1}. PD did not nominate it or vote.`,
+      {
+        source: voterStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [voteGranted.id],
+        branchId: 'raft-election',
+        deltas: [{
+          kind: 'raft_leader_elected',
+          regionId: region.id,
+          oldLeaderStoreId,
+          newLeaderStoreId: candidateStoreId,
+          term: baselineTerm + 1,
+          votesGranted: [candidateStoreId, voterStoreId],
+          quorum: 2,
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          votesGranted: 2,
+          quorum: 2,
+          pdParticipatedInElection: false,
+        },
+      },
+    )
+    const noOpIndex = baselineIndex + 1
+    const proposed = addRaftEvent(
+      'raft',
+      'raft_leader_noop_propose',
+      'Append the new leader current-term no-op',
+      `${candidateStoreId} appends an empty Raft entry at index ${noOpIndex}. This is internal leadership confirmation, not a user-data mutation.`,
+      {
+        source: candidateStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [elected.id],
+        branchId: 'leader-confirmation',
+        deltas: [{
+          kind: 'raft_propose',
+          regionId: region.id,
+          index: noOpIndex,
+          operation: 'leader_noop',
+          term: baselineTerm + 1,
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          index: noOpIndex,
+          entryKind: 'leader_noop',
+          userDataMutation: false,
+        },
+      },
+    )
+    const persisted = addRaftEvent(
+      'raft',
+      'raft_leader_noop_persist',
+      'Persist the no-op on two live voters',
+      `${candidateStoreId} and ${voterStoreId} persist term ${baselineTerm + 1}, index ${noOpIndex}; ${oldLeaderStoreId} remains down at index ${baselineIndex}.`,
+      {
+        source: candidateStoreId,
+        target: voterStoreId,
+        regionId: region.id,
+        dependsOn: [proposed.id],
+        branchId: 'leader-confirmation',
+        deltas: [{
+          kind: 'raft_persist',
+          regionId: region.id,
+          index: noOpIndex,
+          term: baselineTerm + 1,
+          storeIds: [candidateStoreId, voterStoreId],
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          index: noOpIndex,
+          persistedVoters: 2,
+          unavailableVoters: 1,
+        },
+      },
+    )
+    const committed = addRaftEvent(
+      'raft',
+      'raft_leader_noop_commit',
+      'Commit the no-op at quorum',
+      `Two of three configured voters persisted index ${noOpIndex}; the current-term no-op becomes committed.`,
+      {
+        source: voterStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [persisted.id],
+        branchId: 'leader-confirmation',
+        deltas: [{
+          kind: 'raft_commit',
+          regionId: region.id,
+          index: noOpIndex,
+          term: baselineTerm + 1,
+          acknowledgements: 2,
+          quorum: 2,
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          index: noOpIndex,
+          acknowledgements: 2,
+          quorum: 2,
+        },
+      },
+    )
+    const leaderApplied = addRaftEvent(
+      'raft',
+      'raft_leader_noop_apply',
+      'The new leader applies the committed no-op',
+      `${candidateStoreId} advances applied index to ${noOpIndex}; the read still has not created a user-data Raft entry.`,
+      {
+        source: candidateStoreId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [committed.id],
+        branchId: 'leader-confirmation',
+        deltas: [{
+          kind: 'raft_apply',
+          regionId: region.id,
+          index: noOpIndex,
+          term: baselineTerm + 1,
+          storeIds: [candidateStoreId],
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          index: noOpIndex,
+          storeId: candidateStoreId,
+          userDataMutation: false,
+        },
+      },
+    )
+    const observed = addRaftEvent(
+      'raft',
+      'pd_observes_region_leader',
+      'PD observes the new leader heartbeat',
+      `${candidateStoreId} reports Region ${region.id}'s new leader metadata to PD after the Raft peers completed the election.`,
+      {
+        source: candidateStoreId,
+        target: pdId,
+        regionId: region.id,
+        dependsOn: [leaderApplied.id],
+        branchId: 'routing-recovery',
+        deltas: [{
+          kind: 'raft_pd_state',
+          action: 'observe_leader',
+          regionId: region.id,
+          leaderStoreId: candidateStoreId,
+          role: 'observer_and_routing_only',
+        }],
+        metadata: {
+          pdRole: 'observer_only',
+          pdVoted: false,
+          leaderStoreId: candidateStoreId,
+        },
+      },
+    )
+    const refreshed = addRaftEvent(
+      'sql',
+      'region_cache_refreshed',
+      'Refresh Region routing metadata',
+      `After the internal backoff, TiDB learns that ${candidateStoreId} is Region ${region.id}'s leader and refreshes its cache.`,
+      {
+        source: tidbId,
+        target: pdId,
+        regionId: region.id,
+        dependsOn: [observed.id, backoff.id],
+        branchId: 'region-request',
+        deltas: [
+          {
+            kind: 'raft_pd_state',
+            action: 'route_lookup',
+            regionId: region.id,
+            leaderStoreId: candidateStoreId,
+            role: 'observer_and_routing_only',
+          },
+          {
+            kind: 'raft_region_request',
+            action: 'refresh',
+            regionId: region.id,
+            logicalRequestId,
+            attempt: 1,
+            targetStoreId: candidateStoreId,
+            backoffMs,
+            source: 'tidb_internal',
+            clientVisibleError: false,
+          },
+        ],
+        metadata: {
+          cacheState: 'refreshed',
+          leaderStoreId: candidateStoreId,
+          retryBoundary: 'tidb_internal_region_request',
+        },
+      },
+    )
+    const attemptTwo = addRaftEvent(
+      'kv',
+      'region_request_retry',
+      'Retry the same logical request on the new leader',
+      `TiDB sends ${logicalRequestId} attempt 2 to ${candidateStoreId}. This is not an application transaction retry.`,
+      {
+        source: tidbId,
+        target: candidateStoreId,
+        regionId: region.id,
+        dependsOn: [refreshed.id],
+        branchId: 'region-request',
+        deltas: [{
+          kind: 'raft_region_request',
+          action: 'retry',
+          regionId: region.id,
+          logicalRequestId,
+          attempt: 2,
+          targetStoreId: candidateStoreId,
+          backoffMs,
+          source: 'tidb_internal',
+          clientVisibleError: false,
+        }],
+        metadata: {
+          logicalRequestId,
+          attempt: 2,
+          sameLogicalRequest: true,
+          applicationRetry: false,
+        },
+      },
+    )
+    const served = addRaftEvent(
+      'kv',
+      'point_get_recovered',
+      'The new leader serves the modeled snapshot',
+      `${candidateStoreId} serves Region ${region.id} at applied index ${noOpIndex}. TiCity records no result row.`,
+      {
+        source: candidateStoreId,
+        target: tidbId,
+        regionId: region.id,
+        dependsOn: [attemptTwo.id],
+        branchId: 'region-request',
+        deltas: [{
+          kind: 'raft_region_request',
+          action: 'serve',
+          regionId: region.id,
+          logicalRequestId,
+          attempt: 2,
+          targetStoreId: candidateStoreId,
+          backoffMs,
+          source: 'tidb_internal',
+          clientVisibleError: false,
+        }],
+        metadata: {
+          snapshotTs: startTs,
+          appliedIndex: noOpIndex,
+          resultRowsGenerated: false,
+        },
+      },
+    )
+    const response = addRaftEvent(
+      'return',
+      'raft_failover_complete',
+      'Return success without exposing the transient Region error',
+      'The same client request completes after TiDB-internal Region retry. The modeled recovery stayed within the client-visible error threshold.',
+      {
+        source: tidbId,
+        target: 'client',
+        dependsOn: [served.id],
+        branchId: 'region-request',
+        deltas: [{
+          kind: 'raft_region_request',
+          action: 'complete',
+          regionId: region.id,
+          logicalRequestId,
+          attempt: 2,
+          targetStoreId: candidateStoreId,
+          backoffMs,
+          source: 'tidb_internal',
+          clientVisibleError: false,
+        }],
+        metadata: {
+          logicalRequestId,
+          attempts: 2,
+          clientVisibleError: false,
+          applicationRetry: false,
+        },
+      },
+    )
+    addRaftEvent(
+      'raft',
+      'raft_follower_noop_apply',
+      'The surviving follower applies in background',
+      `${voterStoreId} advances applied index to ${noOpIndex}; the failed ${oldLeaderStoreId} peer remains at ${baselineIndex}.`,
+      {
+        source: candidateStoreId,
+        target: voterStoreId,
+        regionId: region.id,
+        dependsOn: [response.id],
+        branchId: 'leader-confirmation',
+        path: 'background',
+        deltas: [{
+          kind: 'raft_apply',
+          regionId: region.id,
+          index: noOpIndex,
+          term: baselineTerm + 1,
+          storeIds: [voterStoreId],
+        }],
+        metadata: {
+          term: baselineTerm + 1,
+          index: noOpIndex,
+          storeId: voterStoreId,
+          clientAlreadyResponded: true,
+        },
+      },
+    )
+
+    state.metrics.statements++
+    state.metrics.reads++
+    return recordReceipt(
+      id,
+      'tikv-failover',
+      analysis,
+      startTs,
+      null,
+      'succeeded',
       null,
       builder,
       warnings,
@@ -3543,6 +4418,19 @@ export function createTiDBSimulation(
     if (analysis.kind === 'explain') {
       return traceExplain(id, analysis, scenarioId, builder, warnings)
     }
+    if (
+      scenarioId === 'tikv-failover' &&
+      analysis.readOnly &&
+      regions.length === 1
+    ) {
+      return traceRaftFailoverScenario(
+        id,
+        analysis,
+        regions[0],
+        builder,
+        warnings,
+      )
+    }
     if (analysis.readOnly) {
       return traceRead(id, analysis, scenarioId, regions, builder, warnings)
     }
@@ -3637,8 +4525,6 @@ export function createTiDBSimulation(
         hot.sizeMiB = state.controls.regionSplitThresholdMiB + 8
         hot.hotScore = 100
       }
-    } else if (id === 'tikv-failover') {
-      markStoreDown('tikv-1')
     } else if (id === 'gc-safe-point') {
       const oldStart = allocateTs()
       const blocker: TransactionState = {

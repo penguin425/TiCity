@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-3'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-4'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -237,6 +237,109 @@ export interface TraceRegionSnapshot {
   mvcc: TraceMvccSnapshot
 }
 
+export type TraceRaftLabPhase =
+  | 'healthy'
+  | 'requesting'
+  | 'leader_lost'
+  | 'backoff'
+  | 'timeout'
+  | 'pre_vote'
+  | 'vote'
+  | 'elected'
+  | 'confirming'
+  | 'routing'
+  | 'serving'
+  | 'complete'
+
+export type TraceRaftLabPeerRole =
+  | 'leader'
+  | 'follower'
+  | 'pre_candidate'
+  | 'candidate'
+  | 'offline'
+
+export interface TraceRaftLabPeerSnapshot {
+  storeId: StoreId
+  role: TraceRaftLabPeerRole
+  healthy: boolean
+  currentTerm: number
+  votedFor: StoreId | null
+  lastLogIndex: number
+  lastLogTerm: number
+  matchIndex: number
+  commitIndex: number
+  appliedIndex: number
+}
+
+export interface TraceRaftLabElectionSnapshot {
+  phase: 'idle' | 'timeout' | 'pre_vote' | 'vote' | 'elected'
+  candidateStoreId: StoreId | null
+  preVotesGranted: readonly StoreId[]
+  votesGranted: readonly StoreId[]
+  prevoteEnabled: true
+  configuredElectionTimeoutTicks: 10
+  configuredMaxElectionTimeoutTicks: 20
+  /** Deterministic teaching order, not a measured TiKV election duration. */
+  elapsedTicks: 13
+  candidatePolicy: 'lowest_live_up_to_date_store_id_model_policy'
+}
+
+export interface TraceRaftLabLogSnapshot {
+  /** TiKV's new-leader empty entry; never a user row mutation. */
+  entryKind: 'leader_noop' | null
+  index: number | null
+  term: number | null
+  persistedStoreIds: readonly StoreId[]
+  committed: boolean
+  appliedStoreIds: readonly StoreId[]
+}
+
+export interface TraceRaftLabRequestSnapshot {
+  logicalRequestId: string
+  source: 'tidb_internal'
+  attempt: 0 | 1 | 2
+  cachedLeaderStoreId: StoreId | null
+  cacheState: 'cached' | 'invalidated' | 'refreshed'
+  status:
+    | 'idle'
+    | 'sent'
+    | 'transport_error'
+    | 'backoff'
+    | 'retrying'
+    | 'served'
+    | 'completed'
+  /** Representative teaching value, not a TiDB retry guarantee. */
+  backoffMs: number
+  clientVisibleError: false
+}
+
+export interface TraceRaftLabPdSnapshot {
+  /** PD observes and answers routing metadata; it never votes in Region Raft. */
+  role: 'observer_and_routing_only'
+  observedLeaderStoreId: StoreId | null
+  routeLookupCompleted: boolean
+}
+
+/**
+ * One representative Region's immutable failover projection. A TiKV process
+ * failure affects peers in many Regions, but this detailed vertical slice
+ * expands only Region 0.
+ */
+export interface TraceRaftLabSnapshot {
+  regionId: number
+  phase: TraceRaftLabPhase
+  oldLeaderStoreId: StoreId
+  leaderStoreId: StoreId | null
+  failedStoreId: StoreId | null
+  quorum: 2
+  liveVoterCount: number
+  peers: readonly TraceRaftLabPeerSnapshot[]
+  election: TraceRaftLabElectionSnapshot
+  log: TraceRaftLabLogSnapshot
+  request: TraceRaftLabRequestSnapshot
+  pd: TraceRaftLabPdSnapshot
+}
+
 export type TraceLockTransactionStatus =
   | 'active'
   | 'waiting'
@@ -325,6 +428,8 @@ export interface TraceStateSnapshot {
   regions: readonly TraceRegionSnapshot[]
   /** Present only for the composite model-3 Lock Lab scenario. */
   lockLab?: TraceLockLabSnapshot
+  /** Present only for the model-4 Region Raft failure vertical slice. */
+  raftLab?: TraceRaftLabSnapshot
 }
 
 export type TraceStateDelta =
@@ -349,13 +454,19 @@ export type TraceStateDelta =
     kind: 'raft_propose'
     regionId: number
     index: number
-    operation: 'prewrite' | 'commit_primary' | 'commit_secondary'
+    operation:
+      | 'prewrite'
+      | 'commit_primary'
+      | 'commit_secondary'
+      | 'leader_noop'
+    term?: number
   }>
   | Readonly<{
     kind: 'raft_persist'
     regionId: number
     index: number
     storeIds: readonly StoreId[]
+    term?: number
   }>
   | Readonly<{
     kind: 'raft_commit'
@@ -363,11 +474,80 @@ export type TraceStateDelta =
     index: number
     acknowledgements: number
     quorum: 2
+    term?: number
   }>
   | Readonly<{
     kind: 'raft_apply'
     regionId: number
     index: number
+    term?: number
+    storeIds?: readonly StoreId[]
+  }>
+  | Readonly<{
+    kind: 'raft_peer_health'
+    regionId: number
+    storeId: StoreId
+    from: 'up'
+    to: 'down'
+  }>
+  | Readonly<{
+    kind: 'raft_election_timeout'
+    regionId: number
+    candidateStoreId: StoreId
+    configuredElectionTimeoutTicks: 10
+    configuredMaxElectionTimeoutTicks: 20
+    elapsedTicks: 13
+    candidatePolicy: 'lowest_live_up_to_date_store_id_model_policy'
+  }>
+  | Readonly<{
+    kind: 'raft_pre_vote'
+    action: 'start' | 'grant'
+    regionId: number
+    candidateStoreId: StoreId
+    voterStoreId: StoreId
+    prospectiveTerm: number
+  }>
+  | Readonly<{
+    kind: 'raft_term_vote'
+    action: 'become_candidate' | 'grant'
+    regionId: number
+    candidateStoreId: StoreId
+    voterStoreId: StoreId
+    term: number
+  }>
+  | Readonly<{
+    kind: 'raft_leader_elected'
+    regionId: number
+    oldLeaderStoreId: StoreId
+    newLeaderStoreId: StoreId
+    term: number
+    votesGranted: readonly StoreId[]
+    quorum: 2
+  }>
+  | Readonly<{
+    kind: 'raft_region_request'
+    action:
+      | 'send'
+      | 'transport_error'
+      | 'backoff'
+      | 'refresh'
+      | 'retry'
+      | 'serve'
+      | 'complete'
+    regionId: number
+    logicalRequestId: string
+    attempt: 1 | 2
+    targetStoreId: StoreId | null
+    backoffMs: number
+    source: 'tidb_internal'
+    clientVisibleError: false
+  }>
+  | Readonly<{
+    kind: 'raft_pd_state'
+    action: 'observe_leader' | 'route_lookup'
+    regionId: number
+    leaderStoreId: StoreId
+    role: 'observer_and_routing_only'
   }>
   | Readonly<{
     kind: 'mvcc'

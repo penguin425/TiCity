@@ -634,7 +634,7 @@ describe('TraceReceipt-driven city flows', () => {
     const to = new THREE.Vector3()
 
     for (const [kind, receipt] of [
-      ['leader_election', failover],
+      ['raft_leader_elected', failover],
       ['quorum_commit', write],
     ] as const) {
       const traceEvent = receipt.events.find((candidate) => candidate.kind === kind)
