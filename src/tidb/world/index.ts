@@ -15,6 +15,7 @@ export interface WorldOptions {
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
   readonly autoStart?: boolean
+  readonly inspectTransactionLab?: boolean
   readonly onSelect?: (component: CityComponent | null) => void
 }
 
@@ -25,6 +26,7 @@ export interface WorldHandle {
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
+  setTransactionLabInspect(enabled: boolean): void
   setHudExpanded(expanded: boolean): void
   resize(): void
   enableAudio(): Promise<boolean>
@@ -56,6 +58,9 @@ export function createTiDBWorld(
     setMode(mode: CityViewMode): void {
       shell.setMode(mode)
     },
+    setTransactionLabInspect(enabled: boolean): void {
+      shell.setTransactionLabInspect(enabled)
+    },
     setHudExpanded(expanded: boolean): void {
       shell.setHudExpanded(expanded)
     },
@@ -80,4 +85,14 @@ export type {
   TiDBSceneGraph,
 } from './city'
 export { COMPONENT_ANCHORS, DISTRICT_BOUNDS, TICITY_LAYOUT, regionPeerPosition } from './layout'
+export {
+  createTransactionLab,
+  EMPTY_TRANSACTION_LAB_PROJECTION,
+} from './transaction-lab'
+export { projectTransactionLab } from './transaction-lab-projection'
+export type {
+  TransactionLab,
+  TransactionLabProjection,
+  TransactionLabRegionProjection,
+} from './transaction-lab'
 export type { CityTheme, SemanticDomain } from './palette'

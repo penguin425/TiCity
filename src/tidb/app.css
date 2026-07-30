@@ -614,6 +614,167 @@ a {
   scroll-margin-top: 4rem;
 }
 
+.tidb-transaction-lab {
+  position: absolute;
+  z-index: 19;
+  top: 5.6rem;
+  left: max(0.8rem, env(safe-area-inset-left));
+  display: none;
+  width: min(35rem, calc(100vw - 27rem));
+  max-height: calc(100dvh - 17rem);
+  overflow: auto;
+  padding: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--domain-txn2pc) 58%, var(--city-line));
+  border-radius: 0.9rem;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--domain-txn2pc) 10%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, var(--city-panel-solid) 94%, transparent);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.28);
+  font: 0.68rem/1.35 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  pointer-events: auto;
+  backdrop-filter: blur(20px) saturate(130%);
+  scrollbar-color: var(--city-line) transparent;
+}
+
+.tidb-layout[data-inspect="open"] .tidb-transaction-lab:not([hidden]) {
+  display: block;
+}
+
+.tidb-transaction-lab__head,
+.tidb-transaction-lab__region-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.tidb-transaction-lab__head h2,
+.tidb-transaction-lab__region-head h3 {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.tidb-transaction-lab__eyebrow {
+  margin: 0 0 0.15rem;
+  color: var(--domain-txn2pc);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+}
+
+.tidb-transaction-lab__stage,
+.tidb-transaction-lab__key-role {
+  border: 1px solid var(--domain-txn2pc);
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem;
+  color: var(--domain-txn2pc);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.tidb-transaction-lab__summary,
+.tidb-transaction-lab__region-meta,
+.tidb-transaction-lab__mvcc {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+}
+
+.tidb-transaction-lab__summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.65rem;
+}
+
+.tidb-transaction-lab__metric,
+.tidb-transaction-lab__cf {
+  min-width: 0;
+  padding: 0.35rem;
+  border: 1px solid var(--city-line);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--city-panel) 84%, transparent);
+}
+
+.tidb-transaction-lab :is(dt, dd) {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tidb-transaction-lab dt {
+  color: var(--city-muted);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+}
+
+.tidb-transaction-lab dd {
+  margin-top: 0.12rem;
+  color: var(--city-text);
+}
+
+.tidb-transaction-lab__regions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.55rem;
+}
+
+.tidb-transaction-lab__region {
+  min-width: 0;
+  padding: 0.55rem;
+  border: 1px solid var(--city-line);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--city-bg-deep) 76%, transparent);
+}
+
+.tidb-transaction-lab__region[data-key-role="primary"] {
+  border-top: 3px solid var(--domain-txn2pc);
+}
+
+.tidb-transaction-lab__region[data-key-role="secondary"] {
+  border-top: 3px dashed var(--domain-kv);
+}
+
+.tidb-transaction-lab__region-meta {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.45rem;
+}
+
+.tidb-transaction-lab__lock,
+.tidb-transaction-lab__peers,
+.tidb-transaction-lab__mvcc-label {
+  margin: 0.4rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.tidb-transaction-lab__lock[data-lock-state="leader-memory"] {
+  color: var(--domain-txn2pc);
+}
+
+.tidb-transaction-lab__peers {
+  color: var(--domain-raft);
+}
+
+.tidb-transaction-lab__mvcc-label {
+  color: var(--city-muted);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+}
+
+.tidb-transaction-lab__mvcc {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.2rem;
+}
+
+.tidb-transaction-lab__cf[data-cf-state="prewrite"],
+.tidb-transaction-lab__cf[data-cf-state="value"],
+.tidb-transaction-lab__cf[data-cf-state="commit"] {
+  border-color: var(--domain-kv);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--domain-kv) 28%, transparent);
+}
+
 .tidb-trace-playback {
   --trace-color: var(--city-cyan);
   position: absolute;

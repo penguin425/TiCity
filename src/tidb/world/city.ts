@@ -12,6 +12,7 @@ import {
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
   HTAP_PATHS,
+  TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
   TIKV_BOUNDS,
   regionPeerPosition,
@@ -20,6 +21,8 @@ import type { ComponentAnchorId, PlanBounds, Point3, RouteLeg } from './layout'
 import { createCityEnvironment } from './environment'
 import { SEMANTIC_COLORS, createCityMaterials } from './palette'
 import type { CityMaterials, CityTheme, SemanticDomain } from './palette'
+import { createTransactionLab } from './transaction-lab'
+import type { TransactionLab } from './transaction-lab'
 
 export type CityComponentKind =
   | 'client'
@@ -77,6 +80,7 @@ export interface TiDBSceneGraph {
   readonly colliders: readonly CityCollider[]
   readonly networks: readonly CityNetwork[]
   readonly materials: CityMaterials
+  readonly transactionLab: TransactionLab
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
@@ -447,6 +451,10 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const environment = createCityEnvironment()
   const ground = environment.ground
   root.add(environment.object)
+  const transactionLab = createTransactionLab()
+  transactionLab.object.position.set(...TRANSACTION_LAB_ORIGIN)
+  transactionLab.object.scale.setScalar(0.92)
+  root.add(transactionLab.object)
 
   /* Client terminal: workloads enter at grade, never from a floating cloud. */
   const clients = new THREE.Group()
@@ -1059,6 +1067,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     colliders,
     networks,
     materials,
+    transactionLab,
     getAnchor(id: string, out: THREE.Vector3): boolean {
       const component = registry.get(id)
       if (component) {
@@ -1081,6 +1090,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       theme = next
       materials.apply(next)
       environment.setTheme(next)
+      transactionLab.setTheme(next)
       if (latestState) updateState(latestState)
       else paintPeers(next)
     },
@@ -1094,6 +1104,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     },
     dispose(): void {
       environment.dispose()
+      transactionLab.dispose()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()

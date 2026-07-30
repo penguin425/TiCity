@@ -26,6 +26,7 @@ import {
   type Locale,
 } from './ui'
 import { createTracePlaybackDock } from './ui/trace-playback'
+import { createTransactionLabPanel } from './ui/transaction-lab'
 import { createTiDBWorld, type WorldHandle } from './world'
 import type { CityComponent } from './world/city'
 import type { CityMovementInput, CityViewMode } from './engine/camera'
@@ -40,6 +41,7 @@ const SCENARIOS: readonly ScenarioId[] = [
   'gc-safe-point',
   'tiflash-mpp',
 ]
+const NO_ACTIVE_TRACE_EVENTS: readonly string[] = Object.freeze([])
 
 const copy = {
   ja: {
@@ -57,6 +59,9 @@ const copy = {
     fly: '飛行',
     walk: '歩行',
     sound: '音',
+    inspect: '内部',
+    showInspect: 'Transaction Labの内部断面を開く',
+    hideInspect: 'Transaction Labの内部断面を閉じる',
     panel: '操作',
     showPanel: '操作パネルを開く',
     hidePanel: '操作パネルを閉じる',
@@ -103,6 +108,9 @@ const copy = {
     fly: 'Fly',
     walk: 'Walk',
     sound: 'Sound',
+    inspect: 'Inspect',
+    showInspect: 'Open the Transaction Lab cutaway',
+    hideInspect: 'Close the Transaction Lab cutaway',
     panel: 'Panel',
     showPanel: 'Open control panel',
     hidePanel: 'Close control panel',
@@ -145,6 +153,7 @@ interface TiCityPublicApi {
   setControl<K extends keyof TiDBControls>(key: K, value: TiDBControls[K]): void
   setView(mode: CityViewMode): void
   setTheme(theme: Theme): void
+  setInspect(enabled: boolean): void
   reset(): void
 }
 
@@ -428,6 +437,7 @@ function boot(): void {
   prepareDocument(locale)
   const simulation = createTiDBSimulation({ seed: 425 })
   let currentTrace: TraceReceipt | null = simulation.runScenario(initialScenario())
+  let traceRevision = 0
   let world: WorldHandle | null = null
   let disposed = false
 
@@ -439,6 +449,7 @@ function boot(): void {
     new URLSearchParams(location.search).get('panel') === 'open'
   layout.dataset.panel = panelExpanded ? 'open' : 'closed'
   layout.dataset.cameraView = 'orbit'
+  layout.dataset.inspect = 'closed'
 
   const pageTitle = document.createElement('h1')
   pageTitle.className = 'visually-hidden'
@@ -484,6 +495,9 @@ function boot(): void {
     fallback.textContent = copy[locale].noWebgl
     worldHost.append(fallback)
   }
+
+  const transactionLabPanel = createTransactionLabPanel(locale)
+  worldHost.append(transactionLabPanel.root)
 
   const traceDock = createTracePlaybackDock(locale, {
     onPrevious: () => {
@@ -540,6 +554,20 @@ function boot(): void {
   const viewActions = document.createElement('div')
   viewActions.className = 'tidb-view-actions'
   const viewButtons = new Map<CityViewMode, HTMLButtonElement>()
+  let inspectOpen = false
+  let inspectButton: HTMLButtonElement | null = null
+
+  const setInspect = (enabled: boolean, focus = false): void => {
+    inspectOpen = enabled
+    layout.dataset.inspect = enabled ? 'open' : 'closed'
+    world?.setTransactionLabInspect(enabled)
+    inspectButton?.setAttribute('aria-pressed', String(enabled))
+    inspectButton?.setAttribute(
+      'aria-label',
+      enabled ? copy[locale].hideInspect : copy[locale].showInspect,
+    )
+    if (enabled && focus) world?.focus('transaction.lab')
+  }
 
   const panelButton = button(copy[locale].panel, () => {
     panelExpanded = !panelExpanded
@@ -579,13 +607,21 @@ function boot(): void {
     viewActions.append(control)
   }
 
+  inspectButton = button(copy[locale].inspect, () => {
+    setInspect(!inspectOpen, !inspectOpen)
+  })
+  inspectButton.dataset.action = 'inspect'
+  inspectButton.setAttribute('aria-label', copy[locale].showInspect)
+
   const audioButton = button(copy[locale].sound, async () => {
     if (!world) return
     const enabled = await world.enableAudio()
     audioButton.setAttribute('aria-pressed', String(enabled))
   })
   audioButton.dataset.action = 'audio'
-  viewActions.append(panelButton, audioButton)
+  viewActions.append(inspectButton, panelButton, audioButton)
+  const initialDetailedTrace = currentTrace.events.some((event) => event.snapshot !== undefined)
+  setInspect(initialDetailedTrace, initialDetailedTrace)
   topCluster.append(navigation.root, viewActions)
   topbar.append(wordmarkHost, topCluster)
 
@@ -611,7 +647,10 @@ function boot(): void {
       'id' in candidate
     ) {
       currentTrace = candidate as TraceReceipt
+      traceRevision++
       world?.update(simulation.state, currentTrace)
+      const hasDetailedSnapshot = currentTrace.events.some((event) => event.snapshot !== undefined)
+      setInspect(hasDetailedSnapshot, hasDetailedSnapshot)
     }
   }
 
@@ -661,6 +700,11 @@ function boot(): void {
         control.textContent = copy[next][mode]
       }
       audioButton.textContent = copy[next].sound
+      inspectButton.textContent = copy[next].inspect
+      inspectButton.setAttribute(
+        'aria-label',
+        inspectOpen ? copy[next].hideInspect : copy[next].showInspect,
+      )
       panelButton.textContent = copy[next].panel
       panelButton.setAttribute(
         'aria-label',
@@ -670,6 +714,7 @@ function boot(): void {
       if (skip) skip.textContent = copy[next].skip
       if (world) world.shell.renderer.domElement.setAttribute('aria-label', copy[next].canvas)
       traceDock.setLocale(next)
+      transactionLabPanel.setLocale(next)
       movementPad.setLocale(next)
       hint.textContent = copy[next].hint[currentView]
     },
@@ -685,6 +730,7 @@ function boot(): void {
 
   let last = performance.now()
   let lastStatus = 0
+  let transactionLabPanelKey = ''
   let animationFrame = 0
   const frame = (now: number) => {
     if (disposed) return
@@ -696,6 +742,22 @@ function boot(): void {
     if (playback) {
       traceDock.update(playback, currentTrace)
       layout.dataset.traceState = playback.phase
+      const activeEventIds = playback.activeEventIds ?? NO_ACTIVE_TRACE_EVENTS
+      const panelKey = [
+        String(traceRevision),
+        currentTrace === null ? '' : String(currentTrace.events.length),
+        playback.event?.id ?? '',
+        activeEventIds.join(','),
+        String(playback.iteration),
+      ].join('|')
+      if (panelKey !== transactionLabPanelKey) {
+        transactionLabPanelKey = panelKey
+        const byId = new Map(currentTrace?.events.map((event) => [event.id, event]))
+        const activeEvents = activeEventIds
+          .map((id) => byId.get(id))
+          .filter((event): event is NonNullable<typeof event> => event !== undefined)
+        transactionLabPanel.update(playback.event, activeEvents)
+      }
     }
 
     if (now - lastStatus >= 250) {
@@ -780,6 +842,7 @@ function boot(): void {
     },
     setView,
     setTheme,
+    setInspect,
     reset,
   }
 
@@ -788,6 +851,7 @@ function boot(): void {
     cancelAnimationFrame(animationFrame)
     themeObserver.disconnect()
     traceDock.dispose()
+    transactionLabPanel.dispose()
     movementPad.dispose()
     world?.dispose()
   }, { once: true })
