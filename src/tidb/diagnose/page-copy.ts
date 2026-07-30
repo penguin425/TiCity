@@ -143,6 +143,65 @@ const PROTOCOL_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
   'Commit-protocol comparison complete': 'commit protocol比較が完了',
 }
 
+const GC_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
+  'TiDB GC leader started round 1': 'TiDB GC leaderがround 1を開始',
+  'Lifetime produced a candidate safe point':
+    'lifetimeからcandidate safe pointを算出',
+  'Global min start_ts capped the candidate':
+    'global minStartTSがcandidateを制限',
+  'PD service minimum accepted the bound':
+    'PD service minimumが制限値を採用',
+  'TiDB staged tikv_gc_safe_point':
+    'TiDBがtikv_gc_safe_pointをstage',
+  'Region ScanLock resolution started':
+    'Region ScanLockによるResolve Locksを開始',
+  'Region 8 returned an old lock': 'Region 8がold lockを返却',
+  'Committed primary resolved lock A':
+    'commit済みprimaryに従いlock Aを解決',
+  'Region 20 returned an old lock': 'Region 20がold lockを返却',
+  'Rolled-back primary resolved lock B':
+    'rollback済みprimaryに従いlock Bを解決',
+  'Saved safe point became visible to TiDB caches':
+    '保存safe pointがTiDB cacheから可視化',
+  'Delete Ranges found one eligible DDL range':
+    'Delete Rangesが適格なDDL rangeを1件検出',
+  'All relevant stores completed the range deletion':
+    '関連する全Storeでrange削除が完了',
+  'TiDB published the global safe point to PD':
+    'TiDBがPDへglobal safe pointを公開',
+  'RocksDB bottommost compaction opened GC filters':
+    'RocksDB bottommost compactionがGC filterを開始',
+  'Compaction Filter removed obsolete MVCC records':
+    'Compaction Filterが不要なMVCC recordを削除',
+  'All representative store filters completed':
+    '全代表Storeのfilterが完了',
+  'Round 1 completed behind the blocker':
+    'blockerに制限されたround 1が完了',
+  'The teaching blocker completed': '教材用blockerが完了',
+  'TiDB GC leader started round 2': 'TiDB GC leaderがround 2を開始',
+  'Lifetime produced the next candidate':
+    'lifetimeから次のcandidateを算出',
+  'No active transaction capped the candidate':
+    'candidateを制限するactive transactionなし',
+  'PD service minimum accepted the candidate':
+    'PD service minimumがcandidateを採用',
+  'TiDB staged the later tikv_gc_safe_point':
+    'TiDBが後続tikv_gc_safe_pointをstage',
+  'Region ScanLock resolution started round 2':
+    'round 2のRegion ScanLockを開始',
+  'Region 8 scan found no old fixture locks':
+    'Region 8にold fixture lockなし',
+  'Region 20 scan found no old fixture locks':
+    'Region 20にold fixture lockなし',
+  'The later safe point became cache-visible':
+    '後続safe pointがcacheから可視化',
+  'Delete Ranges had no pending fixture task':
+    'Delete Rangesに未処理fixture taskなし',
+  'TiDB published the later global safe point':
+    'TiDBが後続global safe pointを公開',
+  'GC/Storage Lab completed': 'GC/Storage Labが完了',
+}
+
 function protocolEventNameJa(label: string): string | undefined {
   const exact = PROTOCOL_EVENT_LABELS_JA[label]
   if (exact) return exact
@@ -178,10 +237,25 @@ function protocolEventNameJa(label: string): string | undefined {
   return undefined
 }
 
+function gcEventNameJa(label: string): string | undefined {
+  const exact = GC_EVENT_LABELS_JA[label]
+  if (exact) return exact
+  const unsafeDestroyRange = /^(.+) received UnsafeDestroyRange$/.exec(label)
+  if (unsafeDestroyRange?.[1]) {
+    return `${unsafeDestroyRange[1]}がUnsafeDestroyRangeを受信`
+  }
+  const safePointDetected = /^(.+) detected the greater safe point$/.exec(label)
+  if (safePointDetected?.[1]) {
+    return `${safePointDetected[1]}が更新safe pointを検出`
+  }
+  return undefined
+}
+
 export function diagnoseEventName(locale: Locale, event: TraceEvent): string {
   return locale === 'ja'
     ? LOCK_EVENT_LABELS_JA[event.label] ??
       protocolEventNameJa(event.label) ??
+      gcEventNameJa(event.label) ??
       event.label
     : event.label
 }

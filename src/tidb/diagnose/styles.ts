@@ -437,6 +437,15 @@ export const DIAGNOSE_CSS = `
 .tidb-diagnose__panel[data-diagnose-section="gc"] { grid-area: gc; }
 .tidb-diagnose__panel[data-diagnose-section="tiflash"] { grid-area: tiflash; }
 
+.tidb-diagnose__panel[data-diagnose-section="gc-safe-point-stores"],
+.tidb-diagnose__panel[data-diagnose-section="gc-coordinator-path"],
+.tidb-diagnose__panel[data-diagnose-section="gc-resolve-locks"],
+.tidb-diagnose__panel[data-diagnose-section="gc-delete-ranges"],
+.tidb-diagnose__panel[data-diagnose-section="gc-store-compaction"],
+.tidb-diagnose__panel[data-diagnose-section="gc-mvcc-chains"] {
+  display: none;
+}
+
 .tidb-diagnose[data-active-lab="raft"] .tidb-diagnose__grid {
   grid-template-areas:
     "cluster raft-peers"
@@ -492,6 +501,67 @@ export const DIAGNOSE_CSS = `
 .tidb-diagnose[data-active-lab="protocol"]
   .tidb-diagnose__panel[data-diagnose-section="protocol-region-state"] {
   grid-area: protocol-region-state;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"] .tidb-diagnose__grid {
+  grid-template-areas:
+    "gc-safe-point gc-safe-point"
+    "gc-coordinator gc-coordinator"
+    "gc-resolve-locks gc-delete-ranges"
+    "gc-store-compaction gc-store-compaction"
+    "gc-mvcc-chains gc-mvcc-chains"
+    "cluster transactions"
+    "cluster lock-waits"
+    "cluster application-retry"
+    "deadlocks deadlocks"
+    "hot gc"
+    "tiflash tiflash"
+    "regions regions";
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-safe-point-stores"],
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-coordinator-path"],
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-resolve-locks"],
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-delete-ranges"],
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-store-compaction"],
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-mvcc-chains"] {
+  display: block;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-safe-point-stores"] {
+  grid-area: gc-safe-point;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-coordinator-path"] {
+  grid-area: gc-coordinator;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-resolve-locks"] {
+  grid-area: gc-resolve-locks;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-delete-ranges"] {
+  grid-area: gc-delete-ranges;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-store-compaction"] {
+  grid-area: gc-store-compaction;
+}
+
+.tidb-diagnose[data-active-lab="gc-storage"]
+  .tidb-diagnose__panel[data-diagnose-section="gc-mvcc-chains"] {
+  grid-area: gc-mvcc-chains;
 }
 
 .tidb-diagnose__panel-head {
@@ -603,6 +673,26 @@ export const DIAGNOSE_CSS = `
 .tidb-diagnose__panel[data-diagnose-section="protocol-client-path"]
   .tidb-diagnose__table td[data-column="backgroundScheduling"] {
   min-width: 13rem;
+  white-space: normal;
+}
+
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="boundRule"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="maxWaitBoundary"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="coordinatorStep"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="semanticBoundary"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="raftBoundary"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="timingBoundary"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="anchorRule"],
+.tidb-diagnose__panel[data-privacy-boundary="synthetic-aggregate-only"]
+  .tidb-diagnose__table td[data-column="deleteRule"] {
+  min-width: 14rem;
   white-space: normal;
 }
 
@@ -938,6 +1028,25 @@ export const DIAGNOSE_CSS = `
       "protocol-selection"
       "protocol-client-path"
       "protocol-region-state"
+      "cluster"
+      "transactions"
+      "lock-waits"
+      "deadlocks"
+      "application-retry"
+      "hot"
+      "gc"
+      "tiflash"
+      "regions";
+  }
+
+  .tidb-diagnose[data-active-lab="gc-storage"] .tidb-diagnose__grid {
+    grid-template-areas:
+      "gc-safe-point"
+      "gc-coordinator"
+      "gc-resolve-locks"
+      "gc-delete-ranges"
+      "gc-store-compaction"
+      "gc-mvcc-chains"
       "cluster"
       "transactions"
       "lock-waits"

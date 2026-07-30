@@ -17,6 +17,12 @@ export const DIAGNOSE_SECTIONS = [
   'protocol-selection',
   'protocol-client-path',
   'protocol-region-state',
+  'gc-safe-point-stores',
+  'gc-coordinator-path',
+  'gc-resolve-locks',
+  'gc-delete-ranges',
+  'gc-store-compaction',
+  'gc-mvcc-chains',
   'transactions',
   'lock-waits',
   'deadlocks',
@@ -27,6 +33,15 @@ export const DIAGNOSE_SECTIONS = [
   'tiflash',
 ] as const
 export type DiagnoseSection = (typeof DIAGNOSE_SECTIONS)[number]
+
+const GC_DETAIL_SECTIONS = new Set<DiagnoseSection>([
+  'gc-safe-point-stores',
+  'gc-coordinator-path',
+  'gc-resolve-locks',
+  'gc-delete-ranges',
+  'gc-store-compaction',
+  'gc-mvcc-chains',
+])
 
 export const DIAGNOSE_SUMMARY_SECTIONS = [
   'cluster',
@@ -159,6 +174,12 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
     'protocol-selection': '宣言済みfixture profile / outcome（固定）',
     'protocol-client-path': 'Exact-event client応答 / timestamp',
     'protocol-region-state': 'Exact-event Region Raft / MVCC状態',
+    'gc-safe-point-stores': 'Exact-event GC safe point / 保存先',
+    'gc-coordinator-path': 'GC coordinator順序',
+    'gc-resolve-locks': 'Region ScanLock / ResolveLock',
+    'gc-delete-ranges': 'Delete Ranges / Store fan-out',
+    'gc-store-compaction': 'TiKV検出 / Compaction Filter',
+    'gc-mvcc-chains': '代表MVCC chain cleanup',
     transactions: 'Transactions / locks',
     'lock-waits': '現在のロック待機',
     deadlocks: 'デッドロック履歴',
@@ -176,6 +197,12 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
     'protocol-selection': 'Declared fixture profile / outcome (static)',
     'protocol-client-path': 'Exact-event client path and timestamps',
     'protocol-region-state': 'Exact-event Region Raft / MVCC state',
+    'gc-safe-point-stores': 'Exact-event GC safe point / stores',
+    'gc-coordinator-path': 'GC coordinator order',
+    'gc-resolve-locks': 'Region ScanLock / ResolveLock',
+    'gc-delete-ranges': 'Delete Ranges / Store fan-out',
+    'gc-store-compaction': 'TiKV detection / Compaction Filter',
+    'gc-mvcc-chains': 'Representative MVCC chain cleanup',
     transactions: 'Transactions / locks',
     'lock-waits': 'Active lock waits',
     deadlocks: 'Deadlock history',
@@ -437,6 +464,56 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     returnedMinCommitTs: '返却min_commit_ts',
     returnedMinCommitTsSource: '返却min_commit_ts由来',
     asyncApplyPrewrite: 'async apply prewrite',
+    round: 'round',
+    candidateSafePoint: 'candidate',
+    globalMinStartTs: 'global minStartTS',
+    transactionBound: 'minStartTS - 1',
+    boundRule: 'safe pointの境界',
+    serviceSafePoint: 'PD service minimum',
+    mysqlStagedSafePoint: 'mysql.tidb staged',
+    visibilitySafePoint: 'TiDB visibility保存値',
+    visibilityStore: 'visibility保存先',
+    cacheBarrier: 'cache barrier',
+    gcLeaderLeaseStore: 'GC leader lease',
+    pdGlobalSafePoint: 'PD global safe point',
+    globalStore: 'global保存先',
+    blockerStatus: 'blocker状態',
+    maxWaitBoundary: 'max wait境界',
+    order: '順序',
+    coordinatorStep: 'coordinator step',
+    pipelineState: 'exact-event状態',
+    stateStore: '状態保存先',
+    semanticBoundary: '実装境界',
+    implementation: '実装',
+    scanState: 'scan状態',
+    pendingLocks: '未解決lock',
+    resolvedCommit: 'commit解決',
+    resolvedRollback: 'rollback解決',
+    command: 'ResolveLock command',
+    raftBoundary: 'Raft境界',
+    rangeSlot: '合成DDL range',
+    rangeStatus: 'range状態',
+    eligibility: '適格条件',
+    fanout: 'fan-out',
+    raftstoreMode: 'raftstore',
+    privacyBoundary: 'privacy境界',
+    detectedSafePoint: 'TiKV検出safe point',
+    publishedSafePoint: 'PD公開safe point',
+    detectionState: '検出状態',
+    compaction: 'compaction',
+    filterActive: 'filter稼働',
+    storagePath: 'storage path',
+    legacyRegionGc: 'legacy Region GC',
+    timingBoundary: '時間境界',
+    chainSlot: '合成chain',
+    versions: 'version数',
+    filtered: 'filter済み',
+    anchors: '保持anchor',
+    present: '残存',
+    defaultCfDeletes: 'Default CF削除',
+    anchorRule: 'Put anchor規則',
+    deleteRule: 'Delete規則',
+    compactionLevel: 'compaction level',
   },
   en: {
     client: 'client',
@@ -557,6 +634,56 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     returnedMinCommitTs: 'returned min_commit_ts',
     returnedMinCommitTsSource: 'returned min_commit_ts source',
     asyncApplyPrewrite: 'async apply prewrite',
+    round: 'round',
+    candidateSafePoint: 'candidate',
+    globalMinStartTs: 'global minStartTS',
+    transactionBound: 'minStartTS - 1',
+    boundRule: 'safe-point bound',
+    serviceSafePoint: 'PD service minimum',
+    mysqlStagedSafePoint: 'mysql.tidb staged',
+    visibilitySafePoint: 'TiDB visibility saved',
+    visibilityStore: 'visibility store',
+    cacheBarrier: 'cache barrier',
+    gcLeaderLeaseStore: 'GC leader lease',
+    pdGlobalSafePoint: 'PD global safe point',
+    globalStore: 'global store',
+    blockerStatus: 'blocker status',
+    maxWaitBoundary: 'max-wait boundary',
+    order: 'order',
+    coordinatorStep: 'coordinator step',
+    pipelineState: 'exact-event state',
+    stateStore: 'state store',
+    semanticBoundary: 'implementation boundary',
+    implementation: 'implementation',
+    scanState: 'scan state',
+    pendingLocks: 'pending locks',
+    resolvedCommit: 'resolved commit',
+    resolvedRollback: 'resolved rollback',
+    command: 'ResolveLock command',
+    raftBoundary: 'Raft boundary',
+    rangeSlot: 'synthetic DDL range',
+    rangeStatus: 'range state',
+    eligibility: 'eligibility',
+    fanout: 'fan-out',
+    raftstoreMode: 'raftstore',
+    privacyBoundary: 'privacy boundary',
+    detectedSafePoint: 'TiKV detected safe point',
+    publishedSafePoint: 'PD published safe point',
+    detectionState: 'detection state',
+    compaction: 'compaction',
+    filterActive: 'filter active',
+    storagePath: 'storage path',
+    legacyRegionGc: 'legacy Region GC',
+    timingBoundary: 'timing boundary',
+    chainSlot: 'synthetic chain',
+    versions: 'versions',
+    filtered: 'filtered',
+    anchors: 'retained anchors',
+    present: 'present',
+    defaultCfDeletes: 'Default CF deletes',
+    anchorRule: 'Put-anchor rule',
+    deleteRule: 'Delete rule',
+    compactionLevel: 'compaction level',
   },
 }
 
@@ -672,6 +799,70 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'cfWrite:empty': '空',
     'cfWrite:commit': 'commit record',
     'returnedMinCommitTsSource:tikv_prewrite_result': 'TiKV Prewrite応答',
+    'boundRule:min_candidate_transaction_bound_service_minimum':
+      'candidate・minStartTS - 1・PD service minimumの最小値',
+    'maxWaitBoundary:within_max_wait_reported_not_killed':
+      '30秒ごとの報告対象内。GCはtransactionをkillしない',
+    'maxWaitBoundary:fixture_completed_not_max_wait_or_kill':
+      'fixtureが明示的に完了。max wait到達でもGCによるkillでもない',
+    'coordinatorStep:stage_mysql_tidb_status':
+      'mysql.tidbへhuman-readable statusをstage',
+    'coordinatorStep:resolve_locks': 'Region ScanLock後にResolveLock',
+    'coordinatorStep:save_visibility_and_cross_100_second_barrier':
+      'visibility safe pointを保存し100秒barrierを通過',
+    'coordinatorStep:delete_ranges': 'DDL whole-range taskをDelete Ranges',
+    'coordinatorStep:publish_pd_global_safe_point':
+      'PD global safe pointを公開',
+    'pipelineState:pending': '未到達',
+    'pipelineState:active': '進行中',
+    'pipelineState:complete': '完了',
+    'semanticBoundary:human_readable_status_not_pd_global':
+      'human-readable status。PD global値ではない',
+    'semanticBoundary:region_scan_then_resolve_lock':
+      'Region単位でScanLock後にold lockを解決',
+    'semanticBoundary:saved_after_resolve_locks_before_delete_ranges':
+      'Resolve Locks後・Delete Ranges前に保存',
+    'semanticBoundary:ddl_whole_ranges_only':
+      'DDL whole-range recordのみ。per-key MVCC filterとは別',
+    'semanticBoundary:coordinator_ends_storage_cleanup_async':
+      '公開後coordinatorは完了。storage cleanupは非同期',
+    'implementation:REGION_SCAN_LOCK': 'Region ScanLock',
+    'scanState:not_scanned': '未scan',
+    'scanState:scanned': 'scan済み',
+    'command:normal_tikv_write_command': '通常のTiKV write command',
+    'raftBoundary:resolve_lock_raft_detail_outside_slice':
+      'ResolveLockのRaft detailはこのslice外（no-Raftとはしない）',
+    'rangeStatus:pending': '未適格',
+    'rangeStatus:eligible': 'direct fan-out適格',
+    'rangeStatus:deleted': '全Store完了',
+    'eligibility:record_drop_ts_below_safe_point':
+      'DDL recordのdrop_tsがsafe point未満',
+    'fanout:every_relevant_store': '関連する各Storeへ個別送信',
+    'raftstoreMode:v1_classic': 'classic raftstore-v1',
+    'raftBoundary:unsafe_destroy_range_bypasses_region_raft':
+      'このclassic fixtureのUnsafeDestroyRangeはRegion Raftを迂回',
+    'privacyBoundary:no_range_boundaries_retained':
+      '実key range boundaryを保持しない',
+    'detectionState:pending': 'PD値の検出待ち',
+    'detectionState:observed': 'PD公開値を検出済み',
+    'storagePath:pd_poll_then_rocksdb_compaction_filter':
+      'PDをpoll後、RocksDB Compaction Filter',
+    'legacyRegionGc:not_scheduled_when_compaction_filter_enabled':
+      'Compaction Filter有効時はscheduleしない',
+    'raftBoundary:compaction_filter_creates_no_raft_entry':
+      'Compaction Filter自体はRaft entryを作らない',
+    'timingBoundary:deterministic_bottommost_fixture_not_live_timing':
+      'bottommostの固定教材。live compaction時刻の保証ではない',
+    'eligibility:commit_ts_at_or_below_published_safe_point':
+      'commit_ts <= 公開safe point',
+    'anchorRule:newest_put_at_or_below_safe_point_retained':
+      'safe point以下の最新Putをsnapshot anchorとして保持',
+    'deleteRule:newest_delete_can_remove_older_chain':
+      '最新Deleteならそれ以前のchain全体を削除可能',
+    'compactionLevel:bottommost_model_fixture':
+      'bottommost（MODEL fixture）',
+    'representation:logical_chains_counted_once':
+      'logical chainを1回だけ集計（replica倍しない）',
   },
   en: {
     'detectorScope:cluster_wide': 'cluster-wide',
@@ -751,6 +942,70 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'cfLock:prewrite': 'Prewrite lock',
     'cfWrite:commit': 'commit record',
     'returnedMinCommitTsSource:tikv_prewrite_result': 'TiKV Prewrite response',
+    'boundRule:min_candidate_transaction_bound_service_minimum':
+      'minimum of candidate, minStartTS - 1, and PD service minimum',
+    'maxWaitBoundary:within_max_wait_reported_not_killed':
+      'reported every 30 s while eligible; GC does not kill the transaction',
+    'maxWaitBoundary:fixture_completed_not_max_wait_or_kill':
+      'fixture completed explicitly; not a max-wait expiry or GC kill',
+    'coordinatorStep:stage_mysql_tidb_status':
+      'stage human-readable status in mysql.tidb',
+    'coordinatorStep:resolve_locks': 'Region ScanLock, then ResolveLock',
+    'coordinatorStep:save_visibility_and_cross_100_second_barrier':
+      'save visibility safe point and cross the 100-second barrier',
+    'coordinatorStep:delete_ranges': 'Delete Ranges for DDL whole-range tasks',
+    'coordinatorStep:publish_pd_global_safe_point':
+      'publish the PD global safe point',
+    'pipelineState:pending': 'pending',
+    'pipelineState:active': 'active',
+    'pipelineState:complete': 'complete',
+    'semanticBoundary:human_readable_status_not_pd_global':
+      'human-readable status, not the PD global value',
+    'semanticBoundary:region_scan_then_resolve_lock':
+      'scan each Region, then resolve its old locks',
+    'semanticBoundary:saved_after_resolve_locks_before_delete_ranges':
+      'saved after Resolve Locks and before Delete Ranges',
+    'semanticBoundary:ddl_whole_ranges_only':
+      'DDL whole-range records only; separate from per-key MVCC filtering',
+    'semanticBoundary:coordinator_ends_storage_cleanup_async':
+      'coordinator ends after publication; storage cleanup is asynchronous',
+    'implementation:REGION_SCAN_LOCK': 'Region ScanLock',
+    'scanState:not_scanned': 'not scanned',
+    'scanState:scanned': 'scanned',
+    'command:normal_tikv_write_command': 'normal TiKV write command',
+    'raftBoundary:resolve_lock_raft_detail_outside_slice':
+      'ResolveLock Raft detail is outside this slice; this is not a no-Raft claim',
+    'rangeStatus:pending': 'not eligible',
+    'rangeStatus:eligible': 'eligible for direct fan-out',
+    'rangeStatus:deleted': 'completed on all stores',
+    'eligibility:record_drop_ts_below_safe_point':
+      'DDL record drop_ts is below the safe point',
+    'fanout:every_relevant_store': 'sent separately to every relevant store',
+    'raftstoreMode:v1_classic': 'classic raftstore-v1',
+    'raftBoundary:unsafe_destroy_range_bypasses_region_raft':
+      'UnsafeDestroyRange bypasses Region Raft in this classic fixture',
+    'privacyBoundary:no_range_boundaries_retained':
+      'no real key-range boundaries retained',
+    'detectionState:pending': 'waiting to detect the PD value',
+    'detectionState:observed': 'PD published value observed',
+    'storagePath:pd_poll_then_rocksdb_compaction_filter':
+      'poll PD, then RocksDB Compaction Filter',
+    'legacyRegionGc:not_scheduled_when_compaction_filter_enabled':
+      'not scheduled while Compaction Filter is enabled',
+    'raftBoundary:compaction_filter_creates_no_raft_entry':
+      'Compaction Filter itself creates no Raft entry',
+    'timingBoundary:deterministic_bottommost_fixture_not_live_timing':
+      'deterministic bottommost fixture, not a live compaction-time guarantee',
+    'eligibility:commit_ts_at_or_below_published_safe_point':
+      'commit_ts <= published safe point',
+    'anchorRule:newest_put_at_or_below_safe_point_retained':
+      'retain the newest Put at or below the safe point as snapshot anchor',
+    'deleteRule:newest_delete_can_remove_older_chain':
+      'a newest Delete can remove its entire older chain',
+    'compactionLevel:bottommost_model_fixture':
+      'bottommost (MODEL fixture)',
+    'representation:logical_chains_counted_once':
+      'logical chains counted once, not multiplied by replicas',
   },
 }
 
@@ -1006,6 +1261,265 @@ function protocolRegionRows(state: Record<string, unknown>): DiagnosticRow[] {
   )
 }
 
+const GC_PHASE_ORDER = [
+  'idle',
+  'preparing',
+  'safe_point_bounded',
+  'resolving_locks',
+  'caching_safe_point',
+  'deleting_ranges',
+  'publishing_safe_point',
+  'tikv_observing',
+  'compacting',
+  'between_rounds',
+  'complete',
+] as const
+
+function gcLabState(state: Record<string, unknown>): Record<string, unknown> {
+  return record(state.gcLab)
+}
+
+function gcPhaseRank(gcLab: Record<string, unknown>): number {
+  const index = GC_PHASE_ORDER.indexOf(
+    value(gcLab.phase) as (typeof GC_PHASE_ORDER)[number],
+  )
+  return index < 0 ? 0 : index
+}
+
+function gcSafePointStoreRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const gcLab = gcLabState(state)
+  if (Object.keys(gcLab).length === 0) return []
+  const safePoint = record(gcLab.safePoint)
+  const blocker = record(gcLab.blocker)
+  const configuration = record(gcLab.configuration)
+  return [{
+    round: value(gcLab.round),
+    phase: value(gcLab.phase),
+    candidateSafePoint: value(safePoint.candidate),
+    globalMinStartTs: value(safePoint.globalMinStartTs),
+    transactionBound: value(safePoint.activeTransactionBound),
+    boundRule: 'min_candidate_transaction_bound_service_minimum',
+    serviceSafePoint: value(safePoint.serviceSafePoint),
+    mysqlStagedSafePoint: value(safePoint.staged),
+    visibilitySafePoint: value(safePoint.visibilitySaved),
+    visibilityStore: '/tidb/store/gcworker/saved_safe_point',
+    cacheBarrier:
+      `${value(configuration.visibilityCacheBarrierSeconds)} s · implementation barrier`,
+    gcLeaderLeaseStore: value(configuration.gcLeaderLeaseStore),
+    pdGlobalSafePoint: value(safePoint.published),
+    globalStore: 'PD gc/safe_point',
+    blockerStatus: value(blocker.status),
+    maxWaitBoundary: blocker.status === 'completed'
+      ? 'fixture_completed_not_max_wait_or_kill'
+      : 'within_max_wait_reported_not_killed',
+  }]
+}
+
+type GcPipelineState = 'pending' | 'active' | 'complete'
+
+function gcCoordinatorRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const gcLab = gcLabState(state)
+  if (Object.keys(gcLab).length === 0) return []
+  const safePoint = record(gcLab.safePoint)
+  const phase = value(gcLab.phase)
+  const phaseRank = gcPhaseRank(gcLab)
+  const serviceSafePoint = safePoint.serviceSafePoint
+  const atServicePoint = (
+    candidate: unknown
+  ): boolean => serviceSafePoint !== null &&
+    serviceSafePoint !== undefined &&
+    candidate === serviceSafePoint
+  const locks = array(record(gcLab.resolveLocks).locks).map(record)
+  const scannedRegionIds = array(record(gcLab.resolveLocks).scannedRegionIds)
+  const expectedRegionIds = new Set(locks.map((lock) => lock.regionId))
+  const resolveComplete = expectedRegionIds.size > 0 &&
+    [...expectedRegionIds].every((regionId) =>
+      scannedRegionIds.includes(regionId)) &&
+    locks.every((lock) => lock.status !== 'pending')
+  const ranges = array(gcLab.deleteRanges).map(record)
+  const deleteComplete = phaseRank > GC_PHASE_ORDER.indexOf('deleting_ranges') ||
+    (
+      phase === 'deleting_ranges' &&
+      ranges.every((range) => range.status === 'deleted')
+    )
+
+  function phaseState(
+    activePhase: (typeof GC_PHASE_ORDER)[number],
+    complete: boolean,
+  ): GcPipelineState {
+    if (complete) return 'complete'
+    const activeRank = GC_PHASE_ORDER.indexOf(activePhase)
+    if (phaseRank === activeRank) return 'active'
+    return phaseRank > activeRank ? 'complete' : 'pending'
+  }
+
+  return [
+    {
+      order: '0',
+      coordinatorStep: 'stage_mysql_tidb_status',
+      pipelineState: atServicePoint(safePoint.staged) ? 'complete' : 'pending',
+      stateStore: 'mysql.tidb / tikv_gc_safe_point',
+      semanticBoundary: 'human_readable_status_not_pd_global',
+    },
+    {
+      order: '1',
+      coordinatorStep: 'resolve_locks',
+      pipelineState: phaseState('resolving_locks', resolveComplete),
+      stateStore: value(record(gcLab.resolveLocks).implementation),
+      semanticBoundary: 'region_scan_then_resolve_lock',
+    },
+    {
+      order: '2',
+      coordinatorStep: 'save_visibility_and_cross_100_second_barrier',
+      pipelineState: phaseState(
+        'caching_safe_point',
+        phaseRank >= GC_PHASE_ORDER.indexOf('caching_safe_point') &&
+          atServicePoint(safePoint.visibilitySaved),
+      ),
+      stateStore: '/tidb/store/gcworker/saved_safe_point',
+      semanticBoundary:
+        'saved_after_resolve_locks_before_delete_ranges',
+    },
+    {
+      order: '3',
+      coordinatorStep: 'delete_ranges',
+      pipelineState: phaseState('deleting_ranges', deleteComplete),
+      stateStore: 'DDL delete-range records',
+      semanticBoundary: 'ddl_whole_ranges_only',
+    },
+    {
+      order: '4',
+      coordinatorStep: 'publish_pd_global_safe_point',
+      pipelineState: phaseState(
+        'publishing_safe_point',
+        phaseRank >= GC_PHASE_ORDER.indexOf('publishing_safe_point') &&
+          atServicePoint(safePoint.published),
+      ),
+      stateStore: 'PD gc/safe_point',
+      semanticBoundary: 'coordinator_ends_storage_cleanup_async',
+    },
+  ]
+}
+
+function gcResolveLockRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const gcLab = gcLabState(state)
+  if (Object.keys(gcLab).length === 0) return []
+  const resolveLocks = record(gcLab.resolveLocks)
+  const configuration = record(gcLab.configuration)
+  const locks = array(resolveLocks.locks).map(record)
+  const scanned = new Set(array(resolveLocks.scannedRegionIds))
+  const regionIds = [...new Set([
+    ...locks.map((lock) => lock.regionId),
+    ...scanned,
+  ])].sort((a, b) => Number(a) - Number(b))
+  return regionIds.map((regionId) => {
+    const regionLocks = locks.filter((lock) => lock.regionId === regionId)
+    return {
+      implementation: value(resolveLocks.implementation),
+      region: value(regionId),
+      scanState: scanned.has(regionId) ? 'scanned' : 'not_scanned',
+      pendingLocks: value(regionLocks.filter((lock) =>
+        lock.status === 'pending').length),
+      resolvedCommit: value(regionLocks.filter((lock) =>
+        lock.status === 'resolved_commit').length),
+      resolvedRollback: value(regionLocks.filter((lock) =>
+        lock.status === 'resolved_rollback').length),
+      command: 'normal_tikv_write_command',
+      raftBoundary: configuration.resolveLockRaftDetailModeled === false
+        ? 'resolve_lock_raft_detail_outside_slice'
+        : '—',
+    }
+  })
+}
+
+function gcDeleteRangeRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const gcLab = gcLabState(state)
+  if (Object.keys(gcLab).length === 0) return []
+  const stores = array(gcLab.stores).map(record)
+  const configuration = record(gcLab.configuration)
+  return array(gcLab.deleteRanges).map(record).flatMap((range, rangeIndex) =>
+    stores.map((store) => ({
+      rangeSlot: `synthetic-ddl-range-${rangeIndex + 1}`,
+      store: value(store.storeId),
+      rangeStatus: value(range.status),
+      eligibility: 'record_drop_ts_below_safe_point',
+      request: value(configuration.deleteRangeRequest),
+      fanout: 'every_relevant_store',
+      raftstoreMode: value(record(gcLab.configuration).raftstoreMode),
+      raftBoundary: configuration.deleteRangeBypassesRaft === true
+        ? 'unsafe_destroy_range_bypasses_region_raft'
+        : '—',
+      privacyBoundary: 'no_range_boundaries_retained',
+    })),
+  )
+}
+
+function gcStoreCompactionRows(
+  state: Record<string, unknown>,
+): DiagnosticRow[] {
+  const gcLab = gcLabState(state)
+  if (Object.keys(gcLab).length === 0) return []
+  const safePoint = record(gcLab.safePoint)
+  const configuration = record(gcLab.configuration)
+  const serviceSafePoint = safePoint.serviceSafePoint
+  const currentPointPublished = serviceSafePoint !== null &&
+    serviceSafePoint !== undefined &&
+    safePoint.published === serviceSafePoint
+  return array(gcLab.stores).map((entry) => {
+    const store = record(entry)
+    const observed = currentPointPublished &&
+      store.detectedSafePoint === safePoint.published
+    return {
+      store: value(store.storeId),
+      detectedSafePoint: value(store.detectedSafePoint),
+      publishedSafePoint: value(safePoint.published),
+      detectionState: observed ? 'observed' : 'pending',
+      compaction: value(store.compaction),
+      filterActive: value(store.filterActive),
+      storagePath: 'pd_poll_then_rocksdb_compaction_filter',
+      legacyRegionGc: configuration.compactionFilterEnabled === true
+        ? 'not_scheduled_when_compaction_filter_enabled'
+        : '—',
+      raftBoundary: 'compaction_filter_creates_no_raft_entry',
+      timingBoundary:
+        'deterministic_bottommost_fixture_not_live_timing',
+    }
+  })
+}
+
+function gcMvccChainRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const gcLab = gcLabState(state)
+  if (Object.keys(gcLab).length === 0) return []
+  const storage = record(gcLab.storage)
+  return array(gcLab.keyChains).map((entry, chainIndex) => {
+    const chain = record(entry)
+    const versions = array(chain.versions).map(record)
+    const filtered = versions.filter((version) => version.state === 'filtered')
+    return {
+      chainSlot: `synthetic-chain-${chainIndex + 1}`,
+      region: value(chain.regionId),
+      versions: value(versions.length),
+      filtered: value(filtered.length),
+      anchors: value(versions.filter((version) =>
+        version.state === 'retained_anchor').length),
+      present: value(versions.filter((version) =>
+        version.state !== 'filtered').length),
+      defaultCfDeletes: value(filtered.filter((version) =>
+        version.writeType === 'put' &&
+        version.valueStorage === 'write_and_default_cf').length),
+      eligibility: 'commit_ts_at_or_below_published_safe_point',
+      anchorRule: 'newest_put_at_or_below_safe_point_retained',
+      deleteRule: 'newest_delete_can_remove_older_chain',
+      compactionLevel: value(storage.compactionLevel),
+      representation: value(storage.representation),
+      timingBoundary:
+        'deterministic_bottommost_fixture_not_live_timing',
+    }
+  })
+}
+
 function lockLabState(state: Record<string, unknown>): Record<string, unknown> {
   return record(state.lockLab)
 }
@@ -1217,6 +1731,12 @@ export function projectDiagnostics(snapshot: TiCityState | unknown): DiagnosticP
     'protocol-selection': () => protocolSelectionRows(state),
     'protocol-client-path': () => protocolClientPathRows(state),
     'protocol-region-state': () => protocolRegionRows(state),
+    'gc-safe-point-stores': () => gcSafePointStoreRows(state),
+    'gc-coordinator-path': () => gcCoordinatorRows(state),
+    'gc-resolve-locks': () => gcResolveLockRows(state),
+    'gc-delete-ranges': () => gcDeleteRangeRows(state),
+    'gc-store-compaction': () => gcStoreCompactionRows(state),
+    'gc-mvcc-chains': () => gcMvccChainRows(state),
     transactions: () => transactionRows(state),
     'lock-waits': () => lockWaitRows(state),
     deadlocks: () => deadlockRows(state),
@@ -1338,9 +1858,15 @@ function rowTone(section: DiagnoseSection, row: DiagnosticRow): SummaryTone {
   if (
     section === 'protocol-selection' ||
     section === 'protocol-client-path' ||
-    section === 'protocol-region-state'
+    section === 'protocol-region-state' ||
+    section === 'gc-safe-point-stores' ||
+    section === 'gc-coordinator-path' ||
+    section === 'gc-resolve-locks' ||
+    section === 'gc-delete-ranges' ||
+    section === 'gc-store-compaction' ||
+    section === 'gc-mvcc-chains'
   ) {
-    // Protocol Lab compares valid paths; post-response cleanup is not a warning.
+    // Detailed labs explain valid paths; intermediate states are not warnings.
     return 'neutral'
   }
   if (section === 'hot-regions') {
@@ -1838,6 +2364,9 @@ function projectionTable(
       'data-diagnose-section': projection.id,
       'data-tone': tone,
       'aria-labelledby': titleId,
+      ...(GC_DETAIL_SECTIONS.has(projection.id)
+        ? { 'data-privacy-boundary': 'synthetic-aggregate-only' }
+        : {}),
     },
   })
   panel.append(
@@ -1938,6 +2467,9 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
     ) &&
     projection.rows.length > 0
   )
+  const hasGcDetail = projections.some((projection) =>
+    GC_DETAIL_SECTIONS.has(projection.id) && projection.rows.length > 0
+  )
   installCityUiStyles(root.ownerDocument ?? document)
   installDiagnoseStyles(root.ownerDocument ?? document)
 
@@ -1986,11 +2518,13 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
 
   root.classList.add('tidb-surface', 'tidb-diagnose')
   root.setAttribute('lang', locale)
-  root.dataset.activeLab = hasProtocolDetail
-    ? 'protocol'
-    : hasRaftDetail
-      ? 'raft'
-      : 'none'
+  root.dataset.activeLab = hasGcDetail
+    ? 'gc-storage'
+    : hasProtocolDetail
+      ? 'protocol'
+      : hasRaftDetail
+        ? 'raft'
+        : 'none'
   root.replaceChildren(
     element('header', { className: 'tidb-diagnose__head' },
       element('div', { className: 'tidb-diagnose__head-copy' },
