@@ -28,6 +28,17 @@ export type {
   RaftLabPeerDefinition,
 } from './raft-lab'
 export {
+  createProtocolLabState,
+  freezeProtocolLabSnapshot,
+  isProtocolLabDelta,
+  reduceProtocolLabState,
+} from './protocol-lab'
+export type {
+  ProtocolLabDelta,
+  ProtocolLabLaneDefinition,
+  ProtocolLabRegionDefinition,
+} from './protocol-lab'
+export {
   createTiDBSimulation,
   DEFAULT_TIDB_CONTROLS,
 } from './simulation'
@@ -78,6 +89,14 @@ export type {
   TraceMetadataValue,
   TraceOutcome,
   TracePath,
+  TraceProtocolEligibilitySnapshot,
+  TraceProtocolLabSnapshot,
+  TraceProtocolLaneId,
+  TraceProtocolLaneSnapshot,
+  TraceProtocolLaneStage,
+  TraceProtocolRaftOperation,
+  TraceProtocolRaftStage,
+  TraceProtocolRegionSnapshot,
   TracePessimisticLockSnapshot,
   TraceMvccSnapshot,
   TraceRaftLabElectionSnapshot,

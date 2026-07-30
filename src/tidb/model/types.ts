@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-4'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-5'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -340,6 +340,136 @@ export interface TraceRaftLabSnapshot {
   pd: TraceRaftLabPdSnapshot
 }
 
+export type TraceProtocolLaneId = 'one_pc' | 'async_commit' | 'two_pc'
+
+export type TraceProtocolLaneStage =
+  | 'idle'
+  | 'requested'
+  | 'started'
+  | 'selected'
+  | 'latest_ts'
+  | 'prewriting'
+  | 'prewritten'
+  | 'commit_ts'
+  | 'committing'
+  | 'client_acknowledged'
+  | 'background'
+  | 'complete'
+
+export type TraceProtocolRaftOperation =
+  | 'one_pc_prewrite'
+  | 'prewrite'
+  | 'commit_primary'
+  | 'commit_secondary'
+  | 'commit_async'
+
+export type TraceProtocolRaftStage =
+  | 'idle'
+  | 'proposed'
+  | 'persisted_quorum'
+  | 'committed'
+  | 'applied'
+
+export interface TraceProtocolRegionSnapshot {
+  regionId: number
+  role: 'primary' | 'secondary'
+  leaderStoreId: StoreId
+  voterStoreIds: readonly [StoreId, StoreId, StoreId]
+  mutationCount: number
+  raft: Readonly<{
+    operation: TraceProtocolRaftOperation | null
+    stage: TraceProtocolRaftStage
+    index: number | null
+    persistedStoreIds: readonly StoreId[]
+    acknowledgements: number
+    quorum: 2
+  }>
+  mvcc: Readonly<{
+    defaultCf: 'empty' | 'value'
+    lockCf: 'empty' | 'prewrite'
+    writeCf: 'empty' | 'commit'
+    /** Only Async Commit prewrite locks carry this modeled flag. */
+    asyncCommit: boolean
+    /**
+     * Count metadata is shown only on the primary lock. The model never
+     * retains or projects real secondary keys.
+     */
+    secondaryCount: number
+  }>
+  returnedMinCommitTs: number | null
+}
+
+export interface TraceProtocolEligibilitySnapshot {
+  enable1Pc: true
+  enableAsyncCommit: true
+  consistency: 'linearizable'
+  mutationCount: number
+  totalKeyBytes: number
+  regionCount: number
+  onePcEligible: boolean
+  asyncCommitEligible: boolean
+  selected: ResolvedCommitProtocol
+  selectionReason:
+    | 'single_region_one_pc_model_case'
+    | 'multi_region_async_commit_model_case'
+    | 'async_key_count_limit_model_case'
+  onePcRejectedBeforeRpc: boolean
+  asyncRejectedAtClientPrecheck: boolean
+  onePcDecisionPoint: 'region_batching' | 'tikv_prewrite'
+  asyncDecisionPoint: 'client_precheck' | 'tikv_prewrite'
+  runtimeFallback: false
+  tryOnePcSent: boolean
+  asyncKeyCountLimit: 256
+  asyncTotalKeyBytesLimit: 4096
+}
+
+export interface TraceProtocolLaneSnapshot {
+  id: TraceProtocolLaneId
+  protocol: ResolvedCommitProtocol
+  requestId: string
+  transactionId: string
+  stage: TraceProtocolLaneStage
+  eligibility: TraceProtocolEligibilitySnapshot
+  startTs: number | null
+  latestTs: number | null
+  requestMinCommitTs: number | null
+  maxCommitTs: number | null
+  commitTs: number | null
+  commitTsSource:
+    | 'tikv_one_pc_result'
+    | 'max_prewrite_min_commit_ts'
+    | 'pd_tso_after_prewrite'
+    | null
+  clientResponded: boolean
+  backgroundComplete: boolean
+  regions: readonly TraceProtocolRegionSnapshot[]
+}
+
+/**
+ * Model-5 comparison state for three independent optimistic transactions.
+ * Transaction coordination and each Region's Raft quorum remain distinct.
+ */
+export interface TraceProtocolLabSnapshot {
+  phase: 'idle' | 'running' | 'complete'
+  focusLaneId: TraceProtocolLaneId | null
+  consistency: 'linearizable'
+  transactionMode: 'optimistic'
+  transactionScope: 'global'
+  representation: 'aggregate_counts_only'
+  safeWindowMs: 2000
+  coordinatorLayer: 'tidb_transaction_commit'
+  raftLayer: 'per_region_consensus'
+  tikvAsyncApplyPrewrite: false
+  clientBoundary: 'response_before_cleanup_completion'
+  backgroundScheduling: 'deterministic_after_client_boundary_model_policy'
+  maxCommitTsPolicy: 'representative_safe_window_model_bound'
+  lanes: readonly [
+    TraceProtocolLaneSnapshot,
+    TraceProtocolLaneSnapshot,
+    TraceProtocolLaneSnapshot,
+  ]
+}
+
 export type TraceLockTransactionStatus =
   | 'active'
   | 'waiting'
@@ -430,6 +560,8 @@ export interface TraceStateSnapshot {
   lockLab?: TraceLockLabSnapshot
   /** Present only for the model-4 Region Raft failure vertical slice. */
   raftLab?: TraceRaftLabSnapshot
+  /** Present only for the model-5 commit-protocol comparison. */
+  protocolLab?: TraceProtocolLabSnapshot
 }
 
 export type TraceStateDelta =
@@ -622,6 +754,51 @@ export type TraceStateDelta =
     retryOfTransactionId: string
     fixedBackoffMs: number
     newTransactionId: string | null
+  }>
+  | Readonly<{
+    kind: 'protocol_lab_focus'
+    laneId: TraceProtocolLaneId | null
+    phase: 'running' | 'complete'
+  }>
+  | Readonly<{
+    kind: 'protocol_lane_stage'
+    laneId: TraceProtocolLaneId
+    from: TraceProtocolLaneStage
+    to: TraceProtocolLaneStage
+  }>
+  | Readonly<{
+    kind: 'protocol_timestamp'
+    laneId: TraceProtocolLaneId
+    purpose:
+      | 'start_ts'
+      | 'latest_ts'
+      | 'request_min_commit_ts'
+      | 'max_commit_ts'
+      | 'returned_min_commit_ts'
+      | 'one_pc_commit_ts'
+      | 'async_commit_ts'
+      | 'commit_ts'
+    source: 'pd' | 'tidb_model_bound' | 'tikv'
+    timestamp: number
+    regionId?: number
+  }>
+  | Readonly<{
+    kind: 'protocol_region_raft'
+    laneId: TraceProtocolLaneId
+    regionId: number
+    operation: TraceProtocolRaftOperation
+    action: 'propose' | 'persist_quorum' | 'commit' | 'apply'
+    index: number
+    storeIds?: readonly StoreId[]
+  }>
+  | Readonly<{
+    kind: 'protocol_client_response'
+    laneId: TraceProtocolLaneId
+    commitTs: number
+  }>
+  | Readonly<{
+    kind: 'protocol_background_complete'
+    laneId: TraceProtocolLaneId
   }>
 
 export interface TraceEvent {
