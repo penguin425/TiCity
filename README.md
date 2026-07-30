@@ -16,8 +16,8 @@ Live site: <https://penguin425.github.io/TiCity/>
 ![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.8.0 is the current published release. It targets the TiDB v8.5 LTS
-> line as a static, offline model and includes the model-6 GC/Storage Lab.
+> TiCity v0.9.0 is the current published release. It targets the TiDB v8.5 LTS
+> line as a static, offline model and includes the model-7 TiFlash/MPP Lab.
 > TiCity does not execute SQL or return real data or invented result rows. A
 > single SQL statement entered by the user is classified entirely in the
 > browser, and only a modeled route and explanation are generated.
@@ -65,6 +65,17 @@ Live site: <https://penguin425.github.io/TiCity/>
   the default Compaction Filter path with retained Put anchors
 - Logical MVCC chains counted once rather than multiplied by three replicas,
   including a Delete-chain example and long-value cleanup in DEFAULT CF
+- A model-7 TiFlash/MPP Lab that expands one 56-event immutable receipt from
+  persistent Region learner replication through per-Region snapshot gates and
+  ephemeral MPP Exchange to the distinct TiDB root
+- Three selected learner projections for Regions 24–26 across two
+  scenario-local TiFlash Stores, with learner role, non-voter status, leader
+  commit, receive, apply, DeltaMerge write, and applied-index state
+- A separate safe-ts/ReadIndex gate for each selected Region: one safe-ts fast
+  path and two ReadIndex waits that cannot return a stale result
+- Two fragments, four non-root TiFlash tasks, four all-to-all HashPartition
+  tunnels, and two PassThrough streams to the distinct `tidb-root`; all six
+  tunnels are ephemeral query transport, not persistent Region replication
 - A causal event graph with immutable post-event snapshots, explicit
   fork/join dependencies, a client-response boundary, and background
   secondary cleanup
@@ -88,9 +99,9 @@ The application has three views:
 
 | URL | Purpose |
 |---|---|
-| [`…/TiCity/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/?scenario=commit-protocols&event=trace-1-event-32) | 3D City and the scenario-selected detailed Lab at the Async Commit client-response boundary |
-| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | Causal event DAG plus the selected Lab's separate protocol, lock, election, or GC/storage semantics |
-| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | Exact-event transaction, protocol, Raft, MVCC, lock/deadlock/retry, and GC/storage diagnostics |
+| [`…/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37`](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37) | 3D City at the Region 26 learner applied-index transition, with persistent replication and ephemeral Exchange on separate rails |
+| [`…/machine/?scenario=tiflash-mpp&event=trace-1-event-37`](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37) | The same exact-event causal DAG plus the separate two-fragment, four-task semantic graph |
+| [`…/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37`](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37) | The same exact-event learner, Region gate, task, six-tunnel, retry, and TiDB-root state |
 
 Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
 through the same immutable receipt; looping reuses that receipt and never
@@ -201,6 +212,48 @@ line-level references.
 
 ![TiCity GC/Storage Lab at the first-round Compaction Filter event](docs/gc-storage-lab.png)
 
+Open the TiFlash/MPP Lab at the same exact model-7 event in
+[City](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37),
+[Machine](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37),
+or [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37).
+Its immutable 56-event receipt begins with a fixed steady-state learner
+backlog. It does not model a client write or initial replica creation. The
+three selected learner projections cover Regions 24–26 across two
+scenario-local TiFlash Stores; they are a bounded teaching fixture, not every
+learner replica in a cluster.
+
+The persistent replication rail keeps TiKV Region commit, proxy receive,
+TiFlash apply, committed DeltaMerge write, and learner applied-index advance
+as separate events. Snapshot readiness is then decided independently for each
+Region. Region 24 has `start_ts <= self_safe_ts` and skips ReadIndex. Regions
+25 and 26 request ReadIndex and wait until the local learner applied index
+reaches the returned index before lock/MVCC checks and post-read Region
+validation. `AVAILABLE` and `PROGRESS` describe replica provisioning only;
+they do **not** make a Region ready for the requested snapshot. ReadIndex is a
+consistency barrier, not a mechanism that copies missing data, and a timeout
+would produce an error rather than a stale result.
+
+The declared successful MPP fixture builds two fragments and four non-root
+TiFlash tasks. Four all-to-all HashPartition tunnels carry aggregate blocks
+between the scan/partial-aggregate and final-aggregate fragments; two
+PassThrough streams feed the distinct TiDB `tidb-root`. These six tunnels are
+ephemeral query transport. They do not persist data or mutate learner indexes,
+Region Raft, or MVCC state. The successful baseline records
+`retryCount=0` and `fallback=false`; it does not claim that every failure is
+retryable or that fallback is unconditional.
+
+Every event carries the same kind of deeply frozen post-event snapshot used by
+City, Machine, and Diagnose. Replay and looping move a cursor over that one
+receipt instead of reapplying learner commands or rerunning the query. Its
+privacy boundary retains only opaque synthetic tokens, teaching indexes, enum
+states, and bucketed counts. It contains no raw SQL, literal, network address,
+key/value, group key, aggregate result, row, session ID, production TSO, raw
+error, stack, or live-cluster observation. See
+[Model Boundary](docs/MODEL_BOUNDARY.md) for the exact source pins and
+failure-boundary qualifications.
+
+![TiCity TiFlash/MPP Lab separating persistent learner replication from ephemeral Exchange](docs/tiflash-mpp-lab.png)
+
 ## Representative scenarios
 
 1. Point reads and routing
@@ -211,7 +264,7 @@ line-level references.
 6. A sequential-key hotspot and Region split
 7. A TiKV failure and leader election
 8. A two-round, 43-event long-running transaction and GC/storage trace
-9. TiFlash catch-up and MPP aggregation
+9. A 56-event TiFlash learner-replication, snapshot-gating, and MPP Exchange trace
 
 ## Local development
 
@@ -282,12 +335,22 @@ src/tidb/
   classic raftstore-v1 fixture. ResolveLock's internal Raft detail, raftstore-v2
   Delete Range behavior, compaction scheduling/timing, actual SST layout,
   physical bytes, and Raft log GC are not modeled.
+- In the model-7 TiFlash/MPP Lab, all 56 events carry one deeply frozen
+  `tiflashMppLab` post-event snapshot. The three selected Region learners span
+  two scenario-local TiFlash Stores. Persistent learner replication remains
+  separate from six ephemeral Exchange tunnels; two fragments and four
+  non-root TiFlash tasks feed a distinct TiDB root.
+- TiFlash replica provisioning is not snapshot readiness. Each selected
+  Region independently follows the safe-ts fast path or waits for its
+  ReadIndex at the local learner applied index. The baseline is a declared
+  successful fixture with zero retries and no TiKV fallback, not a general
+  retry or fallback guarantee.
 - The initial 36 Regions are representative educational values. Additional
   Regions created by splits appear in the 2D diagnostics, while the 3D City
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
 
-Detailed mechanism-level projections in v0.8 apply to five scenarios. The
+Detailed mechanism-level projections in v0.9 apply to six scenarios. The
 cross-Region transaction expands transaction 2PC, per-Region Raft, and
 conceptual MVCC. Lock Lab expands leader-memory lock contention and hands off
 its commit path instead of duplicating that pipeline. Raft Failure Lab expands
@@ -297,8 +360,11 @@ timestamp authority, one-Region 1PC, two-Region Async Commit, and regular 2PC,
 including their client/background boundaries and independent Region Raft
 chains. GC/Storage Lab expands its two safe-point and storage
 rounds without folding Resolve Locks, Delete Range, global publication, or
-physical compaction into one step. The other four scenarios remain compact
-teaching traces and do not yet claim the same mechanism depth.
+physical compaction into one step. TiFlash/MPP Lab expands persistent learner
+replication, per-Region snapshot gates, task construction, ephemeral Exchange,
+and TiDB root delivery without conflating those planes. The other three
+scenarios remain compact teaching traces and do not yet claim the same
+mechanism depth.
 
 The `window.TICITY` object in the browser console exposes the model, playback,
 scenarios, and latest immutable trace for inspection and control.

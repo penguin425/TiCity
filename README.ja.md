@@ -15,8 +15,8 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 ![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.8.0が公開済みの最新releaseです。TiDB v8.5 LTS系列を対象にした
-> 静的・オフラインのモデルで、model-6 GC/Storage Labを含みます。SQLを実行せず、
+> TiCity v0.9.0が公開済みの最新releaseです。TiDB v8.5 LTS系列を対象にした
+> 静的・オフラインのモデルで、model-7 TiFlash/MPP Labを含みます。SQLを実行せず、
 > 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
 > モデル上の経路と説明だけを生成します。
 
@@ -60,6 +60,17 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
   default Compaction Filter経路
 - 3 replica分へ乗算せず1回だけ数える論理MVCC chain。Deleteによる旧chainの
   除去と、DEFAULT CFの長いvalueのcleanupも含みます
+- 永続的なRegion learner複製からRegion単位のsnapshot gate、一時的なMPP
+  Exchange、独立したTiDB rootまでを、1つの56 eventの不変なreceiptへ展開する
+  model-7 TiFlash/MPP Lab
+- scenario内だけの2つのTiFlash StoreにまたがるRegion 24〜26の3つの選択learner
+  projection。learner role、非voter、Leader commit、receive、apply、
+  DeltaMerge write、applied indexの状態を表示
+- 選択したRegionごとに分離したsafe-ts／ReadIndex gate。1つはsafe-ts fast
+  path、2つはReadIndex待機となり、古い結果を返す経路はありません
+- 2 fragment、TiFlash上の4つの非root task、all-to-all HashPartition tunnel
+  4本、独立した`tidb-root`へのPassThrough stream 2本。6本すべてが永続的な
+  Region複製ではなく、一時的なquery transportです
 - 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
   応答後のsecondary cleanupを持つ因果イベントグラフ
 - 3D City、Machine、Diagnoseへ投影される1つの不変なreceipt。Lock Labの
@@ -80,9 +91,9 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 
 | URL | 内容 |
 |---|---|
-| [`…/TiCity/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/?scenario=commit-protocols&event=trace-1-event-32) | Async Commitのclient応答境界における3D Cityとscenarioで選択した詳細Lab |
-| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | 因果event DAGと、選択Labから分離されたprotocol、lock、選出、GC／storageの意味graph |
-| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | exact event時点のtransaction、protocol、Raft、MVCC、lock／deadlock／retry、GC／storage診断 |
+| [`…/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37`](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37) | Region 26のlearner applied-index遷移を表示する3D City。永続的な複製と一時的なExchangeを別railで表示 |
+| [`…/machine/?scenario=tiflash-mpp&event=trace-1-event-37`](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37) | 同じexact eventの因果DAGと、分離した2 fragment／4 taskの意味graph |
+| [`…/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37`](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37) | 同じexact eventのlearner、Region gate、task、6 tunnel、retry、TiDB root状態 |
 
 3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
 不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。
@@ -185,6 +196,44 @@ Raft entryを作りません。後のpatch releaseやraftstore-v2では内部経
 
 ![round 1のCompaction Filter eventを表示するTiCity GC/Storage Lab](docs/gc-storage-lab.png)
 
+TiFlash/MPP Labは、model-7の同じexact eventを
+[City](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37)、
+[Machine](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37)、
+[Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37)
+で開けます。56 eventの不変なreceiptは、固定したsteady-stateのlearner backlog
+から始まり、client writeや初期replica作成はモデル化しません。選択した3つの
+learner projectionは、scenario内だけの2つのTiFlash Storeに置かれたRegion
+24〜26を対象とします。これは範囲を限定した教育用fixtureであり、cluster内の
+すべてのlearner replicaではありません。
+
+永続的な複製railでは、TiKV Region commit、proxy receive、TiFlash apply、
+committed DeltaMerge write、learner applied-index advanceを別々のeventとして
+扱います。その後、snapshot readinessをRegionごとに独立して判定します。
+Region 24は`start_ts <= self_safe_ts`なのでReadIndexを省略します。Region 25と
+26はReadIndexを要求し、local learnerのapplied indexが返されたindexへ達した後で
+lock／MVCC checkとread後のRegion validationへ進みます。`AVAILABLE`と
+`PROGRESS`が表すのはreplicaのprovisioningだけで、要求したsnapshotをRegionから
+すぐ読めることを意味しません。ReadIndexは整合性barrierであって不足dataの
+copy手段ではなく、timeout時は古い結果ではなくerrorになります。
+
+成功することを宣言したMPP fixtureは、2 fragmentとTiFlash上の4つの非root taskを
+作ります。all-to-all HashPartition tunnel 4本がscan／partial-aggregate
+fragmentからfinal-aggregate fragmentへaggregate blockを運び、PassThrough
+stream 2本が独立したTiDBの`tidb-root`へfinal-task blockを送ります。この6本は
+一時的なquery transportです。dataを永続化せず、learner index、Region Raft、
+MVCC stateも変更しません。成功baselineは`retryCount=0`と`fallback=false`を
+記録しますが、すべてのfailureをretryできることや無条件のfallbackは主張しません。
+
+各eventには、City、Machine、Diagnoseが使う同種のdeep-freeze済みevent後snapshot
+があります。再生とループは1つのreceipt上でcursorを動かし、learner commandの
+再applyやqueryの再実行はしません。privacy境界として保持するのは、不透明な合成
+token、教育用index、enum state、bucket化したcountだけです。raw SQL、literal、
+network address、key／value、group key、aggregate result、row、session ID、
+production TSO、raw error、stack、実cluster観測値は含みません。正確なsource
+pinとfailure境界の条件は[モデル境界](docs/MODEL_BOUNDARY.md)を参照してください。
+
+![永続的なlearner複製と一時的なExchangeを分離するTiCity TiFlash/MPP Lab](docs/tiflash-mpp-lab.png)
+
 ## 代表シナリオ
 
 1. Point Readとルーティング
@@ -195,7 +244,7 @@ Raft entryを作りません。後のpatch releaseやraftstore-v2では内部経
 6. 連番キーhotspotとRegion split
 7. TiKV障害とleader election
 8. 2-round、43 eventの長時間transactionとGC／storage trace
-9. TiFlash catch-upとMPP集約
+9. 56 eventのTiFlash learner複製、snapshot gate、MPP Exchange trace
 
 ## ローカル実行
 
@@ -262,20 +311,31 @@ src/tidb/
   raftstore-v1 fixtureへ固定しています。ResolveLock内部のRaft詳細、
   raftstore-v2のDelete Range挙動、compactionのschedule／時間、実SST layout、
   physical byte、Raft log GCはモデル化しません。
+- model-7 TiFlash/MPP Labでは、56 eventすべてがdeep-freezeされた
+  `tiflashMppLab`のevent後snapshotを持ちます。選択した3つのRegion learnerは
+  scenario内だけの2つのTiFlash Storeにまたがります。永続的なlearner複製は
+  6本の一時的なExchange tunnelと分離され、2 fragmentとTiFlash上の4つの
+  非root taskが独立したTiDB rootへ結果を送ります。
+- TiFlash replicaのprovisioningはsnapshot readinessではありません。選択した
+  Regionはそれぞれ独立にsafe-ts fast pathを使うか、local learnerのapplied
+  indexでReadIndexを待ちます。baselineはretry 0回、TiKV fallbackなしと宣言した
+  成功fixtureであり、一般的なretry／fallback保証ではありません。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-v0.8では、機構レベルの詳細projectionを5 scenarioへ適用しています。
+v0.9では、機構レベルの詳細projectionを6 scenarioへ適用しています。
 複数Regionトランザクションはtransaction 2PC、RegionごとのRaft、概念上のMVCCを
 展開します。Lock LabはLeaderメモリ上のlock競合を展開し、commit経路を前者の
 pipelineへhandoffします。Raft Failure Labは1 Regionの選出、current-term
 Leader no-op、PDの観測とrouting、TiDB内部request復旧を展開します。Protocol
 Labはeligibility、timestamp authority、1 Regionの1PC、2 RegionのAsync Commit、
 通常2PCを、client／background境界と独立したRegion Raft chainを含めて展開します。
-GC/Storage LabはResolve Locks、Delete Range、global公開、物理
-compactionを1つのstepへまとめず、2回のsafe-point／storage roundを展開します。
-ほかの4 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
+GC/Storage LabはResolve Locks、Delete Range、global公開、物理compactionを
+1つのstepへまとめず、2回のsafe-point／storage roundを展開します。
+TiFlash/MPP Labは永続的なlearner複製、Region単位のsnapshot gate、task構築、
+一時的なExchange、TiDB rootへのdeliveryを、それらのplaneを混同せずに展開します。
+ほかの3 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
 
 ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。

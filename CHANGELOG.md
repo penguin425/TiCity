@@ -4,6 +4,86 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.9.0] — 2026-07-31
+
+- Complete the model-7 TiFlash/MPP Lab vertical slice across exact-event City,
+  Machine, and Diagnose, with every surface reading the same selected snapshot
+  from one deterministic 56-event immutable receipt.
+- Replace query-driven node-global `resolved_ts` catch-up with per-Region
+  safe-ts or ReadIndex/applied-index gates and keep persistent learner
+  replication separate from ephemeral MPP Exchange data.
+- Keep `AVAILABLE`/`PROGRESS` provisioning separate from snapshot readiness
+  and present one scheduled learner replica per selected query Region rather
+  than claiming a complete table or Store replica inventory.
+- Pin the TiDB, TiKV, TiFlash, TiFlash proxy, client-go, and PD v8.5.0 source
+  profile while labeling topology, indexes, counts, timing, optimizer choice,
+  and the successful no-retry/no-fallback path as synthetic teaching fixtures.
+- Include bilingual release documentation and the TiFlash/MPP Lab screenshot
+  in the release archive, with deterministic, accessibility, responsive,
+  fixed-capacity, reduced-motion, privacy, source-provenance, and
+  production-build gates.
+
+## [0.9.0-beta.1] — 2026-07-31
+
+- Extend Machine with a persistent learner-replication rail and a separate
+  fragment/task/Exchange semantic graph without replacing its causal event
+  DAG.
+- Extend Diagnose with exact-event learner replication, per-Region read gates,
+  four TiFlash tasks, six Exchange tunnels, and the distinct TiDB root stream.
+- Preserve the selected `scenario` and exact `event` among City, Machine, and
+  Diagnose for all 56 snapshots, including each learner catch-up branch and
+  client-streaming stage.
+- Add browser coverage for the shared snapshot, immutable looping, bilingual
+  accessibility, privacy, responsive layouts, fixed capacities, and the
+  replication-versus-Exchange boundary.
+- Keep the successful baseline at zero retries and no fallback while
+  documenting wait-index, Region/storage reconstruction, Exchange connection,
+  dispatch/root-stream, and configured query-level fallback as different
+  failure boundaries.
+
+## [0.9.0-alpha.2] — 2026-07-31
+
+- Add a fixed-capacity 3D TiFlash/MPP Lab cutaway with two scenario-local
+  TiFlash Stores, three selected-query learner projections, four tasks, and
+  six tunnels.
+- Project each immutable snapshot into an accessible bilingual City inspector
+  with per-Region safe-ts, ReadIndex, apply, DeltaMerge, task, tunnel, result,
+  retry, and fallback state synchronized to the Trace Dock.
+- Keep persistent learner replication and ephemeral MPP Exchange on separate
+  visual rails, with Regions, fragments, tasks, and the TiDB root represented
+  as distinct concepts.
+- Reuse the same immutable 56-event receipt during playback and looping
+  without reapplying learner commands, allocating another query TSO,
+  reconstructing tasks, or rerunning the aggregate.
+
+## [0.9.0-alpha.1] — 2026-07-31
+
+- Introduce the model-7 `tiflash-mpp` mechanism slice with 56 deeply frozen
+  exact-event snapshots and nonempty typed deltas. The receipt begins with a
+  fixed steady-state learner backlog and completes one successful two-stage
+  MPP aggregate.
+- Replace the old query-driven node-global `resolved_ts` catch-up shortcut in
+  this scenario with per-Region `self_safe_ts` and
+  ReadIndex-to-learner-applied-index gates; a Region either passes the safe-ts
+  fast path or waits for the exact required applied index, never returns a
+  stale teaching result.
+- Keep TiKV Region commit, proxy learner-command delivery, TiFlash apply,
+  committed DeltaMerge write, and learner applied-index notification on a
+  persistent replication plane distinct from ephemeral MPP Exchange blocks.
+- Use a scenario-local two-TiFlash-Store fixture with one learner projection
+  for each of three selected query Regions, two fragments, four tasks, four
+  all-to-all HashPartition tunnels, and two PassThrough root streams. The
+  projection is not a complete table or Store replica inventory and does not
+  equate Regions, fragments, or tasks.
+- Keep the successful baseline at `retryCount=0` and
+  `fallbackToTiKV=false`; document terminal wait-index timeout, bounded
+  Region/storage reconstruction, pre-data Exchange connection retry,
+  non-independent dispatch/root-stream retry, and configured query-level
+  fallback before client-visible output as distinct failure boundaries.
+- Pin TiDB, TiKV, TiFlash, TiFlash proxy, client-go, and PD implementation
+  commits and retain only synthetic tokens, indexes, enum state, and bucketed
+  counts.
+
 ## [0.8.0] — 2026-07-31
 
 - Complete the model-6 GC/Storage Lab vertical slice across exact-event City,

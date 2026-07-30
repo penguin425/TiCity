@@ -1,11 +1,14 @@
 # TiCity model boundary
 
-TiCity v0.8.0 model-6 targets the **TiDB v8.5 LTS** line and pins mechanism
+TiCity v0.9.0 model-7 targets the **TiDB v8.5 LTS** line and pins mechanism
 details to TiDB v8.5.0 source commit
 `d13e52ed6e22cc5789bed7c64c861578cd2ed55b`, TiKV v8.5.0 source commit
 `a2c58c94f89cbb410e66d8f85c236308d6fc64f0`, client-go commit
-`006dfb024c26859f2e3757172296d84ef36ff585`, and PD commit
-`d190c0e9082de46128b756f93b1291768dda645a`. This document records which
+`006dfb024c26859f2e3757172296d84ef36ff585`, PD commit
+`d190c0e9082de46128b756f93b1291768dda645a`, TiFlash v8.5.0 commit
+`6e12ba23c70f358f2ffbee837feac24118a3e988`, and TiFlash proxy /
+`tidb-engine-ext` commit
+`b877a976997acb7c552db970c01546b4e82bce18`. This document records which
 visible claims are architectural, which values are deliberately
 representative, and which capabilities are not implemented. TiCity is a
 deterministic educational model, not a TiDB emulator or a live-cluster
@@ -31,7 +34,13 @@ observation tool.
 | Regular 2PC obtains `commit_ts` after prewrite, commits the primary on the client path, and can commit secondaries in the background | The two Region prewrite branches join before modeled PD TSO allocation; primary Raft apply gates the response, and secondary Commit/Raft apply follows on an explicitly background path | [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown), [pinned primary/secondary client path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L998-L1054) |
 | The target client source has Async Commit defaults of 256 keys, 4 KiB total key bytes, and a two-second safe window | Protocol Lab pins 256, 4,096, and two seconds as implementation-profile values. They are not a public stable TiDB contract, benchmark, recommendation, or claim about another patch release | [pinned client defaults](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/config/client.go#L123-L167) |
 | Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
-| TiFlash is an asynchronously replicated Raft learner for HTAP | It never counts toward TiKV voter quorum and has visible catch-up lag | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview) |
+| TiFlash is an asynchronously replicated Raft learner for HTAP | Every learner shown for a selected query Region has `role=learner` and `voter=false`; it never counts toward a TiKV voter quorum. The array projects one scheduled learner replica per selected Region and deliberately omits unselected learners, so it is not a complete table or Store replica inventory | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview), [pinned proxy observer registration](https://github.com/pingcap/tidb-engine-ext/blob/b877a976997acb7c552db970c01546b4e82bce18/proxy_components/engine_store_ffi/src/observer.rs#L66-L103) |
+| Normal TiFlash catch-up applies forwarded Region Raft commands, writes committed Region data, and only then advances the learner applied index | The replication rail keeps leader commit, learner receive, TiFlash apply, DeltaMerge committed write, and applied-index notification separate; initial snapshot ingestion is outside the happy-path fixture | [pinned proxy command forwarding](https://github.com/pingcap/tidb-engine-ext/blob/b877a976997acb7c552db970c01546b4e82bce18/proxy_components/engine_store_ffi/src/core/forward_raft/command.rs#L332-L405), [pinned TiFlash command apply](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/MultiRaft/RaftCommands.cpp#L460-L516), [snapshot-ingestion design](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/docs/design/2022-09-27-improve-snapshot-ingestion.md#L23-L36) |
+| TiFlash snapshot readiness is decided per Region, not by a node-global `resolved_ts` | A Region whose `start_ts` is no greater than `self_safe_ts` takes the fast path; otherwise TiFlash obtains ReadIndex and waits for the local learner `applied_index` to reach it before lock/MVCC checks and post-read Region validation | [pinned safe-ts fast path](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/LearnerReadWorker.cpp#L108-L160), [pinned ReadIndex request and wait](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/ReadIndex.cpp#L40-L124), [pinned lock/cache handling](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/LearnerReadWorker.cpp#L353-L419), [pinned post-read validation](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Flash/Coprocessor/DAGStorageInterpreter.cpp#L1028-L1073) |
+| TiFlash replica `AVAILABLE` and `PROGRESS` describe provisioning rather than immediate readiness for an arbitrary query snapshot | The detailed fixture records placement availability separately from every Region read gate and never derives safe-ts, applied-index, or byte lag from `PROGRESS` | [rolling release-8.5 replica documentation](https://github.com/pingcap/docs/blob/2e1cff6fc860fd83edef254195b931c384938d34/tiflash/create-tiflash-replicas.md#L61-L72) |
+| MPP fragments create tasks per participating TiFlash address and connect them with Exchange tunnels | The fixed two-Store fixture has two fragments, four tasks, four all-to-all HashPartition tunnels, and two PassThrough root streams; it never equates one Region, fragment, and task | [pinned TiDB task construction](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/planner/core/fragment.go#L183-L223), [pinned bottom-up fragment linkage](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/planner/core/fragment.go#L353-L428) |
+| Region Raft replication and MPP Exchange are different planes | Learner commands update persistent Region/MVCC state; Exchange carries ephemeral query blocks and never persists data or changes Raft/MVCC indexes | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview), [pinned Exchange receiver](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Flash/Mpp/ExchangeReceiver.cpp#L636-L699) |
+| TiFlash/MPP retry behavior depends on the failing boundary and on whether output has begun | The happy path records no retry or fallback. Its diagnostic contract distinguishes terminal wait-index timeout, one bounded Region/storage-construction retry, pre-data Exchange connection retry, non-retried Region-bearing dispatch/root-stream establishment, and optional pre-output query-level TiKV fallback | [pinned wait-index timeout](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/LearnerReadWorker.cpp#L44-L64), [pinned Region/storage retry](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Flash/Coprocessor/DAGStorageInterpreter.cpp#L1028-L1073), [pinned Exchange retry](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Flash/Mpp/ExchangeReceiver.cpp#L636-L699), [pinned TiDB MPP client](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/copr/mpp.go#L133-L187), [pinned fallback boundary](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/server/conn.go#L1755-L1812) |
 | Raft Engine stores Raft logs by default in this target line | The TiKV inspector names Raft Engine, not the older RaftDB default | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file) |
 | A Region's Raft leader replicates logs and requires a majority of replicas for a successful write | Raft Failure Lab has three configured voters and independent 2-of-3 Pre-Vote, Vote, and no-op persistence quorums | [TiDB storage and Raft](https://docs.pingcap.com/tidb/v8.5/tidb-storage) |
 | TiKV enables Pre-Vote by default; its default election timeout is 10 ticks and a zero maximum resolves to twice that value | The configured window is shown as 10–20 ticks, separately from the deterministic 13-tick elapsed and candidate-selection model policies | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file) |
@@ -64,6 +73,28 @@ The demo schema gives a TiFlash replica only to `events`. Its analytical example
 is deliberately routed to MPP so the path can be taught. Real TiDB requires a
 table-level replica and lets the cost-based optimizer choose TiKV, TiFlash, or
 both; an aggregate is not automatically a TiFlash query.
+
+The default city topology still has one overview TiFlash building. The
+model-7 TiFlash/MPP Lab is a separate, scenario-local two-Store teaching
+fixture so it can show Store-address grouping with opaque Store tokens and a
+real all-to-all HashPartition shape. Its three Region assignments, two
+fragments, four tasks, six tunnels, synthetic indexes, row/block/packet
+buckets, and event durations are fixed for legibility. They are not a
+deployment recommendation, captured plan, result cardinality, throughput
+sample, or latency benchmark.
+
+The Lab projects exactly one scheduled learner replica for each of the three
+Regions selected by its synthetic query. It does not model unselected learners
+and must not be read as the full learner set for a table, Region, or Store, as
+a placement-rule replica count, or as a recommended topology.
+
+`AVAILABLE=true` and `PROGRESS=1` in that fixture declare that its table
+replica has been provisioned. They do not make any Region immediately readable
+at the requested snapshot. Read readiness remains a per-Region exact-event
+state based on the fixture's synthetic `self_safe_ts`, ReadIndex, and learner
+applied index. TiFlash's two-minute safe-ts difference is only a
+synchronization-diagnosis threshold in the pinned source; the Lab does not use
+it as a correctness gate or authorize a stale result.
 
 Protocol Lab does not derive its three lanes from the SQL visible in the
 workbench. It uses independent, aggregate-only optimistic transaction
@@ -337,10 +368,72 @@ and visibly synthetic transaction, lock, range, chain, and version IDs. It
 contains no SQL text, literal, real or encoded key, key range, row value,
 result row, packet, SST content, or live-cluster observation.
 
-The other four scenarios retain compact teaching traces in this model
+The model-7 `tiflash-mpp` scenario is a sixth mechanism-level vertical slice.
+Its immutable 56-event receipt deliberately begins with a fixed steady-state
+learner backlog, not a client write and not initial replica creation. Three
+TiKV Region commits are forwarded through the proxy as ordinary learner
+commands. Region 24 applies its command before the analytical query begins;
+Regions 25 and 26 remain behind until their per-Region learner-read gates
+require the missing indexes. The three learner entries are one scheduled
+replica projection per selected query Region; unselected learners and the
+table's complete replica inventory are outside this receipt.
+
+After TiDB obtains the synthetic query snapshot, `AVAILABLE=true` and
+`PROGRESS=1` are observed as provisioning facts only. The fixture declares an
+MPP access-path choice, builds two fragments, groups scan Regions by two
+scenario-local opaque TiFlash Store tokens, constructs four TiFlash tasks, and
+registers six tunnels to those tasks or the distinct `tidb-root`. This is a
+fixed successful optimizer fixture, not a claim that a provisioned TiFlash
+replica is always selected or immediately ready for the requested snapshot.
+
+Each Region then takes its own correctness path. Region 24 has
+`start_ts <= self_safe_ts`, so it can skip ReadIndex. Regions 25 and 26 request
+ReadIndex and wait until their local learner applied indexes reach the returned
+indexes. The model shows forwarded TiFlash apply, a committed DeltaMerge write,
+and applied-index notification before those gates become ready. ReadIndex is
+a consistency barrier; it does not copy missing data or advance a safe
+timestamp to the query TSO on demand. A wait timeout would produce an error,
+never a stale or inconsistent result, but the baseline fixture takes no
+failure branch.
+
+Only after all three gates are ready does the receipt complete synthetic lock
+checks, open the two DeltaMerge snapshot scans, revalidate the three Regions,
+and run partial aggregation. Four all-to-all HashPartition tunnels carry
+ephemeral aggregate blocks to two final tasks. Two PassThrough streams carry
+the final-task blocks to TiDB's root gather. HashPartition is not broadcast,
+PassThrough is not broadcast, and no Exchange event mutates a learner index,
+Raft state, or persistent MVCC data.
+
+The baseline records `retryCount=0` and `fallbackToTiKV=false`; it models no
+failure or recovery branch. That does not imply that every MPP failure is
+retried. In the pinned implementation, wait-index timeout stops that MPP
+learner-read path with an error; Region/storage construction has a bounded
+retry; Exchange connection establishment can retry only before data is
+received; retrying Region-bearing dispatch requires task reconstruction and
+rescheduling rather than an independent RPC replay; and TiDB root
+result-stream establishment is not independently retried. TiKV fallback is
+configured query-level replanning under eligible error conditions before
+client-visible output or another client-side effect, not partial-task resume.
+
+Every TiFlash/MPP Lab event publishes a deeply frozen `tiflashMppLab`
+post-event snapshot and typed deltas. City keeps the persistent learner
+replication rail separate from the ephemeral query Exchange rail. Machine
+derives its fragment/task semantic graph from the same snapshot without
+replacing the causal DAG. Diagnose projects the exact Region gates, indexes,
+tasks, tunnels, retry boundary, and client stream state. Cursor movement and
+looping reuse the same receipt; they never reapply a learner command, allocate
+another query TSO, rebuild tasks, or rerun an aggregate.
+
+The receipt retains only opaque synthetic query/table/Region/Store/fragment/
+task/tunnel tokens, monotonic teaching indexes, enum states, and bucketed
+counts. It contains no raw SQL, literal, address, key, value, group key or
+aggregate result, row, connection/session ID, resource-group name, production
+TSO, raw error message, stack, or live observation.
+
+The other three scenarios retain compact teaching traces in this model
 revision. They use the same causal dependency field but do not yet claim the
 detailed transaction, concurrency-control, Region-election, commit-protocol,
-or GC/storage projection depth of these five vertical slices.
+GC/storage, or TiFlash/MPP projection depth of these six vertical slices.
 
 ## SQL boundary
 
@@ -356,4 +449,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.8.0.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.9.0.
