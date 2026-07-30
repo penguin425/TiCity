@@ -18,6 +18,16 @@ export type {
   LockLabResourceDefinition,
 } from './lock-lab'
 export {
+  createRaftLabState,
+  freezeRaftLabSnapshot,
+  isRaftLabDelta,
+  reduceRaftLabState,
+} from './raft-lab'
+export type {
+  RaftLabDelta,
+  RaftLabPeerDefinition,
+} from './raft-lab'
+export {
   createTiDBSimulation,
   DEFAULT_TIDB_CONTROLS,
 } from './simulation'
@@ -70,6 +80,14 @@ export type {
   TracePath,
   TracePessimisticLockSnapshot,
   TraceMvccSnapshot,
+  TraceRaftLabElectionSnapshot,
+  TraceRaftLabLogSnapshot,
+  TraceRaftLabPdSnapshot,
+  TraceRaftLabPeerRole,
+  TraceRaftLabPeerSnapshot,
+  TraceRaftLabPhase,
+  TraceRaftLabRequestSnapshot,
+  TraceRaftLabSnapshot,
   TraceRaftPeerSnapshot,
   TraceRegionSnapshot,
   TraceReceipt,

@@ -263,7 +263,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-3')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-4')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))
@@ -826,6 +826,191 @@ describe('model-3 Lock Lab deadlock and application retry', () => {
   })
 })
 
+describe('model-4 Region Raft failure and TiDB-internal retry', () => {
+  function receipt() {
+    return createTiDBSimulation({ seed: 425 }).runScenario('tikv-failover')
+  }
+
+  function event(events: readonly TraceEvent[], kind: string): TraceEvent {
+    const found = events.find((candidate) => candidate.kind === kind)
+    if (!found) throw new Error(`Expected event ${kind}`)
+    return found
+  }
+
+  it('publishes a deterministic, acyclic, fully snapshotted failover trace', () => {
+    const first = receipt()
+    const second = receipt()
+    expect(first).toEqual(second)
+    expect(first.events).toHaveLength(27)
+    expect(first.events.every((candidate) => candidate.snapshot?.raftLab))
+      .toBe(true)
+
+    const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))
+    const visited = new Set<string>()
+    const visiting = new Set<string>()
+    const visit = (candidate: TraceEvent): void => {
+      expect(visiting.has(candidate.id), `cycle at ${candidate.id}`).toBe(false)
+      if (visited.has(candidate.id)) return
+      visiting.add(candidate.id)
+      for (const dependencyId of candidate.dependsOn ?? []) {
+        const dependency = byId.get(dependencyId)
+        expect(dependency, `${candidate.id} dependency ${dependencyId}`).toBeDefined()
+        if (!dependency) continue
+        expect(dependency.atMs + dependency.durationMs).toBeLessThanOrEqual(candidate.atMs)
+        visit(dependency)
+      }
+      visiting.delete(candidate.id)
+      visited.add(candidate.id)
+    }
+    for (const candidate of first.events) visit(candidate)
+    expect(visited.size).toBe(first.events.length)
+  })
+
+  it('separates failure, pre-vote, term vote, election, no-op, routing, and retry', () => {
+    const trace = receipt()
+    const kinds = trace.events.map((candidate) => candidate.kind)
+    const ordered = [
+      'region_request_attempt',
+      'tikv_process_unreachable',
+      'region_request_transport_error',
+      'region_request_backoff',
+      'raft_election_timeout',
+      'raft_pre_vote_start',
+      'raft_pre_vote_request',
+      'raft_pre_vote_granted',
+      'raft_candidate_term',
+      'raft_vote_request',
+      'raft_vote_granted',
+      'raft_leader_elected',
+      'raft_leader_noop_propose',
+      'raft_leader_noop_persist',
+      'raft_leader_noop_commit',
+      'raft_leader_noop_apply',
+      'pd_observes_region_leader',
+      'region_cache_refreshed',
+      'region_request_retry',
+      'point_get_recovered',
+      'raft_failover_complete',
+      'raft_follower_noop_apply',
+    ]
+    let prior = -1
+    for (const kind of ordered) {
+      const index = kinds.indexOf(kind)
+      expect(index, kind).toBeGreaterThan(prior)
+      prior = index
+    }
+
+    const failed = event(trace.events, 'tikv_process_unreachable')
+      .snapshot!.raftLab!
+    expect(failed).toMatchObject({
+      phase: 'leader_lost',
+      oldLeaderStoreId: 'tikv-1',
+      leaderStoreId: null,
+      failedStoreId: 'tikv-1',
+      liveVoterCount: 2,
+    })
+    expect(failed.peers.find((peer) => peer.storeId === 'tikv-1'))
+      .toMatchObject({ role: 'offline', healthy: false, lastLogIndex: 42 })
+
+    const preVote = event(trace.events, 'raft_pre_vote_granted')
+      .snapshot!.raftLab!
+    expect(preVote.election).toMatchObject({
+      phase: 'pre_vote',
+      candidateStoreId: 'tikv-2',
+      preVotesGranted: ['tikv-2', 'tikv-3'],
+      configuredElectionTimeoutTicks: 10,
+      configuredMaxElectionTimeoutTicks: 20,
+      elapsedTicks: 13,
+      candidatePolicy: 'lowest_live_up_to_date_store_id_model_policy',
+    })
+    expect(preVote.peers.find((peer) => peer.storeId === 'tikv-2')?.currentTerm)
+      .toBe(1)
+
+    const elected = event(trace.events, 'raft_leader_elected')
+      .snapshot!.raftLab!
+    expect(elected).toMatchObject({
+      phase: 'elected',
+      leaderStoreId: 'tikv-2',
+      quorum: 2,
+    })
+    expect(elected.election.votesGranted).toEqual(['tikv-2', 'tikv-3'])
+    expect(elected.peers.find((peer) => peer.storeId === 'tikv-2'))
+      .toMatchObject({ role: 'leader', currentTerm: 2, votedFor: 'tikv-2' })
+
+    const committed = event(trace.events, 'raft_leader_noop_commit')
+      .snapshot!.raftLab!
+    expect(committed.log).toMatchObject({
+      entryKind: 'leader_noop',
+      index: 43,
+      term: 2,
+      persistedStoreIds: ['tikv-2', 'tikv-3'],
+      committed: true,
+    })
+    expect(event(trace.events, 'raft_leader_noop_propose').metadata.userDataMutation)
+      .toBe(false)
+
+    const final = trace.events.at(-1)!.snapshot!.raftLab!
+    expect(final.request).toMatchObject({
+      logicalRequestId: 'region-request-1',
+      source: 'tidb_internal',
+      attempt: 2,
+      cacheState: 'refreshed',
+      status: 'completed',
+      clientVisibleError: false,
+    })
+    expect(final.log.appliedStoreIds).toEqual(['tikv-2', 'tikv-3'])
+    expect(final.peers.find((peer) => peer.storeId === 'tikv-1'))
+      .toMatchObject({ appliedIndex: 42, healthy: false })
+    expect(final.pd).toEqual({
+      role: 'observer_and_routing_only',
+      observedLeaderStoreId: 'tikv-2',
+      routeLookupCompleted: true,
+    })
+  })
+
+  it('keeps the read, PD, and privacy boundaries explicit', () => {
+    const sim = createTiDBSimulation({ seed: 425 })
+    const trace = sim.runScenario('tikv-failover')
+    expect(trace.succeeded).toBe(true)
+    expect(trace.committed).toBe(false)
+    expect(trace.protocol).toBeNull()
+    expect(sim.state.metrics).toMatchObject({
+      statements: 1,
+      reads: 1,
+      writes: 0,
+      raftEntries: 1,
+      leaderElections: 1,
+    })
+    expect(trace.events.filter((candidate) =>
+      candidate.deltas?.some((delta) =>
+        delta.kind === 'raft_propose' &&
+        delta.operation !== 'leader_noop',
+      ),
+    )).toEqual([])
+    expect(event(trace.events, 'raft_leader_elected').metadata.pdParticipatedInElection)
+      .toBe(false)
+    expect(event(trace.events, 'raft_failover_complete').metadata.applicationRetry)
+      .toBe(false)
+    expect(JSON.stringify(trace.events.map((candidate) => ({
+      snapshot: candidate.snapshot,
+      deltas: candidate.deltas,
+      metadata: candidate.metadata,
+    })))).not.toMatch(
+      /SELECT \*|accounts|id = 425|row value|result row:/i,
+    )
+    for (const candidate of trace.events) {
+      const snapshot = candidate.snapshot!.raftLab!
+      expect(Object.isFrozen(candidate.snapshot)).toBe(true)
+      expect(Object.isFrozen(snapshot)).toBe(true)
+      expect(Object.isFrozen(snapshot.peers)).toBe(true)
+      expect(Object.isFrozen(snapshot.election.preVotesGranted)).toBe(true)
+      expect(Object.isFrozen(snapshot.election.votesGranted)).toBe(true)
+      expect(Object.isFrozen(snapshot.log.persistedStoreIds)).toBe(true)
+      expect(Object.isFrozen(snapshot.log.appliedStoreIds)).toBe(true)
+    }
+  })
+})
+
 describe('guided scenarios', () => {
   it('ships all nine decision-complete scenario receipts', () => {
     const expected: ScenarioId[] = [
@@ -887,7 +1072,7 @@ describe('guided scenarios', () => {
     expect(sim.state.metrics.leaderElections).toBe(1)
     expect(region.term).toBeGreaterThan(1)
     expect(region.peers.find((peer) => peer.raftRole === 'leader')?.healthy).toBe(true)
-    expect(receipt.events.some((event) => event.kind === 'leader_election')).toBe(true)
+    expect(receipt.events.some((event) => event.kind === 'raft_leader_elected')).toBe(true)
   })
 
   it('creates distinct receipt objects across deterministic scenario resets', () => {
