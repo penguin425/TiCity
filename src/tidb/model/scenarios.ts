@@ -34,7 +34,8 @@ export const TIDB_SCENARIOS: readonly TiDBScenarioDefinition[] = [
     description: 'Keep distributed transaction 2PC separate from each Region Raft quorum.',
     sql: 'UPDATE accounts SET balance = balance + 1 WHERE id = 425',
     controls: { transactionMode: 'pessimistic', commitProtocol: '2pc' },
-    regionIds: [0, 18],
+    /* Region 0 and Region 19 have different leaders in the teaching topology. */
+    regionIds: [0, 19],
     forceProtocol: '2pc',
   },
   {

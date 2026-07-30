@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-1'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-2'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -156,6 +156,139 @@ export type TraceDomain =
 
 export type TraceEventStatus = 'queued' | 'active' | 'success' | 'warning' | 'failed'
 export type TraceMetadataValue = string | number | boolean
+export type TracePath = 'critical' | 'background'
+
+export type TraceTransactionStage =
+  | 'request'
+  | 'active'
+  | 'locking'
+  | 'prewriting'
+  | 'prewritten'
+  | 'committing_primary'
+  | 'client_acknowledged'
+  | 'committing_secondary'
+  | 'complete'
+  | 'rolled_back'
+
+export interface TraceTransactionSnapshot {
+  id: string
+  mode: TransactionMode
+  protocol: ResolvedCommitProtocol
+  stage: TraceTransactionStage
+  startTs: number
+  commitTs: number | null
+  regionIds: readonly number[]
+  primaryRegionId: number
+  clientResponded: boolean
+}
+
+export interface TracePessimisticLockSnapshot {
+  transactionId: string
+  leaderStoreId: StoreId
+  /** TiDB v8.5's normal in-memory pessimistic-lock path is leader-local. */
+  storage: 'leader_memory'
+  replicated: false
+}
+
+export interface TraceMvccSnapshot {
+  /** A tentative value is stored in default CF at prewrite and retained at commit. */
+  defaultCf: 'empty' | 'value'
+  /** The durable transactional lock created by prewrite, not the in-memory lock. */
+  lockCf: 'empty' | 'prewrite'
+  /** The commit record that makes the default-CF value visible. */
+  writeCf: 'empty' | 'commit'
+  startTs: number | null
+  commitTs: number | null
+  primary: boolean
+}
+
+export interface TraceRaftPeerSnapshot {
+  storeId: StoreId
+  raftRole: PeerRaftRole
+  matchIndex: number
+  appliedIndex: number
+  healthy: boolean
+}
+
+export interface TraceRegionSnapshot {
+  regionId: number
+  leaderStoreId: StoreId
+  term: number
+  proposedIndex: number | null
+  persistedStoreIds: readonly StoreId[]
+  acknowledgements: number
+  quorum: 2
+  commitIndex: number
+  appliedIndex: number
+  peers: readonly TraceRaftPeerSnapshot[]
+  pessimisticLock: TracePessimisticLockSnapshot | null
+  mvcc: TraceMvccSnapshot
+}
+
+/**
+ * A renderer-safe projection immediately after one detailed model event.
+ * It contains only synthetic teaching state and never SQL text or row values.
+ */
+export interface TraceStateSnapshot {
+  modelVersion: string
+  tsoLastAllocated: number
+  transaction: TraceTransactionSnapshot | null
+  regions: readonly TraceRegionSnapshot[]
+}
+
+export type TraceStateDelta =
+  | Readonly<{
+    kind: 'tso_allocate'
+    purpose: 'start_ts' | 'commit_ts'
+    timestamp: number
+  }>
+  | Readonly<{
+    kind: 'transaction_stage'
+    from: TraceTransactionStage
+    to: TraceTransactionStage
+  }>
+  | Readonly<{
+    kind: 'pessimistic_lock'
+    action: 'acquire' | 'release'
+    regionId: number
+    leaderStoreId: StoreId
+    storage: 'leader_memory'
+  }>
+  | Readonly<{
+    kind: 'raft_propose'
+    regionId: number
+    index: number
+    operation: 'prewrite' | 'commit_primary' | 'commit_secondary'
+  }>
+  | Readonly<{
+    kind: 'raft_persist'
+    regionId: number
+    index: number
+    storeIds: readonly StoreId[]
+  }>
+  | Readonly<{
+    kind: 'raft_commit'
+    regionId: number
+    index: number
+    acknowledgements: number
+    quorum: 2
+  }>
+  | Readonly<{
+    kind: 'raft_apply'
+    regionId: number
+    index: number
+  }>
+  | Readonly<{
+    kind: 'mvcc'
+    regionId: number
+    cf: 'default' | 'lock' | 'write'
+    action: 'put' | 'delete'
+    timestamp: number
+  }>
+  | Readonly<{
+    kind: 'client_response'
+    committed: boolean
+  }>
 
 export interface TraceEvent {
   id: string
@@ -171,6 +304,16 @@ export interface TraceEvent {
   target?: string
   regionId?: number
   transactionId?: string
+  /** Causal parents. An empty list denotes a DAG root. */
+  dependsOn?: readonly string[]
+  /** Whether this event delays the client response or happens afterwards. */
+  path?: TracePath
+  /** Stable lane identifier for parallel Region branches. */
+  branchId?: string
+  /** Post-event projection for deterministic presentation and inspection. */
+  snapshot?: TraceStateSnapshot
+  /** Typed state changes represented by this event. */
+  deltas?: readonly TraceStateDelta[]
   metadata: Readonly<Record<string, TraceMetadataValue>>
 }
 

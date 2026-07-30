@@ -109,6 +109,201 @@ describe('TraceReceipt-driven city flows', () => {
     city.dispose()
   })
 
+  it('preserves overlapping model intervals and exposes every active branch', () => {
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    const events = [
+      event({
+        id: 'region-0-prewrite',
+        atMs: 0,
+        durationMs: 100,
+        domain: 'txn2pc',
+        regionId: 0,
+      }),
+      event({
+        id: 'region-18-prewrite',
+        atMs: 20,
+        durationMs: 100,
+        domain: 'txn2pc',
+        regionId: 18,
+      }),
+    ]
+    const schedule = buildTracePresentationSchedule(events, [100, 100])
+    const firstEnd = schedule.starts[0] + schedule.lives[0]
+    const secondEnd = schedule.starts[1] + schedule.lives[1]
+
+    expect(schedule.starts[1]).toBeGreaterThan(schedule.starts[0])
+    expect(schedule.starts[1]).toBeLessThan(firstEnd)
+    expect(firstEnd).toBeGreaterThan(schedule.starts[1])
+    expect(secondEnd).toBeGreaterThan(firstEnd)
+    expect([...schedule.order]).toEqual([0, 1])
+
+    const parallel = receipt([
+      event({
+        id: 'branch-a',
+        atMs: 0,
+        durationMs: 100,
+        domain: 'raft',
+        regionId: 0,
+      }),
+      event({
+        id: 'branch-b',
+        atMs: 0,
+        durationMs: 100,
+        domain: 'raft',
+        regionId: 18,
+      }),
+    ])
+    const activeIds = flows.playback.activeEventIds
+    const completedIds = flows.playback.completedEventIds
+    flows.play(parallel)
+
+    expect(flows.playback.activeEventIds).toBe(activeIds)
+    expect(flows.playback.completedEventIds).toBe(completedIds)
+    expect(flows.activeEventIds).toBe(activeIds)
+    expect(flows.completedEventIds).toBe(completedIds)
+    expect(flows.playback.activeEventIds).toEqual(['branch-a', 'branch-b'])
+    expect(flows.playback.currentIndex).toBe(1)
+    expect(flows.playback.cursorMs).toBe(0)
+    flows.update(0.01)
+    expect(flows.active).toBe(2)
+    expect(flows.playback.activeEventIds).toEqual(['branch-a', 'branch-b'])
+
+    flows.update(flows.playback.durationMs / 1_000 + 1)
+    expect(flows.playback.activeEventIds).toEqual([])
+    expect(flows.playback.completedEventIds).toEqual(['branch-a', 'branch-b'])
+    expect(flows.playback.cursorMs).toBe(flows.playback.durationMs)
+    expect(flows.cursorMs).toBe(flows.playback.durationMs)
+    flows.dispose()
+    city.dispose()
+  })
+
+  it('starts a causal join after every declared parent while leaving siblings parallel', () => {
+    const parentA = event({
+      id: 'apply-region-0',
+      atMs: 0,
+      durationMs: 100,
+      domain: 'kv',
+      regionId: 0,
+    })
+    const parentB = event({
+      id: 'apply-region-18',
+      atMs: 0,
+      durationMs: 100,
+      domain: 'kv',
+      regionId: 18,
+    })
+    const join = {
+      ...event({
+        id: 'prewrite-join',
+        atMs: 20,
+        durationMs: 20,
+        domain: 'txn2pc',
+      }),
+      dependsOn: ['apply-region-0', 'apply-region-18'],
+    } as TraceEvent
+    const schedule = buildTracePresentationSchedule(
+      [parentA, parentB, join],
+      [80, 180, 40],
+    )
+    const parentEnd = Math.max(
+      schedule.starts[0] + schedule.lives[0],
+      schedule.starts[1] + schedule.lives[1],
+    )
+
+    expect(schedule.starts[0]).toBe(schedule.starts[1])
+    expect(schedule.starts[2]).toBeGreaterThan(parentEnd)
+    expect([...schedule.order]).toEqual([0, 1, 2])
+  })
+
+  it('keeps dependencies optional for legacy receipts and ignores unknown parents', () => {
+    const root = event({
+      id: 'legacy-root',
+      atMs: 0,
+      durationMs: 100,
+      domain: 'sql',
+    })
+    const legacyChild = event({
+      id: 'legacy-child',
+      atMs: 20,
+      durationMs: 80,
+      domain: 'kv',
+    })
+    const unknownParentChild = {
+      ...legacyChild,
+      dependsOn: ['not-in-this-receipt'],
+    } as TraceEvent
+
+    const legacy = buildTracePresentationSchedule([root, legacyChild], [60, 60])
+    const unknown = buildTracePresentationSchedule(
+      [root, unknownParentChild],
+      [60, 60],
+    )
+
+    expect([...unknown.starts]).toEqual([...legacy.starts])
+    expect([...unknown.lives]).toEqual([...legacy.lives])
+    expect([...unknown.order]).toEqual([...legacy.order])
+    expect(unknown.durationMs).toBe(legacy.durationMs)
+  })
+
+  it('steps by parallel start group in both directions', () => {
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    const rootEvent = event({
+      id: 'root',
+      atMs: 0,
+      durationMs: 10,
+      domain: 'tso',
+    })
+    const branchA = {
+      ...event({
+        id: 'branch-a',
+        atMs: 10,
+        durationMs: 20,
+        domain: 'raft',
+        regionId: 0,
+      }),
+      dependsOn: ['root'],
+    } as TraceEvent
+    const branchB = {
+      ...event({
+        id: 'branch-b',
+        atMs: 10,
+        durationMs: 20,
+        domain: 'raft',
+        regionId: 18,
+      }),
+      dependsOn: ['root'],
+    } as TraceEvent
+    const join = {
+      ...event({
+        id: 'join',
+        atMs: 30,
+        durationMs: 10,
+        domain: 'txn2pc',
+      }),
+      dependsOn: ['branch-a', 'branch-b'],
+    } as TraceEvent
+
+    flows.play(receipt([rootEvent, branchA, branchB, join]))
+    expect(flows.activeEventIds).toEqual(['root'])
+
+    flows.step(1)
+    expect(flows.playback.phase).toBe('paused')
+    expect(flows.playback.currentIndex).toBe(2)
+    expect(flows.activeEventIds).toEqual(['branch-a', 'branch-b'])
+
+    flows.step(1)
+    expect(flows.playback.currentIndex).toBe(3)
+    expect(flows.activeEventIds).toEqual(['join'])
+
+    flows.step(-1)
+    expect(flows.playback.currentIndex).toBe(2)
+    expect(flows.activeEventIds).toEqual(['branch-a', 'branch-b'])
+    flows.dispose()
+    city.dispose()
+  })
+
   it('pauses, steps, and replays without changing the receipt timeline', () => {
     const city = createTiDBSceneGraph()
     const flows = createTraceFlows(city)
@@ -197,6 +392,54 @@ describe('TraceReceipt-driven city flows', () => {
     city.dispose()
   })
 
+  it('reuses the same bounded render pool through 50 parallel trace loops', () => {
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    const trace = receipt(Object.freeze([
+      Object.freeze(event({
+        id: 'parallel-a',
+        atMs: 0,
+        durationMs: 30,
+        domain: 'raft',
+        regionId: 0,
+      })),
+      Object.freeze(event({
+        id: 'parallel-b',
+        atMs: 0,
+        durationMs: 30,
+        domain: 'raft',
+        regionId: 18,
+      })),
+    ]))
+    const children = flows.object.children.length
+    const geometry = flows.mesh.geometry
+    const material = flows.mesh.material
+    const modelTimes = trace.events.map(({ atMs, durationMs }) => ({ atMs, durationMs }))
+
+    flows.play(trace)
+    for (let loop = 0; loop < 50; loop++) {
+      flows.update(flows.playback.durationMs / 1_000 + 0.01)
+      expect(flows.playback.phase).toBe('holding')
+      expect(flows.playback.completedEventIds).toEqual(['parallel-a', 'parallel-b'])
+
+      flows.update(TRACE_LOOP_HOLD_MS / 1_000)
+      expect(flows.playback.iteration).toBe(loop + 2)
+      expect(flows.playback.phase).toBe('playing')
+      expect(flows.active).toBe(2)
+      expect(flows.mesh.count).toBe(2)
+      expect(flows.dropped).toBe(0)
+      expect(flows.object.children).toHaveLength(children)
+      expect(flows.mesh.geometry).toBe(geometry)
+      expect(flows.mesh.material).toBe(material)
+    }
+
+    expect(trace.events.map(({ atMs, durationMs }) => ({ atMs, durationMs }))).toEqual(
+      modelTimes,
+    )
+    flows.dispose()
+    city.dispose()
+  })
+
   it('finishes without restarting when looping is disabled', () => {
     const city = createTiDBSceneGraph()
     const flows = createTraceFlows(city)
@@ -221,21 +464,76 @@ describe('TraceReceipt-driven city flows', () => {
     city.dispose()
   })
 
+  it('keeps parallel state deterministic under reduced motion and disables loops by default', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      writable: true,
+      value: {
+        matchMedia: () => ({ matches: true }),
+      },
+    })
+
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    try {
+      flows.play(receipt([
+        event({ id: 'reduced-a', atMs: 0, durationMs: 20, domain: 'raft' }),
+        event({ id: 'reduced-b', atMs: 0, durationMs: 20, domain: 'raft' }),
+      ]))
+      expect(flows.playback).toMatchObject({
+        motion: 'reduced',
+        looping: false,
+      })
+      flows.update(0.01)
+      expect(flows.active).toBe(2)
+      expect(flows.playback.activeEventIds).toEqual(['reduced-a', 'reduced-b'])
+
+      const cursor = flows.playback.cursorMs
+      flows.setPaused(true)
+      flows.update(10)
+      expect(flows.playback.cursorMs).toBe(cursor)
+      expect(flows.playback.phase).toBe('paused')
+
+      flows.setLooping(true)
+      expect(flows.playback.looping).toBe(true)
+    } finally {
+      flows.dispose()
+      city.dispose()
+      if (previousWindow) {
+        Object.defineProperty(globalThis, 'window', previousWindow)
+      } else {
+        Reflect.deleteProperty(globalThis, 'window')
+      }
+    }
+  })
+
   it('stretches a real cross-Region receipt without mutating model time', () => {
     const simulation = createTiDBSimulation()
     const trace = simulation.runScenario('cross-region-transaction')
     const modelDuration = trace.durationMs
-    const modelTimes = trace.events.map(({ atMs }) => atMs)
+    const modelTimes = trace.events.map(({ atMs, durationMs }) => ({ atMs, durationMs }))
+    const parallelBranches = trace.events.filter((event) =>
+      event.branchId !== undefined &&
+      trace.events.some((candidate) =>
+        candidate.id !== event.id &&
+        candidate.atMs === event.atMs &&
+        candidate.dependsOn?.some((dependency) =>
+          event.dependsOn?.includes(dependency),
+        ),
+      ),
+    )
     const city = createTiDBSceneGraph()
     const flows = createTraceFlows(city)
 
     flows.play(trace)
 
-    expect(trace.events).toHaveLength(31)
-    expect(modelDuration).toBe(372)
-    expect(flows.playback.durationMs).toBeGreaterThan(20_000)
+    expect(parallelBranches.length).toBeGreaterThanOrEqual(2)
+    expect(flows.playback.durationMs).toBeGreaterThan(modelDuration)
     expect(trace.durationMs).toBe(modelDuration)
-    expect(trace.events.map(({ atMs }) => atMs)).toEqual(modelTimes)
+    expect(trace.events.map(({ atMs, durationMs }) => ({ atMs, durationMs }))).toEqual(
+      modelTimes,
+    )
     flows.dispose()
     city.dispose()
   })

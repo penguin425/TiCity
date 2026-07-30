@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { TIDB_SCENARIOS } from './scenarios'
 import { createTiDBSimulation } from './simulation'
-import type { RegionState, ScenarioId } from './types'
+import { TIDB_MODEL_VERSION } from './types'
+import type { RegionState, ScenarioId, TraceEvent } from './types'
 
 function expectRegionInvariants(regions: readonly RegionState[]): void {
   const ordered = [...regions].sort((a, b) => a.startKey - b.startKey)
@@ -162,6 +163,13 @@ describe('transactions, Raft, GC, and TiFlash', () => {
     expect(kinds.indexOf('complete')).toBeLessThan(kinds.indexOf('commit_background'))
     expect(receipt.events.filter((event) => event.kind === 'commit_background'))
       .toHaveLength(3)
+    const responseIndex = kinds.indexOf('complete')
+    expect(receipt.events.slice(0, responseIndex + 1).every((event) =>
+      event.path === 'critical',
+    )).toBe(true)
+    expect(receipt.events.slice(responseIndex + 1).every((event) =>
+      event.path === 'background',
+    )).toBe(true)
   })
 
   it('does not elect or serve a Region after two of three voters are lost', () => {
@@ -236,6 +244,223 @@ describe('transactions, Raft, GC, and TiFlash', () => {
     expect(sim.state.tiflash.resolvedTs).toBe(sim.state.tiflash.targetTs)
     expect(sim.state.tiflash.pendingVersions).toBe(0)
     expect(sim.state.tiflash.lagSeconds).toBe(0)
+  })
+})
+
+describe('model-2 detailed cross-Region transaction', () => {
+  function detailedReceipt() {
+    return createTiDBSimulation({ seed: 2026 })
+      .runScenario('cross-region-transaction')
+  }
+
+  function event(receiptEvents: readonly TraceEvent[], kind: string): TraceEvent {
+    const found = receiptEvents.find((candidate) => candidate.kind === kind)
+    if (!found) throw new Error(`Expected event ${kind}`)
+    return found
+  }
+
+  it('publishes a deterministic, acyclic causal graph with two parallel prewrite branches', () => {
+    const first = detailedReceipt()
+    const second = detailedReceipt()
+
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-2')
+    expect(first).toEqual(second)
+
+    const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))
+    const visited = new Set<string>()
+    const visiting = new Set<string>()
+    const visit = (candidate: TraceEvent): void => {
+      expect(visiting.has(candidate.id), `cycle at ${candidate.id}`).toBe(false)
+      if (visited.has(candidate.id)) return
+      visiting.add(candidate.id)
+      for (const dependencyId of candidate.dependsOn ?? []) {
+        const dependency = byId.get(dependencyId)
+        expect(dependency, `${candidate.id} dependency ${dependencyId}`).toBeDefined()
+        if (!dependency) continue
+        expect(dependency.atMs + dependency.durationMs).toBeLessThanOrEqual(candidate.atMs)
+        visit(dependency)
+      }
+      visiting.delete(candidate.id)
+      visited.add(candidate.id)
+    }
+    for (const candidate of first.events) visit(candidate)
+    expect(visited.size).toBe(first.events.length)
+
+    const prewrites = first.events.filter((candidate) => candidate.kind === 'prewrite')
+    expect(prewrites).toHaveLength(2)
+    expect(new Set(prewrites.map((candidate) => candidate.regionId)).size).toBe(2)
+    expect(new Set(prewrites.map((candidate) => candidate.atMs)).size).toBe(1)
+    expect(prewrites[0].dependsOn).toEqual(prewrites[1].dependsOn)
+
+    const proposals = first.events.filter((candidate) =>
+      candidate.kind === 'raft_propose' &&
+      candidate.metadata.operation === 'prewrite',
+    )
+    expect(proposals).toHaveLength(2)
+    expect(new Set(proposals.map((candidate) => candidate.atMs)).size).toBe(1)
+
+    const join = event(first.events, 'all_prewrite_complete')
+    const prewriteTerminals = first.events.filter((candidate) =>
+      candidate.kind === 'mvcc_prewrite',
+    )
+    expect(new Set(join.dependsOn)).toEqual(new Set(
+      prewriteTerminals.map((candidate) => candidate.id),
+    ))
+    const commitTs = event(first.events, 'commit_ts')
+    expect(commitTs.dependsOn).toEqual([join.id])
+    expect(commitTs.atMs).toBeGreaterThanOrEqual(join.atMs + join.durationMs)
+  })
+
+  it('keeps pessimistic locks only in leader memory without advancing Raft', () => {
+    const receipt = detailedReceipt()
+    const locks = receipt.events.filter((candidate) =>
+      candidate.kind === 'pessimistic_lock',
+    )
+
+    expect(locks).toHaveLength(2)
+    for (const lock of locks) {
+      const region = lock.snapshot?.regions.find((candidate) =>
+        candidate.regionId === lock.regionId,
+      )
+      expect(lock.metadata.storage).toBe('leader_memory')
+      expect(lock.metadata.replicated).toBe(false)
+      expect(lock.metadata.raftIndexBefore).toBe(lock.metadata.raftIndexAfter)
+      expect(lock.deltas?.some((delta) => delta.kind.startsWith('raft_'))).toBe(false)
+      expect(region?.pessimisticLock).toEqual({
+        transactionId: lock.transactionId,
+        leaderStoreId: region?.leaderStoreId,
+        storage: 'leader_memory',
+        replicated: false,
+      })
+      expect(region?.commitIndex).toBe(0)
+      expect(region?.appliedIndex).toBe(0)
+    }
+
+    const start = event(receipt.events, 'start_ts')
+    expect(start.snapshot?.transaction?.startTs).toBe(receipt.startTs)
+    expect(receipt.events.filter((candidate) => candidate.kind === 'raft_propose'))
+      .toHaveLength(4)
+  })
+
+  it('models 2-of-3 Raft persistence, apply indexes, and MVCC column families', () => {
+    const receipt = detailedReceipt()
+    const firstSnapshot = receipt.events[0].snapshot
+
+    expect(firstSnapshot?.regions).toHaveLength(2)
+    expect(new Set(firstSnapshot?.regions.map((region) => region.leaderStoreId)).size)
+      .toBe(2)
+    for (const candidate of receipt.events) {
+      expect(candidate.snapshot, candidate.kind).toBeDefined()
+      expect(candidate.deltas, candidate.kind).toBeDefined()
+      expect(candidate.path, candidate.kind).toMatch(/^(critical|background)$/)
+      for (const region of candidate.snapshot?.regions ?? []) {
+        expect(region.peers).toHaveLength(3)
+        expect(region.quorum).toBe(2)
+        expect(region.appliedIndex).toBeLessThanOrEqual(region.commitIndex)
+        for (const peer of region.peers) {
+          expect(peer.appliedIndex).toBeLessThanOrEqual(region.commitIndex)
+        }
+      }
+    }
+
+    const persists = receipt.events.filter((candidate) => candidate.kind === 'raft_persist')
+    const quorums = receipt.events.filter((candidate) => candidate.kind === 'quorum_commit')
+    expect(persists).toHaveLength(4)
+    expect(quorums).toHaveLength(4)
+    for (const persisted of persists) {
+      const region = persisted.snapshot?.regions.find((candidate) =>
+        candidate.regionId === persisted.regionId,
+      )
+      expect(region?.persistedStoreIds).toHaveLength(2)
+      expect(region?.acknowledgements).toBe(2)
+      expect(persisted.metadata.voters).toBe(3)
+    }
+    for (const quorum of quorums) {
+      expect(quorum.metadata.acknowledgements).toBe(2)
+      expect(quorum.metadata.quorum).toBe(2)
+      expect(quorum.metadata.voters).toBe(3)
+    }
+
+    const prewritten = receipt.events.filter((candidate) =>
+      candidate.kind === 'mvcc_prewrite',
+    )
+    expect(prewritten).toHaveLength(2)
+    for (const candidate of prewritten) {
+      const region = candidate.snapshot?.regions.find((item) =>
+        item.regionId === candidate.regionId,
+      )
+      expect(region?.pessimisticLock).toBeNull()
+      expect(region?.mvcc).toMatchObject({
+        defaultCf: 'value',
+        lockCf: 'prewrite',
+        writeCf: 'empty',
+        startTs: receipt.startTs,
+        commitTs: null,
+      })
+    }
+
+    const finalSnapshot = receipt.events.at(-1)?.snapshot
+    for (const region of finalSnapshot?.regions ?? []) {
+      expect(region.pessimisticLock).toBeNull()
+      expect(region.mvcc).toMatchObject({
+        defaultCf: 'value',
+        lockCf: 'empty',
+        writeCf: 'commit',
+        startTs: receipt.startTs,
+        commitTs: receipt.commitTs,
+      })
+    }
+  })
+
+  it('responds after primary commit and resolves the secondary only in the background', () => {
+    const receipt = detailedReceipt()
+    const commitTimestamp = event(receipt.events, 'commit_ts')
+    const allPrewritten = event(receipt.events, 'all_prewrite_complete')
+    const primaryCommitted = event(receipt.events, 'mvcc_primary_commit')
+    const response = event(receipt.events, 'complete')
+    const secondary = event(receipt.events, 'commit_secondary')
+    const secondaryCommitted = event(receipt.events, 'mvcc_secondary_commit')
+    const cleanup = event(receipt.events, 'secondary_cleanup_complete')
+
+    expect(receipt.startTs).not.toBeNull()
+    expect(receipt.commitTs).toBeGreaterThan(receipt.startTs ?? Number.MAX_SAFE_INTEGER)
+    expect(commitTimestamp.atMs).toBeGreaterThanOrEqual(
+      allPrewritten.atMs + allPrewritten.durationMs,
+    )
+    expect(response.atMs).toBeGreaterThanOrEqual(
+      primaryCommitted.atMs + primaryCommitted.durationMs,
+    )
+    expect(secondary.atMs).toBeGreaterThanOrEqual(response.atMs + response.durationMs)
+    expect(secondaryCommitted.atMs).toBeGreaterThanOrEqual(
+      secondary.atMs + secondary.durationMs,
+    )
+    expect(cleanup.atMs).toBeGreaterThanOrEqual(
+      secondaryCommitted.atMs + secondaryCommitted.durationMs,
+    )
+    expect(response.path).toBe('critical')
+    for (const candidate of receipt.events.slice(receipt.events.indexOf(secondary))) {
+      expect(candidate.path).toBe('background')
+      expect(candidate.snapshot?.transaction?.clientResponded).toBe(true)
+    }
+  })
+
+  it('deep-freezes graph projections and keeps SQL text and literals out of ReplaySpec', () => {
+    const receipt = detailedReceipt()
+    const candidate = event(receipt.events, 'mvcc_prewrite')
+
+    expect(JSON.stringify(receipt.replay)).not.toMatch(/balance|425|SET|WHERE/i)
+    expect(Object.isFrozen(receipt)).toBe(true)
+    expect(Object.isFrozen(receipt.events)).toBe(true)
+    expect(Object.isFrozen(candidate)).toBe(true)
+    expect(Object.isFrozen(candidate.dependsOn)).toBe(true)
+    expect(Object.isFrozen(candidate.deltas)).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot)).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot?.transaction)).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot?.transaction?.regionIds)).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot?.regions)).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot?.regions[0])).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot?.regions[0]?.peers)).toBe(true)
+    expect(Object.isFrozen(candidate.snapshot?.regions[0]?.mvcc)).toBe(true)
   })
 })
 
