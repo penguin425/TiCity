@@ -46,6 +46,57 @@ describe('TiDB diagnostic projections', () => {
       .toMatchObject({ blockedBy: 'txn-7' })
   })
 
+  it('projects event-time transaction, Raft, lock, and MVCC detail', () => {
+    const projections = projectDiagnostics({
+      transaction: {
+        id: 'txn-detail-1',
+        mode: 'pessimistic',
+        protocol: '2pc',
+        stage: 'prewritten',
+        startTs: 101,
+        commitTs: null,
+        regionIds: [0, 1],
+        primaryRegionId: 0,
+      },
+      regions: [{
+        id: 0,
+        leaderStoreId: 'tikv-1',
+        peers: [
+          { storeId: 'tikv-1' },
+          { storeId: 'tikv-2' },
+          { storeId: 'tikv-3' },
+        ],
+        term: 1,
+        commitIndex: 4,
+        appliedIndex: 4,
+        proposedIndex: 4,
+        acknowledgements: 2,
+        quorum: 2,
+        pessimisticLock: {
+          storage: 'leader_memory',
+        },
+        mvcc: {
+          lockCf: 'prewrite',
+          defaultCf: 'value',
+          writeCf: 'empty',
+          primary: true,
+        },
+      }],
+    })
+
+    expect(projections.find((projection) => projection.id === 'transactions')?.rows[0])
+      .toMatchObject({ id: 'txn-detail-1', phase: 'prewritten' })
+    expect(projections.find((projection) => projection.id === 'regions')?.rows[0])
+      .toMatchObject({
+        raftAcks: '2/2',
+        pessimisticLock: 'leader_memory',
+        cfLock: 'prewrite',
+        cfDefault: 'value',
+        cfWrite: 'empty',
+        primary: 'true',
+      })
+  })
+
   it('ships six symptom-first guides with real-cluster check SQL', () => {
     expect(SYMPTOM_GUIDES).toHaveLength(6)
     expect(SYMPTOM_GUIDES.every((guide) => guide.sql.trim().toUpperCase().startsWith('SELECT')))

@@ -99,6 +99,62 @@ describe('TiCity Machine replay', () => {
     expect(root.textContent).toContain('4 ms')
   })
 
+  it('renders explicit fork and join dependencies instead of inventing a serial chain', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      initialIndex: 3,
+      receipt: {
+        id: 'parallel-prewrite',
+        events: [
+          { id: 'start', at: 0, domain: 'txn2pc', label: 'start' },
+          {
+            id: 'region-a',
+            at: 2,
+            duration: 5,
+            domain: 'raft',
+            label: 'Region A prewrite',
+            dependsOn: ['start'],
+          },
+          {
+            id: 'region-b',
+            at: 2,
+            duration: 5,
+            domain: 'raft',
+            label: 'Region B prewrite',
+            dependsOn: ['start'],
+          },
+          {
+            id: 'join',
+            at: 8,
+            domain: 'tso',
+            label: 'allocate commit_ts',
+            dependsOn: ['region-a', 'region-b'],
+          },
+          {
+            id: 'cleanup',
+            at: 12,
+            domain: 'kv',
+            label: 'secondary cleanup',
+            dependsOn: ['join'],
+            criticalPath: false,
+          },
+        ],
+      },
+    })
+
+    const edges = root.querySelectorAll('[data-causal-from]')
+    expect(edges).toHaveLength(5)
+    expect(root.querySelectorAll('[data-causal-from="start"]')).toHaveLength(2)
+    expect(root.querySelectorAll('[data-causal-to="join"]')).toHaveLength(2)
+    expect(
+      root.querySelector('[data-causal-to="cleanup"]')?.getAttribute('data-causal-path'),
+    ).toBe('background')
+    expect(root.querySelector('[data-causal-from="region-a"][data-causal-to="region-b"]'))
+      .toBeNull()
+  })
+
   it('lets keyboard users select a timeline event and keeps focus on it', () => {
     const dom = installTestDom()
     const root = dom.mount('machine')

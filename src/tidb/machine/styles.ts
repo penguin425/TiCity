@@ -257,6 +257,10 @@ export const MACHINE_CSS = `
   stroke-dasharray: 3 6;
   opacity: .18;
 }
+.tidb-machine__causal[data-causal-path="background"] {
+  stroke-dasharray: 5 5;
+  opacity: .48;
+}
 .tidb-machine__arrow { fill: var(--tc-muted); }
 .tidb-machine__cursor {
   stroke: var(--tc-text);

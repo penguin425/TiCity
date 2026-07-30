@@ -22,6 +22,11 @@ export interface MachineEvent {
   source?: string
   target?: string
   status?: string
+  /** Explicit causal parents. Legacy receipts fall back to the prior event. */
+  dependsOn?: readonly string[]
+  /** False marks work that continues after the client critical path. */
+  criticalPath?: boolean
+  regionId?: number
 }
 
 export interface MachineReceipt {
@@ -119,6 +124,13 @@ function asNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
+function asStringArray(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const strings = value.filter((entry): entry is string =>
+    typeof entry === 'string' && entry.length > 0)
+  return strings.length > 0 ? strings : undefined
+}
+
 function machineDomain(value: unknown): MachineLane | null {
   if (value === 'client' || value === 'return' || value === 'sql') return 'sql'
   if (value === 'tso') return 'tso'
@@ -189,6 +201,17 @@ export function adaptTraceReceipt(source: unknown): MachineReceipt {
       source: asString(raw.source) || undefined,
       target: asString(raw.target) || undefined,
       status: asString(raw.status) || undefined,
+      dependsOn: asStringArray(raw.dependsOn),
+      criticalPath: typeof raw.criticalPath === 'boolean'
+        ? raw.criticalPath
+        : raw.path === 'background'
+          ? false
+          : raw.path === 'critical'
+            ? true
+            : undefined,
+      regionId: typeof raw.regionId === 'number' && Number.isInteger(raw.regionId)
+        ? raw.regionId
+        : undefined,
     })
   }
   events.sort((a, b) => a.atMs - b.atMs || a.id.localeCompare(b.id))
@@ -367,24 +390,32 @@ function renderTimeline(
     class: 'tidb-machine__causal-layer',
     'aria-hidden': 'true',
   })
-  for (let index = 1; index < layouts.length; index += 1) {
-    const previous = layouts[index - 1]
+  const layoutById = new Map(layouts.map((layout) => [layout.event.id, layout]))
+  for (let index = 0; index < layouts.length; index += 1) {
     const layout = layouts[index]
-    if (!previous || !layout) continue
-    const distance = Math.max(26, (layout.x - previous.x) * 0.42)
-    causalLayer.append(svgElement('path', {
-      class: `tidb-machine__causal is-${layout.state}`,
-      d: [
-        `M ${previous.x} ${previous.y}`,
-        `C ${previous.x + distance} ${previous.y}`,
-        `${layout.x - distance} ${layout.y}`,
-        `${layout.x} ${layout.y}`,
-      ].join(' '),
-      'data-causal-from': previous.event.id,
-      'data-causal-to': layout.event.id,
-      'data-causal-domain': layout.event.domain,
-      'marker-end': 'url(#tidb-machine-arrow)',
-    }))
+    if (!layout) continue
+    const parentIds = layout.event.dependsOn
+      ?? (index > 0 ? [layouts[index - 1].event.id] : [])
+    for (const parentId of parentIds) {
+      const previous = layoutById.get(parentId)
+      if (!previous || previous === layout) continue
+      const horizontal = Math.max(0, layout.x - previous.x)
+      const distance = Math.max(26, horizontal * 0.42)
+      causalLayer.append(svgElement('path', {
+        class: `tidb-machine__causal is-${layout.state}`,
+        d: [
+          `M ${previous.x} ${previous.y}`,
+          `C ${previous.x + distance} ${previous.y}`,
+          `${layout.x - distance} ${layout.y}`,
+          `${layout.x} ${layout.y}`,
+        ].join(' '),
+        'data-causal-from': previous.event.id,
+        'data-causal-to': layout.event.id,
+        'data-causal-domain': layout.event.domain,
+        'data-causal-path': layout.event.criticalPath === false ? 'background' : 'critical',
+        'marker-end': 'url(#tidb-machine-arrow)',
+      }))
+    }
   }
   svg.append(causalLayer)
 
