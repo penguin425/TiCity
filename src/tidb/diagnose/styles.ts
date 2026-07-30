@@ -465,6 +465,35 @@ export const DIAGNOSE_CSS = `
   grid-area: region-request-retry;
 }
 
+.tidb-diagnose[data-active-lab="protocol"] .tidb-diagnose__grid {
+  grid-template-areas:
+    "protocol-selection protocol-selection"
+    "protocol-client-path protocol-client-path"
+    "protocol-region-state protocol-region-state"
+    "cluster transactions"
+    "cluster lock-waits"
+    "cluster application-retry"
+    "deadlocks deadlocks"
+    "hot gc"
+    "tiflash tiflash"
+    "regions regions";
+}
+
+.tidb-diagnose[data-active-lab="protocol"]
+  .tidb-diagnose__panel[data-diagnose-section="protocol-selection"] {
+  grid-area: protocol-selection;
+}
+
+.tidb-diagnose[data-active-lab="protocol"]
+  .tidb-diagnose__panel[data-diagnose-section="protocol-client-path"] {
+  grid-area: protocol-client-path;
+}
+
+.tidb-diagnose[data-active-lab="protocol"]
+  .tidb-diagnose__panel[data-diagnose-section="protocol-region-state"] {
+  grid-area: protocol-region-state;
+}
+
 .tidb-diagnose__panel-head {
   min-height: 56px;
   gap: 12px;
@@ -518,7 +547,9 @@ export const DIAGNOSE_CSS = `
   outline-offset: 2px;
 }
 
-.tidb-diagnose__panel[data-diagnose-section="regions"] .tidb-diagnose__scroll {
+.tidb-diagnose__panel[data-diagnose-section="regions"] .tidb-diagnose__scroll,
+.tidb-diagnose__panel[data-diagnose-section="protocol-region-state"]
+  .tidb-diagnose__scroll {
   max-height: min(58dvh, 39rem);
   overflow: auto;
   scrollbar-gutter: stable;
@@ -559,6 +590,18 @@ export const DIAGNOSE_CSS = `
   .tidb-diagnose__table td[data-column="selectionPolicy"],
 .tidb-diagnose__panel[data-diagnose-section="deadlocks"]
   .tidb-diagnose__table td[data-column="lockWaitTimeout"] {
+  min-width: 13rem;
+  white-space: normal;
+}
+
+.tidb-diagnose__panel[data-diagnose-section="protocol-selection"]
+  .tidb-diagnose__table td[data-column="selectionReason"],
+.tidb-diagnose__panel[data-diagnose-section="protocol-client-path"]
+  .tidb-diagnose__table td[data-column="maxCommitTsSource"],
+.tidb-diagnose__panel[data-diagnose-section="protocol-client-path"]
+  .tidb-diagnose__table td[data-column="clientBoundary"],
+.tidb-diagnose__panel[data-diagnose-section="protocol-client-path"]
+  .tidb-diagnose__table td[data-column="backgroundScheduling"] {
   min-width: 13rem;
   white-space: normal;
 }
@@ -880,6 +923,22 @@ export const DIAGNOSE_CSS = `
       "raft-peers"
       "raft-election"
       "region-request-retry"
+      "transactions"
+      "lock-waits"
+      "deadlocks"
+      "application-retry"
+      "hot"
+      "gc"
+      "tiflash"
+      "regions";
+  }
+
+  .tidb-diagnose[data-active-lab="protocol"] .tidb-diagnose__grid {
+    grid-template-areas:
+      "protocol-selection"
+      "protocol-client-path"
+      "protocol-region-state"
+      "cluster"
       "transactions"
       "lock-waits"
       "deadlocks"

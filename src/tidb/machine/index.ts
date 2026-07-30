@@ -4,6 +4,10 @@ import type {
   TraceDomain,
   TraceEvent,
   TraceLockLabSnapshot,
+  TraceProtocolLaneId,
+  TraceProtocolLaneSnapshot,
+  TraceProtocolLabSnapshot,
+  TraceProtocolRegionSnapshot,
   TraceRaftLabPeerSnapshot,
   TraceRaftLabSnapshot,
   TraceReceipt,
@@ -71,7 +75,7 @@ const LANE_LABELS: Record<Locale, Record<MachineLane, string>> = {
   ja: {
     sql: 'SQL / Client',
     tso: 'TSO',
-    txn2pc: 'Transaction 2PC',
+    txn2pc: 'Transaction commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
     tiflash: 'TiFlash / MPP',
@@ -79,7 +83,7 @@ const LANE_LABELS: Record<Locale, Record<MachineLane, string>> = {
   en: {
     sql: 'SQL / Client',
     tso: 'TSO',
-    txn2pc: 'Transaction 2PC',
+    txn2pc: 'Transaction commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
     tiflash: 'TiFlash / MPP',
@@ -89,7 +93,7 @@ const LANE_LABELS: Record<Locale, Record<MachineLane, string>> = {
 const LANE_CODES: Record<MachineLane, string> = {
   sql: 'SQL',
   tso: 'TSO',
-  txn2pc: '2PC',
+  txn2pc: 'TXN',
   raft: 'RAFT',
   kv: 'KV',
   tiflash: 'MPP',
@@ -201,6 +205,99 @@ const MACHINE_COPY = {
     sameLogicalRetry: '同じlogical requestに対するTiDB内部retryです。アプリケーションretryではありません。',
     completeValue: '完了',
     incompleteValue: '未完了',
+    protocolEyebrow: 'PROTOCOL LAB / EXACT SNAPSHOT',
+    protocolTitle: '1PC / Async Commit / regular 2PC',
+    protocolPhase: 'Protocol Labフェーズ',
+    protocolFocus: '注目レーン',
+    protocolGraph: 'Commit protocol比較グラフ',
+    protocolGraphDirection: '宣言済みfixture profile / outcomeは比較開始時から固定表示します。stage、timestamp、Region、client境界、cleanupは選択したexact event時点です。この意味グラフは上の因果DAGとは別です。',
+    protocolGraphContract: '3 INDEPENDENT TXNS · EXACT SNAPSHOT',
+    protocolMatrix: '3プロトコルの現在状態',
+    protocolLane: 'プロトコル',
+    transactionStage: 'Exact-event transaction段階',
+    transactionId: 'Transaction',
+    requestId: 'Request',
+    eligibility: '宣言済みfixture profile / outcome（固定）',
+    profileNode: '宣言済みprofile',
+    profileVisibility: '比較開始時から表示',
+    timestampProvenance: 'Exact-event timestampと由来',
+    regionState: 'Exact-event Region Raft / MVCC',
+    clientResponse: 'Client応答',
+    exactClientResponse: 'Exact-event client応答',
+    cleanup: 'Cleanup',
+    exactCleanup: 'Exact-event cleanup',
+    criticalPath: 'Client critical path',
+    backgroundPath: '応答後のbackground',
+    futurePath: '未到達',
+    currentPath: '進行中',
+    completePath: '通過済み',
+    selectedProtocol: '宣言済みprotocol outcome',
+    selectionReason: '宣言済みoutcomeの根拠',
+    enabledFlags: '宣言済み機能フラグ',
+    onePcEligible: '宣言済み1PC eligibility',
+    asyncEligible: '宣言済みAsync Commit eligibility',
+    mutationProfile: '集約mutation',
+    totalKeyBytes: '合計key bytes',
+    limits: '宣言済みAsync既定上限',
+    decisionPoint: '宣言済み判定点',
+    tryOnePc: '宣言済みTryOnePc request flag',
+    onePcRejectedBeforeRpc: '宣言済み1PC RPC前除外',
+    asyncRejectedAtPrecheck: '宣言済みAsync client事前除外',
+    runtimeFallback: '宣言済みruntime fallback outcome',
+    consistency: '整合性',
+    linearizable: 'linearizable（既定）',
+    startTs: 'start_ts',
+    latestTs: 'latest_ts',
+    requestMinCommitTs: 'request min_commit_ts',
+    maxCommitTs: 'max_commit_ts',
+    commitTs: 'commit_ts',
+    timestampSource: '由来',
+    notAllocated: '未割り当て',
+    notApplicable: '非該当',
+    notUsedByProtocol: 'このprotocolでは使用しません',
+    leader: 'Leader',
+    role: '役割',
+    primary: 'primary',
+    secondary: 'secondary',
+    mutations: 'mutations',
+    raftOperation: 'Raft entry',
+    raftProgress: 'Raft進行',
+    raftQuorum: 'Region quorum',
+    persisted: '永続化',
+    acknowledgements: 'acknowledgements',
+    mvccDefault: 'default CF',
+    mvccLock: 'lock CF',
+    mvccWrite: 'write CF',
+    returnedMinCommitTs: '返却 min_commit_ts',
+    asyncMetadata: 'Async lock metadata',
+    secondaryCount: 'secondary数',
+    responsePending: '応答待ち',
+    responseSent: 'commit済みを応答',
+    cleanupPending: '未完了',
+    cleanupDone: '完了',
+    cleanupNotRequired: '不要（background cleanupなし）',
+    focusNone: 'なし（全レーン完了）',
+    runningValue: '進行中',
+    idleValue: '待機',
+    deterministicBackground: 'client応答後の決定的な表示順（TiCity MODEL POLICY）',
+    aggregateOnly: '集約件数のみ。SQL literal、key/value、結果行は保持しません。',
+    eligibilityCaveat: 'この固定fixtureはfeature flag、mutation件数、key bytes、Region batchingをまとめて判定します。Region数だけで一般的なAsync Commit適格性は決まりません。',
+    transactionRaftBoundary: 'Transaction commitはTiDBの原子的commit調整です。各RegionのRaftは別々に2-of-3 quorumを確立します。1PCとAsync CommitはRaft modeではありません。',
+    nonBenchmark: 'MODEL / SIMULATED：3件は独立した代表transactionです。横方向は意味上の段階であり、protocol間のlatency benchmarkではありません。',
+    responseBoundaryNote: 'Client応答はcommit成立後です。Async Commitとregular 2PCのlock cleanupは応答後も続きます。',
+    protocolAccessibleMirror: '宣言済みprofile / outcomeとexact-event状態のアクセシブルな比較',
+    selectOnePc: '1PCを選択',
+    selectAsync: 'Async Commitを選択',
+    selectTwoPc: 'regular 2PCを選択',
+    fetchLatestTs: 'latest_tsと安全上限',
+    onePcCommit: '1回のPrewriteでcommit',
+    prewriteRegions: '全RegionをPrewrite',
+    establishAsyncCommit: 'Async commit_tsを確定',
+    fetchCommitTs: 'PD commit_ts',
+    commitPrimary: 'primaryをcommit',
+    returnClient: 'clientへcommit応答',
+    backgroundCommit: 'background Commit',
+    finishLane: 'cleanup不要で完了',
     empty: '—',
   },
   en: {
@@ -308,6 +405,99 @@ const MACHINE_COPY = {
     sameLogicalRetry: 'This is a TiDB internal retry of the same logical request, not an application retry.',
     completeValue: 'Complete',
     incompleteValue: 'Incomplete',
+    protocolEyebrow: 'PROTOCOL LAB / EXACT SNAPSHOT',
+    protocolTitle: '1PC / Async Commit / regular 2PC',
+    protocolPhase: 'Protocol Lab phase',
+    protocolFocus: 'Focused lane',
+    protocolGraph: 'Commit protocol comparison graph',
+    protocolGraphDirection: 'Declared fixture profiles and outcomes are fixed from comparison start. Stage, timestamps, Regions, the client boundary, and cleanup reflect the selected exact event. This semantic graph is separate from the causal DAG above.',
+    protocolGraphContract: '3 INDEPENDENT TXNS · EXACT SNAPSHOT',
+    protocolMatrix: 'Current state of three protocols',
+    protocolLane: 'Protocol',
+    transactionStage: 'Exact-event transaction stage',
+    transactionId: 'Transaction',
+    requestId: 'Request',
+    eligibility: 'Declared fixture profile / outcome (static)',
+    profileNode: 'Declared profile',
+    profileVisibility: 'Visible from comparison start',
+    timestampProvenance: 'Exact-event timestamps and provenance',
+    regionState: 'Exact-event Region Raft / MVCC',
+    clientResponse: 'Client response',
+    exactClientResponse: 'Exact-event client response',
+    cleanup: 'Cleanup',
+    exactCleanup: 'Exact-event cleanup',
+    criticalPath: 'Client critical path',
+    backgroundPath: 'Post-response background',
+    futurePath: 'Not reached',
+    currentPath: 'In progress',
+    completePath: 'Passed',
+    selectedProtocol: 'Declared protocol outcome',
+    selectionReason: 'Declared outcome rationale',
+    enabledFlags: 'Declared feature flags',
+    onePcEligible: 'Declared 1PC eligibility',
+    asyncEligible: 'Declared Async Commit eligibility',
+    mutationProfile: 'Aggregate mutations',
+    totalKeyBytes: 'Total key bytes',
+    limits: 'Declared Async default limits',
+    decisionPoint: 'Declared decision points',
+    tryOnePc: 'Declared TryOnePc request flag',
+    onePcRejectedBeforeRpc: 'Declared pre-RPC 1PC exclusion',
+    asyncRejectedAtPrecheck: 'Declared Async client-precheck exclusion',
+    runtimeFallback: 'Declared runtime-fallback outcome',
+    consistency: 'Consistency',
+    linearizable: 'Linearizable (default)',
+    startTs: 'start_ts',
+    latestTs: 'latest_ts',
+    requestMinCommitTs: 'request min_commit_ts',
+    maxCommitTs: 'max_commit_ts',
+    commitTs: 'commit_ts',
+    timestampSource: 'Source',
+    notAllocated: 'Not allocated',
+    notApplicable: 'Not applicable',
+    notUsedByProtocol: 'Not used by this protocol',
+    leader: 'Leader',
+    role: 'Role',
+    primary: 'Primary',
+    secondary: 'Secondary',
+    mutations: 'mutations',
+    raftOperation: 'Raft entry',
+    raftProgress: 'Raft progress',
+    raftQuorum: 'Region quorum',
+    persisted: 'Persisted',
+    acknowledgements: 'acknowledgements',
+    mvccDefault: 'default CF',
+    mvccLock: 'lock CF',
+    mvccWrite: 'write CF',
+    returnedMinCommitTs: 'Returned min_commit_ts',
+    asyncMetadata: 'Async lock metadata',
+    secondaryCount: 'Secondaries',
+    responsePending: 'Response pending',
+    responseSent: 'Committed response sent',
+    cleanupPending: 'Incomplete',
+    cleanupDone: 'Complete',
+    cleanupNotRequired: 'Not required (no background cleanup)',
+    focusNone: 'None (all lanes complete)',
+    runningValue: 'Running',
+    idleValue: 'Idle',
+    deterministicBackground: 'Deterministic display order after the client response (TiCity MODEL POLICY)',
+    aggregateOnly: 'Aggregate counts only; no SQL literals, keys, values, or result rows are retained.',
+    eligibilityCaveat: 'This fixed fixture evaluates feature flags, mutation count, key bytes, and Region batching together. Region count alone does not establish general Async Commit eligibility.',
+    transactionRaftBoundary: 'Transaction commit is TiDB atomic commit coordination. Each Region separately establishes its own 2-of-3 Raft quorum. 1PC and Async Commit are not Raft modes.',
+    nonBenchmark: 'MODEL / SIMULATED: these are three independent representative transactions. Horizontal position is a semantic stage, not a latency benchmark between protocols.',
+    responseBoundaryNote: 'The client responds after commit is established. Async Commit and regular 2PC lock cleanup can continue after that boundary.',
+    protocolAccessibleMirror: 'Accessible comparison of declared profiles / outcomes and exact-event state',
+    selectOnePc: 'Select 1PC',
+    selectAsync: 'Select Async Commit',
+    selectTwoPc: 'Select regular 2PC',
+    fetchLatestTs: 'latest_ts and safe bound',
+    onePcCommit: 'Commit in one Prewrite',
+    prewriteRegions: 'Prewrite every Region',
+    establishAsyncCommit: 'Establish Async commit_ts',
+    fetchCommitTs: 'PD commit_ts',
+    commitPrimary: 'Commit primary',
+    returnClient: 'Return committed to client',
+    backgroundCommit: 'Background Commit',
+    finishLane: 'Complete without cleanup',
     empty: '—',
   },
 } as const
@@ -562,6 +752,175 @@ const RAFT_CACHE_STATE_COPY: Readonly<Record<
     invalidated: 'Invalidated',
     refreshed: 'Refreshed',
   },
+}
+
+const PROTOCOL_LANE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceProtocolLaneId, string>>
+>> = {
+  ja: {
+    one_pc: '1PC',
+    async_commit: 'Async Commit',
+    two_pc: 'regular 2PC',
+  },
+  en: {
+    one_pc: '1PC',
+    async_commit: 'Async Commit',
+    two_pc: 'regular 2PC',
+  },
+}
+
+const PROTOCOL_STAGE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceProtocolLaneSnapshot['stage'], string>>
+>> = {
+  ja: {
+    idle: '未開始',
+    requested: 'request受信',
+    started: 'start_ts取得済み',
+    selected: 'protocol選択済み',
+    latest_ts: 'latest_ts取得済み',
+    prewriting: 'Prewrite進行中',
+    prewritten: 'Prewrite完了',
+    commit_ts: 'commit_ts取得済み',
+    committing: 'Commit進行中',
+    client_acknowledged: 'client応答済み',
+    background: 'background cleanup中',
+    complete: '完了',
+  },
+  en: {
+    idle: 'Not started',
+    requested: 'Request received',
+    started: 'start_ts allocated',
+    selected: 'Protocol selected',
+    latest_ts: 'latest_ts allocated',
+    prewriting: 'Prewrite in progress',
+    prewritten: 'Prewrite complete',
+    commit_ts: 'commit_ts allocated',
+    committing: 'Commit in progress',
+    client_acknowledged: 'Client acknowledged',
+    background: 'Background cleanup',
+    complete: 'Complete',
+  },
+}
+
+const PROTOCOL_SELECTION_REASON_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<
+    TraceProtocolLaneSnapshot['eligibility']['selectionReason'],
+    string
+  >>
+>> = {
+  ja: {
+    single_region_one_pc_model_case: '単一Regionの固定1PC代表fixture',
+    multi_region_async_commit_model_case: '制限内の複数Region固定Async代表fixture',
+    async_key_count_limit_model_case: '257 mutationsがAsync既定上限256を超過',
+  },
+  en: {
+    single_region_one_pc_model_case: 'Fixed single-Region representative 1PC fixture',
+    multi_region_async_commit_model_case: 'Fixed in-limit multi-Region Async fixture',
+    async_key_count_limit_model_case: '257 mutations exceed the Async default limit of 256',
+  },
+}
+
+const PROTOCOL_DECISION_POINT_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<
+    TraceProtocolLaneSnapshot['eligibility']['onePcDecisionPoint'] |
+    TraceProtocolLaneSnapshot['eligibility']['asyncDecisionPoint'],
+    string
+  >>
+>> = {
+  ja: {
+    region_batching: 'TiDB clientのRegion batching',
+    tikv_prewrite: 'TiKV Prewrite',
+    client_precheck: 'TiDB client precheck',
+  },
+  en: {
+    region_batching: 'TiDB client Region batching',
+    tikv_prewrite: 'TiKV Prewrite',
+    client_precheck: 'TiDB client precheck',
+  },
+}
+
+const PROTOCOL_COMMIT_TS_SOURCE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<
+    NonNullable<TraceProtocolLaneSnapshot['commitTsSource']>,
+    string
+  >>
+>> = {
+  ja: {
+    tikv_one_pc_result: 'TiKVの1PC Prewrite結果',
+    max_prewrite_min_commit_ts: 'TiKVが返したmin_commit_tsの最大値',
+    pd_tso_after_prewrite: '全Prewrite後のPD TSO',
+  },
+  en: {
+    tikv_one_pc_result: 'TiKV 1PC Prewrite result',
+    max_prewrite_min_commit_ts: 'Maximum min_commit_ts returned by TiKV',
+    pd_tso_after_prewrite: 'PD TSO after every Prewrite',
+  },
+}
+
+const PROTOCOL_RAFT_OPERATION_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<
+    NonNullable<TraceProtocolRegionSnapshot['raft']['operation']>,
+    string
+  >>
+>> = {
+  ja: {
+    one_pc_prewrite: '1PC Prewrite + commit',
+    prewrite: 'Prewrite',
+    commit_primary: 'primary Commit',
+    commit_secondary: 'secondary Commit',
+    commit_async: 'Async background Commit',
+  },
+  en: {
+    one_pc_prewrite: '1PC Prewrite + commit',
+    prewrite: 'Prewrite',
+    commit_primary: 'Primary Commit',
+    commit_secondary: 'Secondary Commit',
+    commit_async: 'Async background Commit',
+  },
+}
+
+const PROTOCOL_RAFT_STAGE_COPY: Readonly<Record<
+  Locale,
+  Readonly<Record<TraceProtocolRegionSnapshot['raft']['stage'], string>>
+>> = {
+  ja: {
+    idle: '未提案',
+    proposed: '提案済み',
+    persisted_quorum: '2-of-3永続化',
+    committed: 'Raft commit済み',
+    applied: 'MVCC apply済み',
+  },
+  en: {
+    idle: 'Not proposed',
+    proposed: 'Proposed',
+    persisted_quorum: 'Persisted by 2 of 3',
+    committed: 'Raft committed',
+    applied: 'Applied to MVCC',
+  },
+}
+
+const PROTOCOL_STAGE_ORDER: Readonly<Record<
+  TraceProtocolLaneSnapshot['stage'],
+  number
+>> = {
+  idle: 0,
+  requested: 1,
+  started: 2,
+  selected: 3,
+  latest_ts: 4,
+  prewriting: 5,
+  prewritten: 6,
+  commit_ts: 7,
+  committing: 8,
+  client_acknowledged: 9,
+  background: 10,
+  complete: 11,
 }
 
 function raftFact(label: string, value: string): HTMLElement {
@@ -1135,6 +1494,957 @@ function renderLockState(
     detector,
     deadlockCard,
     retryCard,
+  ),
+  )
+}
+
+type ProtocolEdgeState = 'complete' | 'current' | 'future'
+
+interface ProtocolFlowEdge {
+  action: string
+  label: string
+  path: 'critical' | 'background'
+  state: ProtocolEdgeState
+}
+
+function protocolFact(label: string, value: string): HTMLElement {
+  return element('div', {},
+    element('dt', { text: label }),
+    element('dd', { text: value }),
+  )
+}
+
+function protocolBoolean(value: boolean, locale: Locale): string {
+  return value ? MACHINE_COPY[locale].yes : MACHINE_COPY[locale].no
+}
+
+function protocolAtLeast(
+  lane: TraceProtocolLaneSnapshot,
+  stage: TraceProtocolLaneSnapshot['stage'],
+): boolean {
+  return PROTOCOL_STAGE_ORDER[lane.stage] >= PROTOCOL_STAGE_ORDER[stage]
+}
+
+function protocolEdgeState(
+  complete: boolean,
+  current: boolean,
+): ProtocolEdgeState {
+  if (complete) return 'complete'
+  return current ? 'current' : 'future'
+}
+
+function protocolFlowEdges(
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): readonly ProtocolFlowEdge[] {
+  const copy = MACHINE_COPY[locale]
+  if (lane.id === 'one_pc') {
+    return [
+      {
+        action: 'select_1pc',
+        label: copy.selectOnePc,
+        path: 'critical',
+        state: protocolEdgeState(
+          protocolAtLeast(lane, 'latest_ts'),
+          lane.stage === 'requested' ||
+            lane.stage === 'started' ||
+            lane.stage === 'selected',
+        ),
+      },
+      {
+        action: 'latest_ts_and_bound',
+        label: copy.fetchLatestTs,
+        path: 'critical',
+        state: protocolEdgeState(
+          protocolAtLeast(lane, 'prewriting'),
+          lane.stage === 'latest_ts',
+        ),
+      },
+      {
+        action: 'one_pc_prewrite_commit',
+        label: copy.onePcCommit,
+        path: 'critical',
+        state: protocolEdgeState(
+          lane.clientResponded,
+          lane.stage === 'prewriting' || lane.stage === 'committing',
+        ),
+      },
+      {
+        action: 'client_commit_response',
+        label: copy.returnClient,
+        path: 'critical',
+        state: protocolEdgeState(
+          lane.stage === 'complete',
+          lane.stage === 'client_acknowledged',
+        ),
+      },
+    ]
+  }
+  if (lane.id === 'async_commit') {
+    return [
+      {
+        action: 'select_async_commit',
+        label: copy.selectAsync,
+        path: 'critical',
+        state: protocolEdgeState(
+          protocolAtLeast(lane, 'latest_ts'),
+          lane.stage === 'requested' ||
+            lane.stage === 'started' ||
+            lane.stage === 'selected',
+        ),
+      },
+      {
+        action: 'latest_ts_and_bound',
+        label: copy.fetchLatestTs,
+        path: 'critical',
+        state: protocolEdgeState(
+          protocolAtLeast(lane, 'prewriting'),
+          lane.stage === 'latest_ts',
+        ),
+      },
+      {
+        action: 'prewrite_all_regions',
+        label: copy.prewriteRegions,
+        path: 'critical',
+        state: protocolEdgeState(
+          lane.clientResponded,
+          lane.stage === 'prewriting' || lane.stage === 'prewritten',
+        ),
+      },
+      {
+        action: 'establish_async_commit',
+        label: copy.establishAsyncCommit,
+        path: 'critical',
+        state: protocolEdgeState(
+          lane.clientResponded,
+          lane.stage === 'prewritten',
+        ),
+      },
+      {
+        action: 'client_commit_response',
+        label: copy.returnClient,
+        path: 'critical',
+        state: protocolEdgeState(
+          protocolAtLeast(lane, 'background'),
+          lane.stage === 'client_acknowledged',
+        ),
+      },
+      {
+        action: 'background_commit_cleanup',
+        label: copy.backgroundCommit,
+        path: 'background',
+        state: protocolEdgeState(
+          lane.backgroundComplete,
+          lane.stage === 'background',
+        ),
+      },
+    ]
+  }
+  return [
+    {
+      action: 'select_regular_2pc',
+      label: copy.selectTwoPc,
+      path: 'critical',
+      state: protocolEdgeState(
+        protocolAtLeast(lane, 'prewriting'),
+        lane.stage === 'requested' ||
+          lane.stage === 'started' ||
+          lane.stage === 'selected',
+      ),
+    },
+    {
+      action: 'prewrite_all_regions',
+      label: copy.prewriteRegions,
+      path: 'critical',
+      state: protocolEdgeState(
+        protocolAtLeast(lane, 'commit_ts'),
+        lane.stage === 'prewriting' || lane.stage === 'prewritten',
+      ),
+    },
+    {
+      action: 'allocate_pd_commit_ts',
+      label: copy.fetchCommitTs,
+      path: 'critical',
+      state: protocolEdgeState(
+        protocolAtLeast(lane, 'committing'),
+        lane.stage === 'commit_ts',
+      ),
+    },
+    {
+      action: 'commit_primary',
+      label: copy.commitPrimary,
+      path: 'critical',
+      state: protocolEdgeState(
+        lane.clientResponded,
+        lane.stage === 'committing',
+      ),
+    },
+    {
+      action: 'client_commit_response',
+      label: copy.returnClient,
+      path: 'critical',
+      state: protocolEdgeState(
+        protocolAtLeast(lane, 'background'),
+        lane.stage === 'client_acknowledged',
+      ),
+    },
+    {
+      action: 'background_secondary_cleanup',
+      label: copy.backgroundCommit,
+      path: 'background',
+      state: protocolEdgeState(
+        lane.backgroundComplete,
+        lane.stage === 'background',
+      ),
+    },
+  ]
+}
+
+function renderProtocolFlow(
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const edges = protocolFlowEdges(lane, locale)
+  const firstNodeState: ProtocolEdgeState =
+    protocolAtLeast(lane, 'latest_ts') ||
+      (lane.id === 'two_pc' && protocolAtLeast(lane, 'prewriting'))
+      ? 'complete'
+      : lane.stage === 'idle'
+        ? 'future'
+        : 'current'
+  const flow = element('div', {
+    className: 'tidb-machine__protocol-flow',
+    attrs: {
+      'data-protocol-flow': lane.id,
+      'data-protocol': lane.protocol,
+      'data-flow-stage': lane.stage,
+      'data-protocol-state-scope': 'exact-event-temporal',
+    },
+  },
+  element('span', {
+    className: `tidb-machine__protocol-node is-${firstNodeState}`,
+    text: copy.profileNode,
+    attrs: {
+      'data-protocol-node': 'eligibility',
+      'data-node-state': firstNodeState,
+    },
+  }),
+  )
+  for (const edge of edges) {
+    flow.append(
+      element('span', {
+        className: `tidb-machine__protocol-edge is-${edge.state} is-${edge.path}`,
+        text: edge.path === 'background' ? '⇢' : '→',
+        attrs: {
+          'data-protocol-edge': `${lane.id}:${edge.action}`,
+          'data-protocol': lane.protocol,
+          'data-edge-action': edge.action,
+          'data-edge-path': edge.path,
+          'data-edge-state': edge.state,
+        },
+      }),
+      element('span', {
+        className: `tidb-machine__protocol-node is-${edge.state} is-${edge.path}`,
+        text: edge.label,
+        attrs: {
+          'data-protocol-node': edge.action,
+          'data-node-state': edge.state,
+          'data-node-path': edge.path,
+        },
+      }),
+    )
+  }
+  return flow
+}
+
+function renderProtocolTimestamp(
+  label: string,
+  kind: string,
+  value: number | null,
+  source: string,
+  sourceLabel: string,
+  locale: Locale,
+  applicable = true,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const available = value !== null
+  const state = !applicable
+    ? 'not-applicable'
+    : available
+      ? 'allocated'
+      : 'pending'
+  return element('div', {
+    className: `tidb-machine__protocol-timestamp is-${state}`,
+    attrs: {
+      'data-protocol-timestamp': kind,
+      'data-timestamp-source': available ? source : 'none',
+      'data-timestamp-value': available ? String(value) : '',
+      'data-timestamp-applicable': String(applicable),
+    },
+  },
+  element('dt', { text: label }),
+  element('dd', {},
+    element('strong', {
+      text: !applicable
+        ? copy.notApplicable
+        : available
+          ? String(value)
+          : copy.notAllocated,
+    }),
+    element('small', {
+      text: !applicable
+        ? copy.notUsedByProtocol
+        : available
+          ? `${copy.timestampSource}: ${sourceLabel}`
+          : copy.futurePath,
+    }),
+  ),
+  )
+}
+
+function renderProtocolEligibility(
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const eligibility = lane.eligibility
+  return element('section', {
+    className: 'tidb-machine__protocol-card tidb-machine__protocol-eligibility',
+    attrs: {
+      'data-protocol-eligibility': lane.id,
+      'data-protocol-state-scope': 'declared-static',
+      'data-profile-visibility': 'comparison-start',
+      'data-selected-protocol': eligibility.selected,
+      'data-selection-reason': eligibility.selectionReason,
+      'data-one-pc-eligible': String(eligibility.onePcEligible),
+      'data-async-commit-eligible': String(eligibility.asyncCommitEligible),
+      'data-try-one-pc-sent': String(eligibility.tryOnePcSent),
+      'data-one-pc-rejected-before-rpc': String(
+        eligibility.onePcRejectedBeforeRpc,
+      ),
+      'data-async-rejected-at-client-precheck': String(
+        eligibility.asyncRejectedAtClientPrecheck,
+      ),
+      'data-runtime-fallback': String(eligibility.runtimeFallback),
+      'data-one-pc-decision-point': eligibility.onePcDecisionPoint,
+      'data-async-decision-point': eligibility.asyncDecisionPoint,
+    },
+  },
+  element('h4', { text: copy.eligibility }),
+  element('dl', { className: 'tidb-machine__protocol-facts' },
+    protocolFact(
+      copy.selectedProtocol,
+      PROTOCOL_LANE_COPY[locale][lane.id],
+    ),
+    protocolFact(
+      copy.selectionReason,
+      PROTOCOL_SELECTION_REASON_COPY[locale][eligibility.selectionReason],
+    ),
+    protocolFact(
+      copy.enabledFlags,
+      `1PC=${protocolBoolean(eligibility.enable1Pc, locale)} · Async=${protocolBoolean(eligibility.enableAsyncCommit, locale)}`,
+    ),
+    protocolFact(
+      copy.onePcEligible,
+      protocolBoolean(eligibility.onePcEligible, locale),
+    ),
+    protocolFact(
+      copy.asyncEligible,
+      protocolBoolean(eligibility.asyncCommitEligible, locale),
+    ),
+    protocolFact(
+      copy.mutationProfile,
+      `${eligibility.mutationCount} / ${eligibility.regionCount} Region`,
+    ),
+    protocolFact(copy.totalKeyBytes, String(eligibility.totalKeyBytes)),
+    protocolFact(
+      copy.limits,
+      `${eligibility.asyncKeyCountLimit} mutations · ${eligibility.asyncTotalKeyBytesLimit} bytes`,
+    ),
+    protocolFact(
+      copy.decisionPoint,
+      `1PC: ${PROTOCOL_DECISION_POINT_COPY[locale][eligibility.onePcDecisionPoint]} · Async: ${PROTOCOL_DECISION_POINT_COPY[locale][eligibility.asyncDecisionPoint]}`,
+    ),
+    protocolFact(
+      copy.tryOnePc,
+      protocolBoolean(eligibility.tryOnePcSent, locale),
+    ),
+    protocolFact(
+      copy.onePcRejectedBeforeRpc,
+      protocolBoolean(eligibility.onePcRejectedBeforeRpc, locale),
+    ),
+    protocolFact(
+      copy.asyncRejectedAtPrecheck,
+      protocolBoolean(eligibility.asyncRejectedAtClientPrecheck, locale),
+    ),
+    protocolFact(
+      copy.runtimeFallback,
+      protocolBoolean(eligibility.runtimeFallback, locale),
+    ),
+  ),
+  )
+}
+
+function renderProtocolTimestamps(
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const commitSource = lane.commitTsSource === null
+    ? copy.futurePath
+    : PROTOCOL_COMMIT_TS_SOURCE_COPY[locale][lane.commitTsSource]
+  return element('section', {
+    className: 'tidb-machine__protocol-card',
+    attrs: {
+      'data-protocol-timestamps': lane.id,
+      'data-commit-ts-source': lane.commitTsSource ?? 'none',
+      'data-protocol-state-scope': 'exact-event-temporal',
+    },
+  },
+  element('h4', { text: copy.timestampProvenance }),
+  element('dl', { className: 'tidb-machine__protocol-timestamps' },
+    renderProtocolTimestamp(
+      copy.startTs,
+      'start_ts',
+      lane.startTs,
+      'pd',
+      'PD TSO',
+      locale,
+    ),
+    renderProtocolTimestamp(
+      copy.latestTs,
+      'latest_ts',
+      lane.latestTs,
+      'pd',
+      'PD TSO',
+      locale,
+      lane.protocol !== '2pc',
+    ),
+    renderProtocolTimestamp(
+      copy.requestMinCommitTs,
+      'request_min_commit_ts',
+      lane.requestMinCommitTs,
+      'tidb_model_bound',
+      locale === 'ja'
+        ? 'TiDB計算（latest_ts + 1）'
+        : 'TiDB calculation (latest_ts + 1)',
+      locale,
+      lane.protocol !== '2pc',
+    ),
+    renderProtocolTimestamp(
+      copy.maxCommitTs,
+      'max_commit_ts',
+      lane.maxCommitTs,
+      'tidb_model_bound',
+      locale === 'ja'
+        ? 'TiCity代表safe-window MODEL bound'
+        : 'TiCity representative safe-window MODEL bound',
+      locale,
+      lane.protocol !== '2pc',
+    ),
+    renderProtocolTimestamp(
+      copy.commitTs,
+      'commit_ts',
+      lane.commitTs,
+      lane.commitTsSource ?? 'none',
+      commitSource,
+      locale,
+    ),
+  ),
+  )
+}
+
+function renderProtocolRegion(
+  lane: TraceProtocolLaneSnapshot,
+  region: TraceProtocolRegionSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const operation = region.raft.operation === null
+    ? copy.empty
+    : PROTOCOL_RAFT_OPERATION_COPY[locale][region.raft.operation]
+  const persisted = region.raft.persistedStoreIds.length === 0
+    ? copy.empty
+    : region.raft.persistedStoreIds.join(' · ')
+  const returnedMinCommitTs = region.returnedMinCommitTs === null
+    ? copy.notAllocated
+    : String(region.returnedMinCommitTs)
+  return element('li', {
+    className: `tidb-machine__protocol-region is-${region.raft.stage}`,
+    attrs: {
+      'data-protocol-region': String(region.regionId),
+      'data-protocol': lane.protocol,
+      'data-region-role': region.role,
+      'data-region-leader': region.leaderStoreId,
+      'data-raft-operation': region.raft.operation ?? 'none',
+      'data-raft-stage': region.raft.stage,
+      'data-raft-quorum': String(region.raft.quorum),
+      'data-raft-acknowledgements': String(region.raft.acknowledgements),
+      'data-raft-persisted-count': String(region.raft.persistedStoreIds.length),
+      'data-mvcc-default-cf': region.mvcc.defaultCf,
+      'data-mvcc-lock-cf': region.mvcc.lockCf,
+      'data-mvcc-write-cf': region.mvcc.writeCf,
+      'data-mvcc-async-commit': String(region.mvcc.asyncCommit),
+      'data-returned-min-commit-ts': region.returnedMinCommitTs === null
+        ? ''
+        : String(region.returnedMinCommitTs),
+      'data-returned-min-commit-ts-source': region.returnedMinCommitTs === null
+        ? 'none'
+        : 'tikv',
+      'data-transaction-layer': 'tidb_transaction_commit',
+      'data-consensus-layer': 'per_region_raft',
+    },
+  },
+  element('div', { className: 'tidb-machine__protocol-region-head' },
+    element('strong', { text: `Region ${region.regionId}` }),
+    element('span', {
+      text: region.role === 'primary'
+        ? copy.primary.toUpperCase()
+        : copy.secondary.toUpperCase(),
+    }),
+  ),
+  element('dl', { className: 'tidb-machine__protocol-facts' },
+    protocolFact(copy.leader, region.leaderStoreId),
+    protocolFact(copy.mutationProfile, `${region.mutationCount} ${copy.mutations}`),
+    protocolFact(copy.raftOperation, operation),
+    protocolFact(
+      copy.raftProgress,
+      PROTOCOL_RAFT_STAGE_COPY[locale][region.raft.stage],
+    ),
+    protocolFact(
+      copy.raftQuorum,
+      `${region.raft.acknowledgements}/${region.raft.quorum} ${copy.acknowledgements}`,
+    ),
+    protocolFact(copy.persisted, persisted),
+    protocolFact(copy.mvccDefault, region.mvcc.defaultCf),
+    protocolFact(copy.mvccLock, region.mvcc.lockCf),
+    protocolFact(copy.mvccWrite, region.mvcc.writeCf),
+    protocolFact(copy.returnedMinCommitTs, returnedMinCommitTs),
+    protocolFact(
+      copy.asyncMetadata,
+      `${protocolBoolean(region.mvcc.asyncCommit, locale)} · ${copy.secondaryCount}: ${region.mvcc.secondaryCount}`,
+    ),
+  ),
+  )
+}
+
+function renderProtocolLane(
+  protocolLab: TraceProtocolLabSnapshot,
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const focused = protocolLab.focusLaneId === lane.id
+  return element('article', {
+    className: `tidb-machine__protocol-lane is-${lane.id} ${focused ? 'is-focused' : ''}`,
+    attrs: {
+      'data-protocol-lane': lane.id,
+      'data-protocol': lane.protocol,
+      'data-protocol-stage': lane.stage,
+      'data-protocol-focused': String(focused),
+      'data-client-responded': String(lane.clientResponded),
+      'data-background-complete': String(lane.backgroundComplete),
+      'data-transaction-id': lane.transactionId,
+      'data-request-id': lane.requestId,
+    },
+  },
+  element('header', { className: 'tidb-machine__protocol-lane-head' },
+    element('div', {},
+      element('span', {
+        className: 'tidb-machine__protocol-lane-code',
+        text: lane.id === 'one_pc'
+          ? '1PC'
+          : lane.id === 'async_commit'
+            ? 'ASYNC'
+            : '2PC',
+      }),
+      element('h3', { text: PROTOCOL_LANE_COPY[locale][lane.id] }),
+    ),
+    element('span', {
+      className: `tidb-machine__protocol-stage is-${lane.stage}`,
+      text: PROTOCOL_STAGE_COPY[locale][lane.stage],
+      attrs: {
+        'aria-label': `${copy.transactionStage}: ${
+          PROTOCOL_STAGE_COPY[locale][lane.stage]
+        }`,
+        'data-stage-state': lane.stage,
+        'data-protocol-state-scope': 'exact-event-temporal',
+      },
+    }),
+  ),
+  element('dl', {
+    className: 'tidb-machine__protocol-lane-identity',
+    attrs: {
+      'data-protocol-state-scope': 'declared-static',
+      'data-profile-visibility': 'comparison-start',
+    },
+  },
+    protocolFact(copy.transactionId, lane.transactionId),
+    protocolFact(copy.requestId, lane.requestId),
+  ),
+  renderProtocolFlow(lane, locale),
+  element('div', { className: 'tidb-machine__protocol-details' },
+    renderProtocolEligibility(lane, locale),
+    renderProtocolTimestamps(lane, locale),
+    element('section', {
+      className: 'tidb-machine__protocol-card tidb-machine__protocol-regions',
+      attrs: {
+        'data-protocol-regions': lane.id,
+        'data-protocol-state-scope': 'exact-event-temporal',
+      },
+    },
+    element('h4', { text: copy.regionState }),
+    element('ul', {
+      className: 'tidb-machine__protocol-region-list',
+      attrs: { 'aria-label': `${PROTOCOL_LANE_COPY[locale][lane.id]} ${copy.regionState}` },
+    },
+    ...lane.regions.map((region) =>
+      renderProtocolRegion(lane, region, locale)),
+    ),
+    ),
+    element('section', {
+      className: 'tidb-machine__protocol-card tidb-machine__protocol-boundary',
+      attrs: {
+        'data-protocol-client-boundary': lane.id,
+        'data-protocol-state-scope': 'exact-event-temporal',
+        'data-client-result': lane.clientResponded ? 'committed' : 'pending',
+        'data-cleanup-state': lane.protocol === '1pc'
+          ? 'not_required'
+          : lane.backgroundComplete
+            ? 'complete'
+            : 'pending',
+      },
+    },
+    element('h4', { text: copy.exactClientResponse }),
+    element('strong', {
+      text: lane.clientResponded ? copy.responseSent : copy.responsePending,
+    }),
+    element('p', {
+      className: 'tidb-machine__protocol-path-label is-critical',
+      text: `● ${copy.criticalPath}`,
+    }),
+    element('h4', { text: copy.exactCleanup }),
+    element('strong', {
+      text: lane.protocol === '1pc'
+        ? copy.cleanupNotRequired
+        : lane.backgroundComplete
+          ? copy.cleanupDone
+          : copy.cleanupPending,
+    }),
+    element('p', {
+      className: 'tidb-machine__protocol-path-label is-background',
+      text: lane.protocol === '1pc'
+        ? `◇ ${copy.finishLane}`
+        : `⇢ ${copy.backgroundPath}`,
+    }),
+    ),
+  ),
+  )
+}
+
+function protocolTimestampSummary(
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): string {
+  const copy = MACHINE_COPY[locale]
+  const value = (
+    label: string,
+    timestamp: number | null,
+    source: string,
+    applicable = true,
+  ) => !applicable
+    ? `${label}: ${copy.notApplicable} (${copy.notUsedByProtocol})`
+    : `${label}: ${timestamp ?? copy.notAllocated} (${source})`
+  return [
+    value(copy.startTs, lane.startTs, lane.startTs === null ? copy.futurePath : 'PD TSO'),
+    value(
+      copy.latestTs,
+      lane.latestTs,
+      lane.latestTs === null ? copy.futurePath : 'PD TSO',
+      lane.protocol !== '2pc',
+    ),
+    value(
+      copy.requestMinCommitTs,
+      lane.requestMinCommitTs,
+      lane.requestMinCommitTs === null ? copy.futurePath : 'TiDB latest_ts + 1',
+      lane.protocol !== '2pc',
+    ),
+    value(
+      copy.maxCommitTs,
+      lane.maxCommitTs,
+      lane.maxCommitTs === null ? copy.futurePath : 'TiCity MODEL bound',
+      lane.protocol !== '2pc',
+    ),
+    value(
+      copy.commitTs,
+      lane.commitTs,
+      lane.commitTsSource === null
+        ? copy.futurePath
+        : PROTOCOL_COMMIT_TS_SOURCE_COPY[locale][lane.commitTsSource],
+    ),
+  ].join('; ')
+}
+
+function protocolRegionSummary(
+  lane: TraceProtocolLaneSnapshot,
+  locale: Locale,
+): string {
+  const copy = MACHINE_COPY[locale]
+  return lane.regions.map((region) => {
+    const operation = region.raft.operation === null
+      ? copy.empty
+      : PROTOCOL_RAFT_OPERATION_COPY[locale][region.raft.operation]
+    return [
+      `Region ${region.regionId} ${
+        region.role === 'primary' ? copy.primary : copy.secondary
+      }`,
+      `${copy.leader}: ${region.leaderStoreId}`,
+      `${copy.raftOperation}: ${operation}`,
+      `${copy.raftProgress}: ${PROTOCOL_RAFT_STAGE_COPY[locale][region.raft.stage]}`,
+      `${copy.raftQuorum}: ${region.raft.acknowledgements}/${region.raft.quorum}`,
+      `${copy.mvccDefault}: ${region.mvcc.defaultCf}`,
+      `${copy.mvccLock}: ${region.mvcc.lockCf}`,
+      `${copy.mvccWrite}: ${region.mvcc.writeCf}`,
+    ].join(', ')
+  }).join('; ')
+}
+
+function renderProtocolAccessibleMirror(
+  protocolLab: TraceProtocolLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  const table = element('table', {
+    className: 'tidb-machine__protocol-mirror',
+    attrs: {
+      'data-protocol-mirror': 'accessible',
+    },
+  },
+  element('caption', { text: copy.protocolAccessibleMirror }),
+  element('thead', {},
+    element('tr', {},
+      element('th', { text: copy.protocolLane, attrs: { scope: 'col' } }),
+      element('th', { text: copy.transactionStage, attrs: { scope: 'col' } }),
+      element('th', { text: copy.eligibility, attrs: { scope: 'col' } }),
+      element('th', { text: copy.timestampProvenance, attrs: { scope: 'col' } }),
+      element('th', { text: copy.regionState, attrs: { scope: 'col' } }),
+      element('th', { text: copy.exactClientResponse, attrs: { scope: 'col' } }),
+      element('th', { text: copy.exactCleanup, attrs: { scope: 'col' } }),
+    ),
+  ),
+  )
+  const body = element('tbody')
+  for (const lane of protocolLab.lanes) {
+    const eligibility = lane.eligibility
+    body.append(element('tr', {
+      attrs: {
+        'data-protocol-mirror-lane': lane.id,
+        'data-protocol': lane.protocol,
+      },
+    },
+    element('th', {
+      text: PROTOCOL_LANE_COPY[locale][lane.id],
+      attrs: { scope: 'row' },
+    }),
+    element('td', {
+      text: `${PROTOCOL_STAGE_COPY[locale][lane.stage]}; ${copy.transactionId}: ${lane.transactionId}; ${copy.requestId}: ${lane.requestId}`,
+      attrs: { 'data-protocol-state-scope': 'exact-event-temporal' },
+    }),
+    element('td', {
+      text: [
+        copy.profileVisibility,
+        `${copy.selectedProtocol}: ${lane.protocol}`,
+        `${copy.selectionReason}: ${PROTOCOL_SELECTION_REASON_COPY[locale][eligibility.selectionReason]}`,
+        `${copy.onePcEligible}: ${protocolBoolean(eligibility.onePcEligible, locale)}`,
+        `${copy.asyncEligible}: ${protocolBoolean(eligibility.asyncCommitEligible, locale)}`,
+        `${eligibility.mutationCount} mutations / ${eligibility.regionCount} Regions / ${eligibility.totalKeyBytes} bytes`,
+        `${copy.runtimeFallback}: ${protocolBoolean(eligibility.runtimeFallback, locale)}`,
+      ].join('; '),
+      attrs: {
+        'data-protocol-state-scope': 'declared-static',
+        'data-profile-visibility': 'comparison-start',
+      },
+    }),
+    element('td', {
+      text: protocolTimestampSummary(lane, locale),
+      attrs: { 'data-protocol-state-scope': 'exact-event-temporal' },
+    }),
+    element('td', {
+      text: protocolRegionSummary(lane, locale),
+      attrs: { 'data-protocol-state-scope': 'exact-event-temporal' },
+    }),
+    element('td', {
+      text: lane.clientResponded ? copy.responseSent : copy.responsePending,
+      attrs: { 'data-protocol-state-scope': 'exact-event-temporal' },
+    }),
+    element('td', {
+      text: lane.protocol === '1pc'
+        ? copy.cleanupNotRequired
+        : lane.backgroundComplete
+          ? copy.cleanupDone
+          : copy.cleanupPending,
+      attrs: { 'data-protocol-state-scope': 'exact-event-temporal' },
+    }),
+    ))
+  }
+  table.append(body)
+  return table
+}
+
+function renderProtocolComparisonGraph(
+  protocolLab: TraceProtocolLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = MACHINE_COPY[locale]
+  return element('div', {
+    className: 'tidb-machine__protocol-graph',
+    attrs: {
+      role: 'group',
+      tabindex: '0',
+      'aria-label': `${copy.protocolGraph}. ${copy.protocolGraphDirection}`,
+      'data-protocol-graph': 'semantic',
+      'data-graph-kind': 'commit-protocol-comparison',
+      'data-protocol-phase': protocolLab.phase,
+      'data-focus-lane': protocolLab.focusLaneId ?? '',
+      'data-lane-count': String(protocolLab.lanes.length),
+      'data-latency-benchmark': 'false',
+    },
+  },
+  element('div', { className: 'tidb-machine__protocol-card-head' },
+    element('h3', { text: copy.protocolGraph }),
+    element('span', {
+      className: 'tidb-machine__protocol-graph-contract',
+      text: copy.protocolGraphContract,
+    }),
+  ),
+  element('p', {
+    className: 'tidb-machine__protocol-direction',
+    text: copy.protocolGraphDirection,
+  }),
+  element('div', {
+    className: 'tidb-machine__protocol-visual',
+    attrs: {
+      'aria-hidden': 'true',
+      'data-protocol-visual': 'matrix',
+    },
+  },
+  ...protocolLab.lanes.map((lane) =>
+    renderProtocolLane(protocolLab, lane, locale)),
+  ),
+  renderProtocolAccessibleMirror(protocolLab, locale),
+  )
+}
+
+function renderProtocolState(
+  event: MachineEvent,
+  locale: Locale,
+): HTMLElement | null {
+  const protocolLab = event.snapshot?.protocolLab
+  if (!protocolLab) return null
+  const copy = MACHINE_COPY[locale]
+  return element('section', {
+    className: 'tidb-machine__protocol-state',
+    attrs: {
+      'aria-labelledby': 'tidb-machine-protocol-title',
+      'data-protocol-lab-state': 'true',
+      'data-protocol-event-id': event.id,
+      'data-protocol-event-kind': event.kind ?? '',
+      'data-protocol-event-branch': event.branchId ?? '',
+      'data-protocol-phase': protocolLab.phase,
+      'data-protocol-focus': protocolLab.focusLaneId ?? '',
+      'data-coordinator-layer': protocolLab.coordinatorLayer,
+      'data-raft-layer': protocolLab.raftLayer,
+      'data-client-boundary': protocolLab.clientBoundary,
+      'data-representation': protocolLab.representation,
+      'data-transaction-mode': protocolLab.transactionMode,
+      'data-transaction-scope': protocolLab.transactionScope,
+      'data-safe-window-ms': String(protocolLab.safeWindowMs),
+      'data-tikv-async-apply-prewrite': String(
+        protocolLab.tikvAsyncApplyPrewrite,
+      ),
+      'data-background-scheduling': protocolLab.backgroundScheduling,
+      'data-max-commit-ts-policy': protocolLab.maxCommitTsPolicy,
+      'data-latency-benchmark': 'false',
+    },
+  },
+  element('header', { className: 'tidb-machine__protocol-head' },
+    element('div', {},
+      element('p', {
+        className: 'tidb-machine__protocol-eyebrow',
+        text: copy.protocolEyebrow,
+      }),
+      element('h2', {
+        text: copy.protocolTitle,
+        attrs: { id: 'tidb-machine-protocol-title' },
+      }),
+    ),
+    element('div', { className: 'tidb-machine__protocol-head-meta' },
+      element('span', {
+        className: `tidb-machine__protocol-phase is-${protocolLab.phase}`,
+        text: `${copy.protocolPhase}: ${
+          protocolLab.phase === 'complete'
+            ? copy.completeValue
+            : protocolLab.phase === 'running'
+              ? copy.runningValue
+              : copy.idleValue
+        }`,
+        attrs: { 'data-phase-state': protocolLab.phase },
+      }),
+      element('span', {
+        className: 'tidb-machine__protocol-snapshot',
+        text: `SNAPSHOT · ${event.id}`,
+      }),
+    ),
+  ),
+  element('dl', { className: 'tidb-machine__protocol-summary' },
+    protocolFact(
+      copy.protocolFocus,
+      protocolLab.focusLaneId === null
+        ? copy.focusNone
+        : PROTOCOL_LANE_COPY[locale][protocolLab.focusLaneId],
+    ),
+    protocolFact(copy.consistency, copy.linearizable),
+    protocolFact(copy.clientResponse, copy.responseBoundaryNote),
+    protocolFact(
+      copy.backgroundPath,
+      copy.deterministicBackground,
+    ),
+  ),
+  renderProtocolComparisonGraph(protocolLab, locale),
+  element('div', { className: 'tidb-machine__protocol-notes' },
+    element('p', {
+      className: 'tidb-machine__protocol-boundary-note',
+      text: copy.transactionRaftBoundary,
+      attrs: {
+        'data-transaction-raft-boundary': 'separate',
+        'data-one-pc-raft-mode': 'false',
+        'data-async-commit-raft-mode': 'false',
+      },
+    }),
+    element('p', {
+      className: 'tidb-machine__protocol-model-note',
+      text: copy.nonBenchmark,
+      attrs: {
+        'data-model-simulated': 'true',
+        'data-latency-benchmark': 'false',
+      },
+    }),
+    element('p', {
+      className: 'tidb-machine__protocol-boundary-note',
+      text: copy.responseBoundaryNote,
+      attrs: { 'data-response-before-cleanup': 'true' },
+    }),
+    element('p', {
+      className: 'tidb-machine__protocol-boundary-note',
+      text: copy.eligibilityCaveat,
+      attrs: { 'data-region-count-alone-sufficient': 'false' },
+    }),
+    element('p', {
+      className: 'tidb-machine__protocol-boundary-note',
+      text: copy.aggregateOnly,
+      attrs: { 'data-aggregate-counts-only': 'true' },
+    }),
   ),
   )
 }
@@ -1715,6 +3025,7 @@ function renderTimeline(
       'data-event-transaction': event.transactionId ?? '',
       'data-event-has-lock-snapshot': event.snapshot?.lockLab ? 'true' : 'false',
       'data-event-has-raft-snapshot': event.snapshot?.raftLab ? 'true' : 'false',
+      'data-event-has-protocol-snapshot': event.snapshot?.protocolLab ? 'true' : 'false',
       'data-event-status': status,
       'data-event-state': state,
     })
@@ -1811,6 +3122,11 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
   const lockSlot = element('div', { className: 'tidb-machine__lock-slot' })
   const hasRaftSnapshots = receipt.events.some((event) => Boolean(event.snapshot?.raftLab))
   const raftSlot = element('div', { className: 'tidb-machine__raft-slot' })
+  const hasProtocolSnapshots = receipt.events.some((event) =>
+    Boolean(event.snapshot?.protocolLab))
+  const protocolSlot = element('div', {
+    className: 'tidb-machine__protocol-slot',
+  })
   const detail = element('section', {
     className: 'tidb-machine__detail',
     attrs: { 'aria-live': 'polite', 'aria-atomic': 'true' },
@@ -1990,6 +3306,16 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
       if (raftState) raftSlot.replaceChildren(raftState)
       else raftSlot.replaceChildren()
     }
+    if (hasProtocolSnapshots) {
+      const protocolState = event ? renderProtocolState(event, locale) : null
+      protocolSlot.hidden = protocolState === null
+      protocolSlot.setAttribute(
+        'aria-hidden',
+        protocolState === null ? 'true' : 'false',
+      )
+      if (protocolState) protocolSlot.replaceChildren(protocolState)
+      else protocolSlot.replaceChildren()
+    }
     options.onSeek?.(event, current)
 
     for (const marker of frame.querySelectorAll<SVGElement>('[data-event-index]')) {
@@ -2055,6 +3381,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     frame,
     ...(hasLockSnapshots ? [lockSlot] : []),
     ...(hasRaftSnapshots ? [raftSlot] : []),
+    ...(hasProtocolSnapshots ? [protocolSlot] : []),
     detail,
     element('p', { className: 'tidb-machine__note', text: CATALOG[locale].simulatedTiming }),
   )

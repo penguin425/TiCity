@@ -129,6 +129,11 @@ interface EventOptions {
   regionId?: number
   transactionId?: string
   dependsOn?: readonly string[]
+  /**
+   * Deterministic presentation fence only. It delays an independent event in
+   * replay without adding a causal DAG edge.
+   */
+  presentationAfter?: string
   path?: TracePath
   branchId?: string
   snapshot?: TraceStateSnapshot
@@ -238,9 +243,20 @@ class TraceBuilder {
       }
       return Math.max(latest, dependency.atMs + dependency.durationMs)
     }, 0)
+    const presentationEndMs = options.presentationAfter === undefined
+      ? 0
+      : (() => {
+        const predecessor = this.eventById.get(options.presentationAfter)
+        if (!predecessor) {
+          throw new Error(
+            `Unknown trace presentation predecessor: ${options.presentationAfter}`,
+          )
+        }
+        return predecessor.atMs + predecessor.durationMs
+      })()
     const atMs = options.dependsOn === undefined
-      ? this.cursorMs
-      : dependencyEndMs
+      ? Math.max(this.cursorMs, presentationEndMs)
+      : Math.max(dependencyEndMs, presentationEndMs)
     const event: TraceEvent = Object.freeze({
       id: `${this.receiptId}-event-${this.events.length + 1}`,
       atMs,
@@ -4105,32 +4121,6 @@ export function createTiDBSimulation(
       return result
     }
 
-    function mergeParallelRegions(
-      base: TraceProtocolLabSnapshot,
-      laneId: TraceProtocolLaneId,
-      branches: ReadonlyMap<number, TraceProtocolLabSnapshot>,
-    ): TraceProtocolLabSnapshot {
-      const baseLane = lane(base, laneId)
-      const branchLanes = [...branches.values()].map((snapshot) =>
-        lane(snapshot, laneId))
-      const mergedLane: TraceProtocolLaneSnapshot = {
-        ...baseLane,
-        stage: branchLanes[0]?.stage ?? baseLane.stage,
-        regions: baseLane.regions.map((region) =>
-          lane(
-            branches.get(region.regionId) ?? base,
-            laneId,
-          ).regions.find((candidate) => candidate.regionId === region.regionId) ??
-          region),
-      }
-      return freezeProtocolLabSnapshot({
-        ...base,
-        lanes: base.lanes.map((candidate) =>
-          candidate.id === laneId ? mergedLane : candidate,
-        ) as unknown as TraceProtocolLabSnapshot['lanes'],
-      })
-    }
-
     function allocateProtocolTs(): number {
       const physical = TSO_BASE + Math.floor(state.t * 1_000) * 1_000
       const timestamp = Math.max(state.tso.lastAllocated + 100, physical)
@@ -4371,8 +4361,8 @@ export function createTiDBSimulation(
     const oneEligibility = addProtocolEvent(
       'txn2pc',
       'protocol_eligibility_check',
-      '1PC wins protocol selection',
-      'Both optional features are enabled in this fixture. One prewrite batch is eligible for TryOnePc; 1PC takes precedence over Async Commit.',
+      'Choose the TryOnePc candidate',
+      'Both optional features are enabled. One Region batch makes 1PC the fixture candidate; success is confirmed only when TiKV returns one_pc_commit_ts.',
       {
         source: tidbId,
         target: tidbId,
@@ -4385,7 +4375,7 @@ export function createTiDBSimulation(
           to: 'selected',
         }],
         metadata: {
-          selected: '1pc',
+          candidate: '1pc',
           decisionPoint: 'tikv_prewrite',
           tryOnePc: true,
           useAsyncCommit: true,
@@ -4504,6 +4494,7 @@ export function createTiDBSimulation(
         metadata: {
           onePcCommitTs: oneCommitTs,
           source: 'tikv_calculated',
+          selected: '1pc',
           runtimeFallback: false,
         },
       },
@@ -4726,11 +4717,9 @@ export function createTiDBSimulation(
         },
       },
     )
-    const asyncBranchBase = protocolLab
     const asyncPrewriteResults = new Map<number, TraceEvent>()
-    const asyncPrewriteStates = new Map<number, TraceProtocolLabSnapshot>()
+    let previousAsyncPrewriteResult: TraceEvent | null = null
     for (const [index, regionId] of [25, 26].entries()) {
-      protocolLab = asyncBranchBase
       const dispatch = addProtocolEvent(
         'txn2pc',
         'async_prewrite_dispatch',
@@ -4743,18 +4732,25 @@ export function createTiDBSimulation(
           target: byRegionId.get(regionId)?.leaderStoreId,
           regionId,
           dependsOn: [asyncLatest.id],
+          ...(previousAsyncPrewriteResult
+            ? { presentationAfter: previousAsyncPrewriteResult.id }
+            : {}),
           branchId: `async_commit-region-${regionId}`,
-          deltas: [{
-            kind: 'protocol_lane_stage',
-            laneId: 'async_commit',
-            from: 'latest_ts',
-            to: 'prewriting',
-          }],
+          deltas: index === 0
+            ? [{
+              kind: 'protocol_lane_stage',
+              laneId: 'async_commit',
+              from: 'latest_ts',
+              to: 'prewriting',
+            }]
+            : [],
           metadata: {
             useAsyncCommit: true,
             tryOnePc: false,
             role: index === 0 ? 'primary' : 'secondary',
             secondaryCount: index === 0 ? 1 : 0,
+            presentationScheduling:
+              'deterministic_sibling_serialization_model_policy',
           },
         },
       )
@@ -4792,13 +4788,8 @@ export function createTiDBSimulation(
         },
       )
       asyncPrewriteResults.set(regionId, result)
-      asyncPrewriteStates.set(regionId, protocolLab)
+      previousAsyncPrewriteResult = result
     }
-    protocolLab = mergeParallelRegions(
-      asyncBranchBase,
-      'async_commit',
-      asyncPrewriteStates,
-    )
     const asyncCommitTs = Math.max(
       ...lane(protocolLab, 'async_commit').regions.map((region) =>
         region.returnedMinCommitTs ?? 0),
@@ -4868,11 +4859,9 @@ export function createTiDBSimulation(
         },
       },
     )
-    const asyncBackgroundBase = protocolLab
     const asyncBackgroundApplies = new Map<number, TraceEvent>()
-    const asyncBackgroundStates = new Map<number, TraceProtocolLabSnapshot>()
-    for (const regionId of [25, 26]) {
-      protocolLab = asyncBackgroundBase
+    let previousAsyncBackgroundApply: TraceEvent | null = null
+    for (const [index, regionId] of [25, 26].entries()) {
       const dispatch = addProtocolEvent(
         'txn2pc',
         'async_commit_background_dispatch',
@@ -4883,17 +4872,24 @@ export function createTiDBSimulation(
           target: byRegionId.get(regionId)?.leaderStoreId,
           regionId,
           dependsOn: [asyncResponse.id],
+          ...(previousAsyncBackgroundApply
+            ? { presentationAfter: previousAsyncBackgroundApply.id }
+            : {}),
           path: 'background',
           branchId: `async_commit-background-${regionId}`,
-          deltas: [{
-            kind: 'protocol_lane_stage',
-            laneId: 'async_commit',
-            from: 'client_acknowledged',
-            to: 'background',
-          }],
+          deltas: index === 0
+            ? [{
+              kind: 'protocol_lane_stage',
+              laneId: 'async_commit',
+              from: 'client_acknowledged',
+              to: 'background',
+            }]
+            : [],
           metadata: {
             criticalPath: false,
             scheduling: 'deterministic_after_client_boundary_model_policy',
+            presentationScheduling:
+              'deterministic_sibling_serialization_model_policy',
           },
         },
       )
@@ -4906,13 +4902,8 @@ export function createTiDBSimulation(
         'background',
       )
       asyncBackgroundApplies.set(regionId, apply)
-      asyncBackgroundStates.set(regionId, protocolLab)
+      previousAsyncBackgroundApply = apply
     }
-    protocolLab = mergeParallelRegions(
-      asyncBackgroundBase,
-      'async_commit',
-      asyncBackgroundStates,
-    )
     const asyncComplete = addProtocolEvent(
       'txn2pc',
       'protocol_branch_complete',
@@ -5062,11 +5053,9 @@ export function createTiDBSimulation(
         },
       },
     )
-    const twoPrewriteBase = protocolLab
     const twoPrewriteResults = new Map<number, TraceEvent>()
-    const twoPrewriteStates = new Map<number, TraceProtocolLabSnapshot>()
-    for (const regionId of [27, 28]) {
-      protocolLab = twoPrewriteBase
+    let previousTwoPcPrewriteResult: TraceEvent | null = null
+    for (const [index, regionId] of [27, 28].entries()) {
       const dispatch = addProtocolEvent(
         'txn2pc',
         'two_pc_prewrite_dispatch',
@@ -5077,14 +5066,24 @@ export function createTiDBSimulation(
           target: byRegionId.get(regionId)?.leaderStoreId,
           regionId,
           dependsOn: [twoSelected.id],
+          ...(previousTwoPcPrewriteResult
+            ? { presentationAfter: previousTwoPcPrewriteResult.id }
+            : {}),
           branchId: `two_pc-region-${regionId}`,
-          deltas: [{
-            kind: 'protocol_lane_stage',
-            laneId: 'two_pc',
-            from: 'selected',
-            to: 'prewriting',
-          }],
-          metadata: { tryOnePc: false, useAsyncCommit: false },
+          deltas: index === 0
+            ? [{
+              kind: 'protocol_lane_stage',
+              laneId: 'two_pc',
+              from: 'selected',
+              to: 'prewriting',
+            }]
+            : [],
+          metadata: {
+            tryOnePc: false,
+            useAsyncCommit: false,
+            presentationScheduling:
+              'deterministic_sibling_serialization_model_policy',
+          },
         },
       )
       const apply = raftSequence(
@@ -5109,13 +5108,8 @@ export function createTiDBSimulation(
         },
       )
       twoPrewriteResults.set(regionId, result)
-      twoPrewriteStates.set(regionId, protocolLab)
+      previousTwoPcPrewriteResult = result
     }
-    protocolLab = mergeParallelRegions(
-      twoPrewriteBase,
-      'two_pc',
-      twoPrewriteStates,
-    )
     const allPrewritten = addProtocolEvent(
       'txn2pc',
       'two_pc_all_prewritten',

@@ -112,6 +112,21 @@ async function expectRaftVoteCity(page: Page): Promise<void> {
   ).toBe(true)
 }
 
+async function expectTraceLink(
+  page: Page,
+  selector: string,
+  scenario: string,
+  eventId: string,
+  locale: 'en' | 'ja',
+): Promise<void> {
+  const href = await page.locator(selector).getAttribute('href')
+  if (!href) throw new Error(`Trace link ${selector} has no href`)
+  const url = new URL(href, page.url())
+  expect(url.searchParams.get('scenario')).toBe(scenario)
+  expect(url.searchParams.get('event')).toBe(eventId)
+  expect(url.searchParams.get('lang')).toBe(locale)
+}
+
 for (const surface of pages) {
   test(`${surface.path} boots offline and passes the accessibility gate`, async ({ page }) => {
     const thirdPartyRequests: string[] = []
@@ -427,6 +442,307 @@ test('Raft Failure Lab Diagnose preserves election and final retry snapshots', a
     .toHaveAttribute('data-tone', 'healthy')
   await expect(page.locator('[data-diagnose-section="region-request-retry"]'))
     .toHaveAttribute('data-tone', 'healthy')
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Protocol Lab exact Async response stays exclusive and readable on mobile', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const eventId = 'trace-1-event-32'
+  await page.goto(
+    `/?lang=en&scenario=commit-protocols&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', {
+    timeout: 15_000,
+  })
+
+  const layout = page.locator('.tidb-layout')
+  const protocolLab = page.locator('[data-protocol-lab]')
+  const asyncLane = protocolLab.locator(
+    '[data-protocol-lane="async_commit"]',
+  )
+  const dock = page.locator('[data-trace-dock]')
+  await expect(layout).toHaveAttribute('data-active-lab', 'protocol')
+  await expect(layout).toHaveAttribute('data-inspect', 'open')
+  await expect(protocolLab).toBeVisible()
+  await expect(protocolLab).toHaveAttribute('tabindex', '0')
+  await protocolLab.focus()
+  await expect(protocolLab).toBeFocused()
+  await expect(protocolLab).toHaveAttribute('data-protocol-phase', 'running')
+  await expect(protocolLab.locator('[data-protocol-lane]')).toHaveCount(3)
+
+  await expect(asyncLane).toHaveAttribute(
+    'data-selected-protocol',
+    'async_commit',
+  )
+  await expect(asyncLane).toHaveAttribute('data-client-responded', 'true')
+  await expect(asyncLane).toHaveAttribute('data-background-complete', 'false')
+  await expect(asyncLane.locator('[data-client-state="responded"]'))
+    .toContainText('Committed response sent')
+  await expect(asyncLane.locator('[data-background-state="pending"]'))
+    .toContainText('Pending after client response')
+  await expect(asyncLane.locator('[data-protocol-region]')).toHaveCount(2)
+  await expect(asyncLane.locator('[data-mvcc-lock="prewrite"]')).toHaveCount(2)
+
+  await expect(page.locator('[data-transaction-lab]')).toBeHidden()
+  await expect(page.locator('[data-lock-lab]')).toBeHidden()
+  await expect(page.locator('[data-raft-lab]')).toBeHidden()
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  await expect(dock).toHaveAttribute('data-event-index', '31')
+  await expect(dock).toHaveAttribute('data-event-count', '74')
+  await expect(dock).toHaveAttribute('data-looping', 'true')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  const [labBox, dockBox] = await Promise.all([
+    protocolLab.boundingBox(),
+    dock.boundingBox(),
+  ])
+  expect(labBox).not.toBeNull()
+  expect(dockBox).not.toBeNull()
+  if (!labBox || !dockBox) {
+    throw new Error('Protocol Lab overlays have no layout box')
+  }
+  expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
+  expect(
+    await page.evaluate(() =>
+      document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBe(true)
+
+  await expectTraceLink(
+    page,
+    '.tidb-topbar [data-nav="machine"]',
+    'commit-protocols',
+    eventId,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-topbar [data-nav="diagnose"]',
+    'commit-protocols',
+    eventId,
+    'en',
+  )
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Protocol Lab Machine separates its semantic graph at the regular 2PC boundary', async ({
+  page,
+}) => {
+  const eventId = 'trace-1-event-67'
+  await page.goto(
+    `/machine/?lang=en&scenario=commit-protocols&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
+
+  const current = page.locator('[data-event-index][aria-current="step"]')
+  await expect(current).toHaveAttribute('data-event-index', '66')
+  await expect(current).toHaveAttribute(
+    'data-event-kind',
+    'protocol_client_response',
+  )
+  await expect(current).toHaveAttribute('data-event-branch', 'two_pc')
+  await expect(current).toHaveAttribute(
+    'data-event-has-protocol-snapshot',
+    'true',
+  )
+
+  const causal = page.locator('[data-graph-kind="causal-dag"]')
+  const protocolGraph = page.locator(
+    '[data-protocol-graph="semantic"]',
+  )
+  await expect(causal).toBeVisible()
+  await expect(protocolGraph).toBeVisible()
+  await expect(protocolGraph).toHaveAttribute(
+    'data-graph-kind',
+    'commit-protocol-comparison',
+  )
+  await expect(protocolGraph).toHaveAttribute('data-lane-count', '3')
+  await expect(protocolGraph).toHaveAttribute('data-focus-lane', 'two_pc')
+  await expect(protocolGraph).toHaveAttribute('tabindex', '0')
+  await protocolGraph.focus()
+  await expect(protocolGraph).toBeFocused()
+  await expect(protocolGraph.locator('[data-protocol-lane]')).toHaveCount(3)
+  await expect(causal.locator('[data-protocol-graph]')).toHaveCount(0)
+  await expect(protocolGraph.locator('[data-protocol-edge]')).not.toHaveCount(0)
+  await expect(protocolGraph.locator(
+    '[data-protocol-edge][data-causal-from], ' +
+    '[data-protocol-edge][data-causal-to], ' +
+    '[data-protocol-edge][data-causal-domain], ' +
+    '[data-protocol-edge][data-causal-path]',
+  )).toHaveCount(0)
+
+  const state = page.locator('[data-protocol-lab-state="true"]')
+  await expect(state).toHaveAttribute('data-protocol-event-id', eventId)
+  await expect(state).toHaveAttribute(
+    'data-protocol-event-kind',
+    'protocol_client_response',
+  )
+  await expect(state).toHaveAttribute('data-protocol-event-branch', 'two_pc')
+  await expect(state).toHaveAttribute('data-protocol-phase', 'running')
+  await expect(state).toHaveAttribute('data-protocol-focus', 'two_pc')
+  await expect(state).toHaveAttribute(
+    'data-client-boundary',
+    'response_before_cleanup_completion',
+  )
+  const twoPcLane = state.locator('[data-protocol-lane="two_pc"]')
+  await expect(twoPcLane).toHaveAttribute(
+    'data-protocol-stage',
+    'client_acknowledged',
+  )
+  await expect(twoPcLane).toHaveAttribute('data-client-responded', 'true')
+  await expect(twoPcLane).toHaveAttribute('data-background-complete', 'false')
+  await expect(twoPcLane.locator(
+    '[data-region-role="primary"][data-mvcc-write-cf="commit"]',
+  )).toHaveCount(1)
+  await expect(twoPcLane.locator(
+    '[data-region-role="secondary"][data-mvcc-lock-cf="prewrite"]',
+  )).toHaveCount(1)
+  await expect(state.locator('[data-aggregate-counts-only="true"]'))
+    .toContainText('no SQL literals, keys, values, or result rows')
+
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="city"]',
+    'commit-protocols',
+    eventId,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="diagnose"]',
+    'commit-protocols',
+    eventId,
+    'en',
+  )
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('Protocol Lab Diagnose preserves response and final snapshots in English and Japanese', async ({
+  page,
+}) => {
+  const scenario = 'commit-protocols'
+  const asyncEventId = 'trace-1-event-32'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=${scenario}&event=${asyncEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(asyncEventId)
+  await expect(page.locator('.tidb-diagnose'))
+    .toHaveAttribute('data-active-lab', 'protocol')
+
+  const selection = page.locator(
+    '[data-table-section="protocol-selection"]',
+  )
+  const clientPath = page.locator(
+    '[data-table-section="protocol-client-path"]',
+  )
+  const regionState = page.locator(
+    '[data-table-section="protocol-region-state"]',
+  )
+  await expect(page.locator(
+    '[data-diagnose-section="protocol-selection"]',
+  )).toContainText('Declared fixture profile / outcome (static)')
+  await expect(page.locator(
+    '[data-diagnose-section="protocol-client-path"]',
+  )).toBeVisible()
+  await expect(page.locator(
+    '[data-diagnose-section="protocol-region-state"]',
+  )).toBeVisible()
+  await expect(selection.locator('tbody tr')).toHaveCount(3)
+  await expect(clientPath.locator('tbody tr')).toHaveCount(3)
+  await expect(regionState.locator('tbody tr')).toHaveCount(5)
+  await expect(selection).toContainText(
+    'aggregate counts only (no SQL, keys, values, or rows)',
+  )
+  await expect(clientPath.locator('tbody tr').nth(1))
+    .toContainText('client acknowledged')
+  await expect(clientPath.locator('tbody tr').nth(1))
+    .toContainText('running after client response')
+  await expect(regionState.locator('tbody tr').filter({
+    hasText: 'Async Commit',
+  })).toHaveCount(2)
+  await expect(regionState.locator('tbody tr').filter({
+    hasText: 'Async Commit',
+  }).filter({
+    hasText: 'Prewrite lock',
+  })).toHaveCount(2)
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="machine"]',
+    scenario,
+    asyncEventId,
+    'en',
+  )
+
+  const finalEventId = 'trace-1-event-74'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=${scenario}&event=${finalEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(finalEventId)
+  const finalClientPath = page.locator(
+    '[data-table-section="protocol-client-path"]',
+  )
+  const finalRegionState = page.locator(
+    '[data-table-section="protocol-region-state"]',
+  )
+  await expect(finalClientPath.locator('tbody tr')).toHaveCount(3)
+  await expect(finalClientPath.locator('tbody tr').nth(1)).toContainText(
+    'complete',
+  )
+  await expect(finalClientPath.locator('tbody tr').nth(2)).toContainText(
+    'complete',
+  )
+  await expect(finalRegionState.locator('tbody tr')).toHaveCount(5)
+  await expect(finalRegionState).not.toContainText('Prewrite lock')
+  await expect(finalRegionState.locator('tbody tr').filter({
+    hasText: 'commit record',
+  })).toHaveCount(5)
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="city"]',
+    scenario,
+    finalEventId,
+    'en',
+  )
+
+  await page.goto(
+    `/diagnose/?lang=ja&scenario=${scenario}&event=${finalEventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ja')
+  await expect(page.locator('select[aria-label="投影するイベント時点"]'))
+    .toHaveValue(finalEventId)
+  await expect(page.locator(
+    '[data-diagnose-section="protocol-selection"]',
+  )).toContainText('宣言済みfixture profile / outcome（固定）')
+  await expect(page.locator(
+    '[data-diagnose-section="protocol-client-path"]',
+  )).toContainText('Exact-event client応答 / timestamp')
+  await expect(page.locator(
+    '[data-diagnose-section="protocol-region-state"]',
+  )).toContainText('Exact-event Region Raft / MVCC状態')
+  await expect(page.locator(
+    '[data-table-section="protocol-selection"]',
+  )).toContainText('集計数のみ（SQL・key・value・rowなし）')
+  await expect(page.locator(
+    '[data-table-section="protocol-region-state"]',
+  )).not.toContainText('Prewrite lock')
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="machine"]',
+    scenario,
+    finalEventId,
+    'ja',
+  )
+  expect(new URL(page.url()).searchParams.get('event')).toBe(finalEventId)
   await expectNoSeriousAccessibilityViolations(page)
 })
 

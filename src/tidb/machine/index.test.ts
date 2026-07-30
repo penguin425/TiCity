@@ -37,7 +37,9 @@ describe('TiCity Machine replay', () => {
     ).toEqual([...MACHINE_LANES])
     expect(root.querySelectorAll('[data-event-domain="txn2pc"]')).toHaveLength(1)
     expect(root.querySelectorAll('[data-event-domain="raft"]')).toHaveLength(1)
-    expect(root.querySelector('[data-lane="txn2pc"]')?.textContent).toContain('2PC')
+    expect(root.querySelector('[data-lane="txn2pc"]')?.textContent).toContain('TXN')
+    expect(root.querySelector('[data-lane="txn2pc"]')?.textContent)
+      .toContain('Transaction commit')
     expect(root.querySelector('[data-lane="raft"]')?.textContent).toContain('Raft')
   })
 
@@ -497,6 +499,369 @@ describe('TiCity Machine replay', () => {
       expect(raftState?.textContent).not.toContain('SELECT *')
       expect(raftState?.textContent).not.toContain('result row:')
     }
+  })
+
+  it('keeps the causal DAG separate from an exact three-lane commit-protocol semantic graph', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('commit-protocols')
+    const responseEvent = receipt.events.find((event) =>
+      event.kind === 'protocol_client_response' &&
+      event.branchId === 'async_commit')
+    expect(responseEvent?.snapshot?.protocolLab?.focusLaneId)
+      .toBe('async_commit')
+    expect(responseEvent?.snapshot?.protocolLab?.lanes.map((lane) => [
+      lane.id,
+      lane.stage,
+    ])).toEqual([
+      ['one_pc', 'complete'],
+      ['async_commit', 'client_acknowledged'],
+      ['two_pc', 'idle'],
+    ])
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt,
+      initialEventId: responseEvent?.id,
+    })
+
+    expect(root.querySelector('[data-graph-kind="causal-dag"]')).not.toBeNull()
+    const graph = root.querySelector(
+      '[data-protocol-graph="semantic"]',
+    )
+    expect(graph?.getAttribute('data-graph-kind'))
+      .toBe('commit-protocol-comparison')
+    expect(graph?.getAttribute('data-lane-count')).toBe('3')
+    expect(graph?.getAttribute('data-focus-lane')).toBe('async_commit')
+    expect(graph?.getAttribute('data-latency-benchmark')).toBe('false')
+    expect(graph?.getAttribute('tabindex')).toBe('0')
+    expect(graph?.getAttribute('aria-label')).toContain(
+      'separate from the causal DAG above',
+    )
+    expect(graph?.querySelectorAll('[data-causal-from]')).toHaveLength(0)
+    expect(graph?.querySelectorAll('[data-protocol-lane]')).toHaveLength(3)
+    expect(graph?.querySelectorAll(
+      '[data-protocol-mirror="accessible"] [data-protocol-mirror-lane]',
+    )).toHaveLength(3)
+
+    const semanticEdges = graph?.querySelectorAll(
+      '[data-protocol-edge]',
+    ) ?? []
+    expect(semanticEdges.length).toBeGreaterThan(0)
+    expect(semanticEdges.every((edge) =>
+      Boolean(edge.dataset.protocol) &&
+      Boolean(edge.dataset.edgeAction) &&
+      Boolean(edge.dataset.edgePath) &&
+      Boolean(edge.dataset.edgeState))).toBe(true)
+    expect(semanticEdges.every((edge) =>
+      edge.getAttribute('data-causal-from') === null &&
+      edge.getAttribute('data-causal-to') === null)).toBe(true)
+
+    const state = root.querySelector('[data-protocol-lab-state="true"]')
+    expect(state?.getAttribute('data-protocol-event-id')).toBe(responseEvent?.id)
+    expect(state?.getAttribute('data-protocol-event-kind'))
+      .toBe('protocol_client_response')
+    expect(state?.getAttribute('data-coordinator-layer'))
+      .toBe('tidb_transaction_commit')
+    expect(state?.getAttribute('data-raft-layer'))
+      .toBe('per_region_consensus')
+    expect(state?.querySelector('[data-protocol-lane="one_pc"]')
+      ?.getAttribute('data-protocol-stage')).toBe('complete')
+    const asyncLane = state?.querySelector(
+      '[data-protocol-lane="async_commit"]',
+    )
+    expect(asyncLane?.getAttribute('data-protocol-stage'))
+      .toBe('client_acknowledged')
+    expect(asyncLane?.getAttribute('data-client-responded')).toBe('true')
+    expect(asyncLane?.getAttribute('data-background-complete')).toBe('false')
+    expect(state?.querySelector('[data-protocol-lane="two_pc"]')
+      ?.getAttribute('data-protocol-stage')).toBe('idle')
+
+    expect(asyncLane?.querySelector('[data-protocol-timestamp="start_ts"]')
+      ?.getAttribute('data-timestamp-source')).toBe('pd')
+    expect(asyncLane?.querySelector('[data-protocol-timestamp="latest_ts"]')
+      ?.getAttribute('data-timestamp-source')).toBe('pd')
+    expect(asyncLane?.querySelector(
+      '[data-protocol-timestamp="request_min_commit_ts"]',
+    )?.getAttribute('data-timestamp-source')).toBe('tidb_model_bound')
+    expect(asyncLane?.querySelector('[data-protocol-timestamp="commit_ts"]')
+      ?.getAttribute('data-timestamp-source'))
+      .toBe('max_prewrite_min_commit_ts')
+    expect(asyncLane?.querySelector('[data-protocol-region="25"]')
+      ?.getAttribute('data-raft-stage')).toBe('applied')
+    expect(asyncLane?.querySelector('[data-protocol-region="25"]')
+      ?.getAttribute('data-mvcc-lock-cf')).toBe('prewrite')
+    expect(asyncLane?.querySelector('[data-protocol-region="25"]')
+      ?.getAttribute('data-mvcc-write-cf')).toBe('empty')
+    expect(state?.querySelector('[data-transaction-raft-boundary="separate"]'))
+      .not.toBeNull()
+    expect(state?.querySelector('[data-model-simulated="true"]')
+      ?.getAttribute('data-latency-benchmark')).toBe('false')
+    expect(state?.textContent).toContain('1PC and Async Commit are not Raft modes')
+    expect(state?.textContent).toContain('not a latency benchmark')
+    expect(state?.textContent).not.toContain('INSERT INTO')
+  })
+
+  it('marks regular 2PC-only timestamp omissions and 1PC cleanup as not applicable in both projections', () => {
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('commit-protocols')
+    const comparisonEvent = receipt.events.find((event) =>
+      event.kind === 'protocol_comparison_start')
+    expect(comparisonEvent?.snapshot?.protocolLab?.lanes.map((lane) => [
+      lane.id,
+      lane.stage,
+    ])).toEqual([
+      ['one_pc', 'idle'],
+      ['async_commit', 'idle'],
+      ['two_pc', 'idle'],
+    ])
+
+    for (const locale of ['en', 'ja'] as const) {
+      const dom = installTestDom()
+      const root = dom.mount(`machine-protocol-applicability-${locale}`)
+      mountMachine(root as unknown as HTMLElement, {
+        locale,
+        receipt,
+        initialEventId: comparisonEvent?.id,
+      })
+
+      for (const laneId of ['one_pc', 'async_commit', 'two_pc']) {
+        const lane = root.querySelector(`[data-protocol-lane="${laneId}"]`)
+        expect(lane?.getAttribute('data-protocol-stage')).toBe('idle')
+        const profile = lane?.querySelector(
+          '[data-protocol-eligibility]',
+        )
+        expect(profile?.getAttribute('data-protocol-state-scope'))
+          .toBe('declared-static')
+        expect(profile?.getAttribute('data-profile-visibility'))
+          .toBe('comparison-start')
+        expect(profile?.textContent).toContain(
+          locale === 'en'
+            ? 'Declared fixture profile / outcome (static)'
+            : '宣言済みfixture profile / outcome（固定）',
+        )
+        expect(lane?.querySelector('[data-stage-state="idle"]')
+          ?.getAttribute('data-protocol-state-scope'))
+          .toBe('exact-event-temporal')
+        expect(lane?.querySelector('[data-protocol-timestamps]')
+          ?.getAttribute('data-protocol-state-scope'))
+          .toBe('exact-event-temporal')
+        expect(lane?.querySelector('[data-protocol-regions]')
+          ?.getAttribute('data-protocol-state-scope'))
+          .toBe('exact-event-temporal')
+        expect(lane?.querySelector('[data-protocol-client-boundary]')
+          ?.getAttribute('data-protocol-state-scope'))
+          .toBe('exact-event-temporal')
+
+        const mirrorCells = root.querySelector(
+          `[data-protocol-mirror-lane="${laneId}"]`,
+        )?.querySelectorAll('td')
+        expect(mirrorCells?.[0]?.getAttribute('data-protocol-state-scope'))
+          .toBe('exact-event-temporal')
+        expect(mirrorCells?.[1]?.getAttribute('data-protocol-state-scope'))
+          .toBe('declared-static')
+        expect(mirrorCells?.[1]?.textContent).toContain(
+          locale === 'en'
+            ? 'Visible from comparison start'
+            : '比較開始時から表示',
+        )
+        for (const cell of mirrorCells?.slice(2) ?? []) {
+          expect(cell.getAttribute('data-protocol-state-scope'))
+            .toBe('exact-event-temporal')
+        }
+      }
+      expect(root.textContent).toContain(
+        locale === 'en'
+          ? 'Stage, timestamps, Regions, the client boundary, and cleanup reflect the selected exact event.'
+          : 'stage、timestamp、Region、client境界、cleanupは選択したexact event時点です。',
+      )
+      expect(root.textContent).not.toContain(
+        locale === 'en' ? 'TryOnePc sent' : 'TryOnePc送信',
+      )
+
+      const twoPc = root.querySelector('[data-protocol-lane="two_pc"]')
+      for (const kind of [
+        'latest_ts',
+        'request_min_commit_ts',
+        'max_commit_ts',
+      ]) {
+        const timestamp = twoPc?.querySelector(
+          `[data-protocol-timestamp="${kind}"]`,
+        )
+        expect(timestamp?.getAttribute('class')).toContain('is-not-applicable')
+        expect(timestamp?.getAttribute('data-timestamp-applicable')).toBe('false')
+        expect(timestamp?.getAttribute('data-timestamp-source')).toBe('none')
+        expect(timestamp?.getAttribute('data-timestamp-value')).toBe('')
+        expect(timestamp?.textContent).toContain(
+          locale === 'en' ? 'Not applicable' : '非該当',
+        )
+        expect(timestamp?.textContent).toContain(
+          locale === 'en'
+            ? 'Not used by this protocol'
+            : 'このprotocolでは使用しません',
+        )
+        expect(timestamp?.textContent).not.toContain(
+          locale === 'en' ? 'Not reached' : '未到達',
+        )
+      }
+      expect(twoPc?.querySelector('[data-protocol-timestamp="start_ts"]')
+        ?.getAttribute('data-timestamp-applicable')).toBe('true')
+      expect(twoPc?.querySelector('[data-protocol-timestamp="commit_ts"]')
+        ?.getAttribute('data-timestamp-applicable')).toBe('true')
+
+      const onePcBoundary = root.querySelector(
+        '[data-protocol-client-boundary="one_pc"]',
+      )
+      expect(onePcBoundary?.getAttribute('data-cleanup-state'))
+        .toBe('not_required')
+      expect(onePcBoundary?.querySelectorAll('strong')[1]?.textContent)
+        .toBe(locale === 'en'
+          ? 'Not required (no background cleanup)'
+          : '不要（background cleanupなし）')
+
+      const twoPcMirror = root.querySelector(
+        '[data-protocol-mirror-lane="two_pc"]',
+      )
+      const twoPcTimestampSummary = twoPcMirror?.querySelectorAll('td')[2]
+      expect(twoPcTimestampSummary?.textContent).toContain(
+        locale === 'en'
+          ? 'latest_ts: Not applicable (Not used by this protocol)'
+          : 'latest_ts: 非該当 (このprotocolでは使用しません)',
+      )
+      const onePcMirror = root.querySelector(
+        '[data-protocol-mirror-lane="one_pc"]',
+      )
+      expect(onePcMirror?.querySelectorAll('td')[5]?.textContent)
+        .toBe(locale === 'en'
+          ? 'Not required (no background cleanup)'
+          : '不要（background cleanupなし）')
+    }
+  })
+
+  it('shows eligibility, timestamp provenance, and the post-response background edge without conflating Region Raft', () => {
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('commit-protocols')
+    const backgroundEvent = receipt.events.find((event) =>
+      event.kind === 'two_pc_secondary_commit_dispatch')
+    expect(backgroundEvent?.snapshot?.protocolLab).toBeDefined()
+
+    for (const locale of ['en', 'ja'] as const) {
+      const dom = installTestDom()
+      const root = dom.mount(`machine-protocol-${locale}`)
+      mountMachine(root as unknown as HTMLElement, {
+        locale,
+        receipt,
+        initialEventId: backgroundEvent?.id,
+      })
+
+      const lane = root.querySelector('[data-protocol-lane="two_pc"]')
+      expect(lane?.getAttribute('data-protocol-stage')).toBe('background')
+      const eligibility = lane?.querySelector(
+        '[data-protocol-eligibility="two_pc"]',
+      )
+      expect(eligibility?.getAttribute('data-selected-protocol')).toBe('2pc')
+      expect(eligibility?.getAttribute('data-one-pc-eligible')).toBe('false')
+      expect(eligibility?.getAttribute('data-async-commit-eligible')).toBe('false')
+      expect(eligibility?.getAttribute('data-runtime-fallback')).toBe('false')
+      expect(eligibility?.getAttribute('data-async-decision-point'))
+        .toBe('client_precheck')
+
+      const commitTs = lane?.querySelector(
+        '[data-protocol-timestamp="commit_ts"]',
+      )
+      expect(commitTs?.getAttribute('data-timestamp-source'))
+        .toBe('pd_tso_after_prewrite')
+      expect(commitTs?.getAttribute('data-timestamp-value')).not.toBe('')
+
+      const primary = lane?.querySelector('[data-protocol-region="27"]')
+      const secondary = lane?.querySelector('[data-protocol-region="28"]')
+      expect(primary?.getAttribute('data-region-role')).toBe('primary')
+      expect(primary?.getAttribute('data-mvcc-write-cf')).toBe('commit')
+      expect(secondary?.getAttribute('data-region-role')).toBe('secondary')
+      expect(secondary?.getAttribute('data-mvcc-lock-cf')).toBe('prewrite')
+      expect(primary?.getAttribute('data-consensus-layer'))
+        .toBe('per_region_raft')
+      expect(primary?.getAttribute('data-transaction-layer'))
+        .toBe('tidb_transaction_commit')
+
+      const backgroundEdge = lane?.querySelector(
+        '[data-edge-action="background_secondary_cleanup"]',
+      )
+      expect(backgroundEdge?.getAttribute('data-edge-path')).toBe('background')
+      expect(backgroundEdge?.getAttribute('data-edge-state')).toBe('current')
+      expect(root.querySelector(
+        `[data-causal-to="${backgroundEvent?.id}"]`,
+      )?.getAttribute('data-causal-path')).toBe('background')
+      expect(root.textContent).toContain(
+        locale === 'en'
+          ? 'Region count alone does not establish'
+          : 'Region数だけで一般的なAsync Commit適格性は決まりません',
+      )
+      expect(root.textContent).toContain('257')
+      expect(root.textContent).toContain('256')
+    }
+  })
+
+  it('mounts and clears the Protocol Lab slot from the selected event snapshot', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const protocolReceipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('commit-protocols')
+    const protocolEvent = protocolReceipt.events.find((event) =>
+      event.kind === 'protocol_lab_complete')
+    if (!protocolEvent?.snapshot?.protocolLab) {
+      throw new Error('Expected an exact Protocol Lab snapshot.')
+    }
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      initialIndex: 0,
+      receipt: {
+        id: 'protocol-slot-lifecycle',
+        events: [
+          {
+            id: 'plain-event',
+            atMs: 0,
+            durationMs: 1,
+            domain: 'sql',
+            kind: 'plain',
+            label: 'Plain event',
+            detail: '',
+          },
+          {
+            ...protocolEvent,
+            id: 'protocol-event',
+            atMs: 2,
+          },
+        ],
+      },
+    })
+
+    const slot = root.querySelector(
+      '.tidb-machine__protocol-slot',
+    ) as unknown as HTMLElement
+    expect(slot.hidden).toBe(true)
+    expect(slot.getAttribute('aria-hidden')).toBe('true')
+    expect(root.querySelector('[data-event-id="plain-event"]')
+      ?.getAttribute('data-event-has-protocol-snapshot')).toBe('false')
+    expect(root.querySelector('[data-event-id="protocol-event"]')
+      ?.getAttribute('data-event-has-protocol-snapshot')).toBe('true')
+
+    root.querySelector('[data-event-id="protocol-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(slot.hidden).toBe(false)
+    expect(slot.getAttribute('aria-hidden')).toBe('false')
+    expect(slot.querySelector('[data-protocol-lab-state="true"]')
+      ?.getAttribute('data-protocol-phase')).toBe('complete')
+    expect(slot.querySelectorAll(
+      '[data-protocol-lane][data-protocol-stage="complete"]',
+    )).toHaveLength(3)
+
+    root.querySelector('[data-event-id="plain-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(slot.hidden).toBe(true)
+    expect(slot.getAttribute('aria-hidden')).toBe('true')
+    expect(slot.children).toHaveLength(0)
   })
 
   it('mounts independent Lock and Raft slots and clears both on an event without snapshots', () => {

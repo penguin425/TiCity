@@ -28,6 +28,57 @@ function eventBy(
 }
 
 describe('Commit Protocol Lab accessible projection', () => {
+  it('separates the declared fixture profile from exact-event temporal state', () => {
+    installTestDom()
+    const panel = createProtocolLabPanel('en')
+    const events = protocolEvents()
+    const comparisonStart = eventBy(events, 'protocol_comparison_start')
+
+    panel.update(comparisonStart)
+
+    const onePc = panel.root.querySelector(
+      '[data-protocol-lane="one_pc"]',
+    )
+    const profile = onePc?.querySelector(
+      '[data-protocol-state-scope="declared-static"]',
+    )
+    expect(profile?.getAttribute('data-profile-visibility'))
+      .toBe('comparison-start')
+    expect(profile?.textContent).toContain(
+      'Declared fixture profile / outcome (static)',
+    )
+    expect(profile?.textContent).toContain('Declared protocol outcome1PC')
+    expect(profile?.textContent).toContain(
+      'Declared eligibility outcome1PC eligible',
+    )
+    expect(profile?.textContent).toContain(
+      'Declared request shape / exclusionsTryOnePc true',
+    )
+
+    expect(onePc?.getAttribute('data-lane-stage')).toBe('idle')
+    expect(
+      onePc?.querySelectorAll(
+        '[data-protocol-state-scope="exact-event-temporal"]',
+      ),
+    ).toHaveLength(3)
+    expect(
+      onePc?.querySelector('.tidb-protocol-lab__timestamps')?.textContent,
+    ).toContain('start_ts · PDPending')
+    expect(onePc?.querySelector('[data-client-state="awaiting"]')?.textContent)
+      .toContain('Exact-event client boundaryAwaiting response')
+    expect(onePc?.querySelector('[data-raft-stage="idle"]')).not.toBeNull()
+
+    panel.update(eventBy(events, 'protocol_client_response', 'one_pc'))
+    expect(profile?.textContent).toContain(
+      'Declared fixture profile / outcome (static)',
+    )
+    expect(onePc?.getAttribute('data-lane-stage'))
+      .toBe('client_acknowledged')
+    expect(
+      onePc?.querySelector('.tidb-protocol-lab__timestamps')?.textContent,
+    ).not.toContain('start_ts · PDPending')
+  })
+
   it('renders every immutable model-5 snapshot into three fixed comparison lanes', () => {
     installTestDom()
     const panel = createProtocolLabPanel('en')

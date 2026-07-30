@@ -165,6 +165,12 @@ describe('model-5 Protocol Lab trace', () => {
     expect(receipt.events.map((event) => event.id)).toEqual(
       EXPECTED_KINDS.map((_, index) => `trace-1-event-${index + 1}`),
     )
+    for (let index = 1; index < receipt.events.length; index++) {
+      expect(
+        receipt.events[index].atMs,
+        `event ${index + 1} must not rewind replay time`,
+      ).toBeGreaterThanOrEqual(receipt.events[index - 1].atMs)
+    }
 
     const backgroundIds = new Set([
       ...Array.from({ length: 11 }, (_, index) => index + 33),
@@ -199,17 +205,29 @@ describe('model-5 Protocol Lab trace', () => {
     expect(eventAt(receipt, 1).dependsOn).toEqual([])
     expect(eventAt(receipt, 19).dependsOn).toEqual(['trace-1-event-18'])
     expect(eventAt(receipt, 25).dependsOn).toEqual(['trace-1-event-18'])
-    expect(eventAt(receipt, 19).atMs).toBe(eventAt(receipt, 25).atMs)
+    expect(eventAt(receipt, 25).atMs).toBeGreaterThanOrEqual(
+      eventAt(receipt, 24).atMs + eventAt(receipt, 24).durationMs,
+    )
     expect(eventAt(receipt, 31).dependsOn).toEqual([
       'trace-1-event-24',
       'trace-1-event-30',
     ])
-    expect(eventAt(receipt, 33).atMs).toBe(eventAt(receipt, 38).atMs)
+    expect(eventAt(receipt, 38).atMs).toBeGreaterThanOrEqual(
+      eventAt(receipt, 37).atMs + eventAt(receipt, 37).durationMs,
+    )
     expect(eventAt(receipt, 43).dependsOn).toEqual([
       'trace-1-event-37',
       'trace-1-event-42',
     ])
-    expect(eventAt(receipt, 48).atMs).toBe(eventAt(receipt, 54).atMs)
+    expect(eventAt(receipt, 54).atMs).toBeGreaterThanOrEqual(
+      eventAt(receipt, 53).atMs + eventAt(receipt, 53).durationMs,
+    )
+    for (const number of [19, 25, 33, 38, 48, 54]) {
+      expect(eventAt(receipt, number).metadata).toMatchObject({
+        presentationScheduling:
+          'deterministic_sibling_serialization_model_policy',
+      })
+    }
     expect(eventAt(receipt, 60).dependsOn).toEqual([
       'trace-1-event-53',
       'trace-1-event-59',
@@ -267,6 +285,52 @@ describe('model-5 Protocol Lab trace', () => {
         raftLayer: 'per_region_consensus',
       })
     }
+  })
+
+  it('keeps completed sibling-branch state visible in receipt order', () => {
+    const { receipt } = runProtocolLab()
+
+    const asyncFirstPrewrite = lane(
+      labAt(receipt, 24),
+      'async_commit',
+    ).regions[0]
+    const asyncSecondDispatch = lane(
+      labAt(receipt, 25),
+      'async_commit',
+    ).regions[0]
+    expect(asyncFirstPrewrite).toMatchObject({
+      returnedMinCommitTs: expect.any(Number),
+      mvcc: { lockCf: 'prewrite', writeCf: 'empty' },
+    })
+    expect(asyncSecondDispatch).toEqual(asyncFirstPrewrite)
+
+    const asyncFirstCleanup = lane(
+      labAt(receipt, 37),
+      'async_commit',
+    ).regions[0]
+    const asyncSecondCleanupDispatch = lane(
+      labAt(receipt, 38),
+      'async_commit',
+    ).regions[0]
+    expect(asyncFirstCleanup.mvcc).toMatchObject({
+      lockCf: 'empty',
+      writeCf: 'commit',
+    })
+    expect(asyncSecondCleanupDispatch).toEqual(asyncFirstCleanup)
+
+    const twoPcFirstPrewrite = lane(
+      labAt(receipt, 53),
+      'two_pc',
+    ).regions[0]
+    const twoPcSecondDispatch = lane(
+      labAt(receipt, 54),
+      'two_pc',
+    ).regions[0]
+    expect(twoPcFirstPrewrite.mvcc).toMatchObject({
+      lockCf: 'prewrite',
+      writeCf: 'empty',
+    })
+    expect(twoPcSecondDispatch).toEqual(twoPcFirstPrewrite)
   })
 
   it('records exact eligibility decisions and timestamp authorities', () => {

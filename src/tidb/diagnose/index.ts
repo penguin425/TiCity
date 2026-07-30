@@ -14,6 +14,9 @@ export const DIAGNOSE_SECTIONS = [
   'raft-peers',
   'raft-election',
   'region-request-retry',
+  'protocol-selection',
+  'protocol-client-path',
+  'protocol-region-state',
   'transactions',
   'lock-waits',
   'deadlocks',
@@ -153,6 +156,9 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
     'raft-peers': 'Raft voter peers',
     'raft-election': 'Raft leader選出',
     'region-request-retry': 'TiDB Region request再試行',
+    'protocol-selection': '宣言済みfixture profile / outcome（固定）',
+    'protocol-client-path': 'Exact-event client応答 / timestamp',
+    'protocol-region-state': 'Exact-event Region Raft / MVCC状態',
     transactions: 'Transactions / locks',
     'lock-waits': '現在のロック待機',
     deadlocks: 'デッドロック履歴',
@@ -167,6 +173,9 @@ const SECTION_TITLES: Record<Locale, Record<DiagnoseSection, string>> = {
     'raft-peers': 'Raft voter peers',
     'raft-election': 'Raft leader election',
     'region-request-retry': 'TiDB Region request retry',
+    'protocol-selection': 'Declared fixture profile / outcome (static)',
+    'protocol-client-path': 'Exact-event client path and timestamps',
+    'protocol-region-state': 'Exact-event Region Raft / MVCC state',
     transactions: 'Transactions / locks',
     'lock-waits': 'Active lock waits',
     deadlocks: 'Deadlock history',
@@ -373,6 +382,61 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     requestStatus: 'request状態',
     clientVisibleError: 'client返却error',
     applicationRetry: 'application retry',
+    lane: '比較lane',
+    profileScope: 'profile / 時間境界',
+    selected: '宣言済みprotocol outcome',
+    selectionReason: '宣言済みoutcomeの根拠',
+    onePcEnabled: '宣言済み1PC feature',
+    asyncCommitEnabled: '宣言済みAsync Commit feature',
+    consistency: '宣言済み一貫性',
+    onePcEligible: '宣言済み1PC eligibility',
+    asyncCommitEligible: '宣言済みAsync Commit eligibility',
+    regionCount: 'Region数',
+    mutationCount: 'mutation数',
+    totalKeyBytes: 'key合計byte',
+    onePcDecisionPoint: '宣言済み1PC判定点',
+    asyncDecisionPoint: '宣言済みAsync判定点',
+    onePcRejectedBeforeRpc: '宣言済み1PC RPC前除外',
+    asyncRejectedAtClientPrecheck: '宣言済みAsync client事前除外',
+    tryOnePcSent: '宣言済みTryOnePc request flag',
+    asyncKeyCountLimit: 'Async key数上限',
+    asyncTotalKeyBytesLimit: 'Async key byte上限',
+    runtimeFallback: '宣言済みruntime fallback outcome',
+    representation: '投影方式',
+    request: '合成request',
+    transaction: '合成transaction',
+    stage: 'exact-event stage',
+    startTsSource: 'start_ts由来',
+    latestTs: 'latest_ts',
+    latestTsSource: 'latest_ts由来',
+    requestMinCommitTs: 'request min_commit_ts',
+    requestMinCommitTsSource: 'request min_commit_ts由来',
+    maxCommitTs: 'max_commit_ts',
+    maxCommitTsSource: 'max_commit_ts由来',
+    commitTsSource: 'commit_ts由来',
+    clientResponded: 'client応答済み',
+    backgroundState: '応答後cleanup',
+    clientBoundary: 'client境界',
+    backgroundScheduling: 'background順序',
+    protocol: 'protocol',
+    role: '役割',
+    leader: 'Leader',
+    voterCount: 'voter数',
+    persistedVoters: '永続化voter',
+    raftOperation: 'Raft operation',
+    raftStage: 'Raft stage',
+    raftIndex: 'Raft index',
+    raftAcks: 'Raft ack',
+    coordinatorLayer: 'transaction層',
+    raftLayer: 'Raft層',
+    cfDefault: 'cfDefault',
+    cfLock: 'cfLock',
+    cfWrite: 'cfWrite',
+    asyncCommit: 'Async lock metadata',
+    secondaryCount: 'secondary数',
+    returnedMinCommitTs: '返却min_commit_ts',
+    returnedMinCommitTsSource: '返却min_commit_ts由来',
+    asyncApplyPrewrite: 'async apply prewrite',
   },
   en: {
     client: 'client',
@@ -437,6 +501,62 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     requestStatus: 'request status',
     clientVisibleError: 'client-visible error',
     applicationRetry: 'application retry',
+    lane: 'comparison lane',
+    profileScope: 'profile / time boundary',
+    selected: 'declared protocol outcome',
+    selectionReason: 'declared outcome rationale',
+    onePcEnabled: 'declared 1PC feature',
+    asyncCommitEnabled: 'declared Async Commit feature',
+    consistency: 'declared consistency',
+    onePcEligible: 'declared 1PC eligibility',
+    asyncCommitEligible: 'declared Async Commit eligibility',
+    regionCount: 'Regions',
+    mutationCount: 'mutations',
+    totalKeyBytes: 'total key bytes',
+    onePcDecisionPoint: 'declared 1PC decision point',
+    asyncDecisionPoint: 'declared Async decision point',
+    onePcRejectedBeforeRpc: 'declared pre-RPC 1PC exclusion',
+    asyncRejectedAtClientPrecheck:
+      'declared Async client-precheck exclusion',
+    tryOnePcSent: 'declared TryOnePc request flag',
+    asyncKeyCountLimit: 'Async key-count limit',
+    asyncTotalKeyBytesLimit: 'Async key-byte limit',
+    runtimeFallback: 'declared runtime-fallback outcome',
+    representation: 'projection',
+    request: 'synthetic request',
+    transaction: 'synthetic transaction',
+    stage: 'exact-event stage',
+    startTsSource: 'start_ts source',
+    latestTs: 'latest_ts',
+    latestTsSource: 'latest_ts source',
+    requestMinCommitTs: 'request min_commit_ts',
+    requestMinCommitTsSource: 'request min_commit_ts source',
+    maxCommitTs: 'max_commit_ts',
+    maxCommitTsSource: 'max_commit_ts source',
+    commitTsSource: 'commit_ts source',
+    clientResponded: 'client responded',
+    backgroundState: 'post-response cleanup',
+    clientBoundary: 'client boundary',
+    backgroundScheduling: 'background ordering',
+    protocol: 'protocol',
+    role: 'role',
+    leader: 'leader',
+    voterCount: 'voters',
+    persistedVoters: 'persisted voters',
+    raftOperation: 'Raft operation',
+    raftStage: 'Raft stage',
+    raftIndex: 'Raft index',
+    raftAcks: 'Raft acknowledgements',
+    coordinatorLayer: 'transaction layer',
+    raftLayer: 'Raft layer',
+    cfDefault: 'cfDefault',
+    cfLock: 'cfLock',
+    cfWrite: 'cfWrite',
+    asyncCommit: 'Async lock metadata',
+    secondaryCount: 'secondary count',
+    returnedMinCommitTs: 'returned min_commit_ts',
+    returnedMinCommitTsSource: 'returned min_commit_ts source',
+    asyncApplyPrewrite: 'async apply prewrite',
   },
 }
 
@@ -478,6 +598,80 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'cacheState:invalidated': '無効化',
     'cacheState:refreshed': '更新済み',
     'pdRole:observer_and_routing_only': '観測とroute metadataのみ',
+    'lane:one_pc': '1PC',
+    'lane:async_commit': 'Async Commit',
+    'lane:two_pc': '通常2PC',
+    'profileScope:declared_fixture_profile_visible_from_comparison_start':
+      '宣言済みの代表profile / outcome（比較開始時から表示）',
+    'selected:1pc': '1PC',
+    'selected:async_commit': 'Async Commit',
+    'selected:2pc': '通常2PC',
+    'protocol:1pc': '1PC',
+    'protocol:async_commit': 'Async Commit',
+    'protocol:2pc': '通常2PC',
+    'selectionReason:single_region_one_pc_model_case':
+      '単一Regionの代表ケース（1PC優先）',
+    'selectionReason:multi_region_async_commit_model_case':
+      '複数RegionかつAsync制限内の代表ケース',
+    'selectionReason:async_key_count_limit_model_case':
+      '257 mutationsがAsync上限256を超過',
+    'consistency:linearizable': 'linear consistency',
+    'onePcDecisionPoint:region_batching': 'TiDB Region batching',
+    'onePcDecisionPoint:tikv_prewrite': 'TiKV Prewrite応答',
+    'asyncDecisionPoint:client_precheck': 'TiDB client事前判定',
+    'asyncDecisionPoint:tikv_prewrite': 'TiKV Prewrite応答',
+    'representation:aggregate_counts_only':
+      '集計数のみ（SQL・key・value・rowなし）',
+    'stage:idle': '待機',
+    'stage:requested': 'request受付',
+    'stage:started': 'transaction開始',
+    'stage:selected': 'protocol選択済み',
+    'stage:latest_ts': 'timestamp floor計算済み',
+    'stage:prewriting': 'Prewrite中',
+    'stage:prewritten': 'Prewrite完了',
+    'stage:commit_ts': 'commit_ts取得済み',
+    'stage:committing': 'Commit中',
+    'stage:client_acknowledged': 'client応答済み',
+    'stage:background': '応答後cleanup中',
+    'stage:complete': '完了',
+    'startTsSource:pd_tso': 'PD TSO',
+    'latestTsSource:pd_tso': 'PD TSO',
+    'requestMinCommitTsSource:latest_ts_plus_one':
+      'TiDB算出：latest_ts + 1',
+    'maxCommitTsSource:representative_safe_window_model_bound':
+      'MODEL POLICY：代表safe-window上限',
+    'commitTsSource:tikv_one_pc_result': 'TiKV one_pc_commit_ts',
+    'commitTsSource:max_prewrite_min_commit_ts':
+      'TiKV返却min_commit_tsの最大値',
+    'commitTsSource:pd_tso_after_prewrite': '全Prewrite後のPD TSO',
+    'backgroundState:not_required': '不要',
+    'backgroundState:not_started': '未開始',
+    'backgroundState:in_progress_after_response': 'client応答後に進行中',
+    'backgroundState:complete': '完了',
+    'clientBoundary:response_before_cleanup_completion':
+      'client応答後にcleanup完了',
+    'backgroundScheduling:deterministic_after_client_boundary_model_policy':
+      'MODEL POLICY：client応答後の固定表示順',
+    'role:primary': 'primary',
+    'role:secondary': 'secondary',
+    'raftOperation:one_pc_prewrite': '1PC Prewrite',
+    'raftOperation:commit_primary': 'primary Commit',
+    'raftOperation:commit_secondary': 'secondary Commit',
+    'raftOperation:commit_async': 'Async background Commit',
+    'raftStage:idle': '待機',
+    'raftStage:proposed': '提案済み',
+    'raftStage:persisted_quorum': 'quorum永続化済み',
+    'raftStage:committed': 'Raft commit済み',
+    'raftStage:applied': 'MVCC apply済み',
+    'coordinatorLayer:tidb_transaction_commit': 'TiDB transaction commit',
+    'raftLayer:per_region_consensus': 'Regionごとのconsensus',
+    'cfDefault:empty': '空',
+    'cfDefault:value': '代表value',
+    'cfLock:empty': '空',
+    'cfLock:prewrite': 'Prewrite lock',
+    'cfWrite:empty': '空',
+    'cfWrite:commit': 'commit record',
+    'returnedMinCommitTsSource:tikv_prewrite_result': 'TiKV Prewrite応答',
   },
   en: {
     'detectorScope:cluster_wide': 'cluster-wide',
@@ -489,6 +683,74 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'retrySource:tidb_internal': 'TiDB internal',
     'boundary:same logical Region request': 'same logical Region request',
     'pdRole:observer_and_routing_only': 'Observe and route metadata only',
+    'lane:one_pc': '1PC',
+    'lane:async_commit': 'Async Commit',
+    'lane:two_pc': 'regular 2PC',
+    'profileScope:declared_fixture_profile_visible_from_comparison_start':
+      'Declared representative profile / outcome; visible from comparison start',
+    'selected:1pc': '1PC',
+    'selected:async_commit': 'Async Commit',
+    'selected:2pc': 'regular 2PC',
+    'protocol:1pc': '1PC',
+    'protocol:async_commit': 'Async Commit',
+    'protocol:2pc': 'regular 2PC',
+    'selectionReason:single_region_one_pc_model_case':
+      'representative single-Region case (1PC precedence)',
+    'selectionReason:multi_region_async_commit_model_case':
+      'representative multi-Region case within Async limits',
+    'selectionReason:async_key_count_limit_model_case':
+      '257 mutations exceed the Async limit of 256',
+    'consistency:linearizable': 'linear consistency',
+    'onePcDecisionPoint:region_batching': 'TiDB Region batching',
+    'onePcDecisionPoint:tikv_prewrite': 'TiKV Prewrite response',
+    'asyncDecisionPoint:client_precheck': 'TiDB client precheck',
+    'asyncDecisionPoint:tikv_prewrite': 'TiKV Prewrite response',
+    'representation:aggregate_counts_only':
+      'aggregate counts only (no SQL, keys, values, or rows)',
+    'stage:idle': 'idle',
+    'stage:requested': 'request received',
+    'stage:started': 'transaction started',
+    'stage:selected': 'protocol selected',
+    'stage:latest_ts': 'timestamp floor ready',
+    'stage:prewriting': 'prewriting',
+    'stage:prewritten': 'prewritten',
+    'stage:commit_ts': 'commit_ts ready',
+    'stage:committing': 'committing',
+    'stage:client_acknowledged': 'client acknowledged',
+    'stage:background': 'post-response cleanup',
+    'stage:complete': 'complete',
+    'startTsSource:pd_tso': 'PD TSO',
+    'latestTsSource:pd_tso': 'PD TSO',
+    'requestMinCommitTsSource:latest_ts_plus_one':
+      'TiDB-derived: latest_ts + 1',
+    'maxCommitTsSource:representative_safe_window_model_bound':
+      'MODEL POLICY: representative safe-window bound',
+    'commitTsSource:tikv_one_pc_result': 'TiKV one_pc_commit_ts',
+    'commitTsSource:max_prewrite_min_commit_ts':
+      'maximum TiKV-returned min_commit_ts',
+    'commitTsSource:pd_tso_after_prewrite': 'PD TSO after all prewrites',
+    'backgroundState:not_required': 'not required',
+    'backgroundState:not_started': 'not started',
+    'backgroundState:in_progress_after_response':
+      'running after client response',
+    'backgroundState:complete': 'complete',
+    'clientBoundary:response_before_cleanup_completion':
+      'response before cleanup completion',
+    'backgroundScheduling:deterministic_after_client_boundary_model_policy':
+      'MODEL POLICY: fixed display order after client response',
+    'raftOperation:one_pc_prewrite': '1PC Prewrite',
+    'raftOperation:commit_primary': 'primary Commit',
+    'raftOperation:commit_secondary': 'secondary Commit',
+    'raftOperation:commit_async': 'Async background Commit',
+    'raftStage:persisted_quorum': 'persisted by quorum',
+    'raftStage:committed': 'Raft committed',
+    'raftStage:applied': 'MVCC applied',
+    'coordinatorLayer:tidb_transaction_commit': 'TiDB transaction commit',
+    'raftLayer:per_region_consensus': 'per-Region consensus',
+    'cfDefault:value': 'representative value',
+    'cfLock:prewrite': 'Prewrite lock',
+    'cfWrite:commit': 'commit record',
+    'returnedMinCommitTsSource:tikv_prewrite_result': 'TiKV Prewrite response',
   },
 }
 
@@ -619,6 +881,129 @@ function regionRequestRetryRows(state: Record<string, unknown>): DiagnosticRow[]
     applicationRetry: 'false',
     boundary: 'same logical Region request',
   }]
+}
+
+function protocolLabState(state: Record<string, unknown>): Record<string, unknown> {
+  return record(state.protocolLab)
+}
+
+function protocolLaneRows(
+  state: Record<string, unknown>,
+): Record<string, unknown>[] {
+  return array(protocolLabState(state).lanes).map(record)
+}
+
+function protocolSelectionRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const protocolLab = protocolLabState(state)
+  if (Object.keys(protocolLab).length === 0) return []
+  return protocolLaneRows(state).map((lane) => {
+    const eligibility = record(lane.eligibility)
+    return {
+      lane: value(lane.id),
+      profileScope:
+        'declared_fixture_profile_visible_from_comparison_start',
+      selected: value(eligibility.selected),
+      selectionReason: value(eligibility.selectionReason),
+      onePcEnabled: value(eligibility.enable1Pc),
+      asyncCommitEnabled: value(eligibility.enableAsyncCommit),
+      consistency: value(eligibility.consistency),
+      onePcEligible: value(eligibility.onePcEligible),
+      asyncCommitEligible: value(eligibility.asyncCommitEligible),
+      regionCount: value(eligibility.regionCount),
+      mutationCount: value(eligibility.mutationCount),
+      totalKeyBytes: value(eligibility.totalKeyBytes),
+      onePcDecisionPoint: value(eligibility.onePcDecisionPoint),
+      asyncDecisionPoint: value(eligibility.asyncDecisionPoint),
+      onePcRejectedBeforeRpc: value(eligibility.onePcRejectedBeforeRpc),
+      asyncRejectedAtClientPrecheck:
+        value(eligibility.asyncRejectedAtClientPrecheck),
+      tryOnePcSent: value(eligibility.tryOnePcSent),
+      asyncKeyCountLimit: value(eligibility.asyncKeyCountLimit),
+      asyncTotalKeyBytesLimit: value(eligibility.asyncTotalKeyBytesLimit),
+      runtimeFallback: value(eligibility.runtimeFallback),
+      representation: value(protocolLab.representation),
+    }
+  })
+}
+
+function present(raw: unknown): boolean {
+  return raw !== null && raw !== undefined
+}
+
+function protocolBackgroundState(lane: Record<string, unknown>): string {
+  if (lane.protocol === '1pc') return 'not_required'
+  if (lane.backgroundComplete === true) return 'complete'
+  if (lane.clientResponded === true) return 'in_progress_after_response'
+  return 'not_started'
+}
+
+function protocolClientPathRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const protocolLab = protocolLabState(state)
+  if (Object.keys(protocolLab).length === 0) return []
+  return protocolLaneRows(state).map((lane) => ({
+    lane: value(lane.id),
+    protocol: value(lane.protocol),
+    request: value(lane.requestId),
+    transaction: value(lane.transactionId),
+    stage: value(lane.stage),
+    startTs: value(lane.startTs),
+    startTsSource: present(lane.startTs) ? 'pd_tso' : '—',
+    latestTs: value(lane.latestTs),
+    latestTsSource: present(lane.latestTs) ? 'pd_tso' : '—',
+    requestMinCommitTs: value(lane.requestMinCommitTs),
+    requestMinCommitTsSource: present(lane.requestMinCommitTs)
+      ? 'latest_ts_plus_one'
+      : '—',
+    maxCommitTs: value(lane.maxCommitTs),
+    maxCommitTsSource: present(lane.maxCommitTs)
+      ? value(protocolLab.maxCommitTsPolicy)
+      : '—',
+    commitTs: value(lane.commitTs),
+    commitTsSource: value(lane.commitTsSource),
+    clientResponded: value(lane.clientResponded),
+    backgroundState: protocolBackgroundState(lane),
+    clientBoundary: value(protocolLab.clientBoundary),
+    backgroundScheduling: value(protocolLab.backgroundScheduling),
+  }))
+}
+
+function protocolRegionRows(state: Record<string, unknown>): DiagnosticRow[] {
+  const protocolLab = protocolLabState(state)
+  if (Object.keys(protocolLab).length === 0) return []
+  return protocolLaneRows(state).flatMap((lane) =>
+    array(lane.regions).map((entry) => {
+      const region = record(entry)
+      const raft = record(region.raft)
+      const mvcc = record(region.mvcc)
+      const voters = array(region.voterStoreIds)
+      return {
+        lane: value(lane.id),
+        protocol: value(lane.protocol),
+        region: value(region.regionId),
+        role: value(region.role),
+        mutationCount: value(region.mutationCount),
+        leader: value(region.leaderStoreId),
+        voterCount: value(voters.length),
+        raftOperation: value(raft.operation),
+        raftStage: value(raft.stage),
+        raftIndex: value(raft.index),
+        raftAcks: `${value(raft.acknowledgements)}/${value(raft.quorum)}`,
+        persistedVoters: value(raft.persistedStoreIds),
+        coordinatorLayer: value(protocolLab.coordinatorLayer),
+        raftLayer: value(protocolLab.raftLayer),
+        cfDefault: value(mvcc.defaultCf),
+        cfLock: value(mvcc.lockCf),
+        cfWrite: value(mvcc.writeCf),
+        asyncCommit: value(mvcc.asyncCommit),
+        secondaryCount: value(mvcc.secondaryCount),
+        returnedMinCommitTs: value(region.returnedMinCommitTs),
+        returnedMinCommitTsSource: present(region.returnedMinCommitTs)
+          ? 'tikv_prewrite_result'
+          : '—',
+        asyncApplyPrewrite: value(protocolLab.tikvAsyncApplyPrewrite),
+      }
+    }),
+  )
 }
 
 function lockLabState(state: Record<string, unknown>): Record<string, unknown> {
@@ -829,6 +1214,9 @@ export function projectDiagnostics(snapshot: TiCityState | unknown): DiagnosticP
     'raft-peers': () => raftPeerRows(state),
     'raft-election': () => raftElectionRows(state),
     'region-request-retry': () => regionRequestRetryRows(state),
+    'protocol-selection': () => protocolSelectionRows(state),
+    'protocol-client-path': () => protocolClientPathRows(state),
+    'protocol-region-state': () => protocolRegionRows(state),
     transactions: () => transactionRows(state),
     'lock-waits': () => lockWaitRows(state),
     deadlocks: () => deadlockRows(state),
@@ -946,6 +1334,14 @@ function rowTone(section: DiagnoseSection, row: DiagnosticRow): SummaryTone {
   }
   if (section === 'application-retry') {
     return row.status?.toLowerCase() === 'completed' ? 'healthy' : 'attention'
+  }
+  if (
+    section === 'protocol-selection' ||
+    section === 'protocol-client-path' ||
+    section === 'protocol-region-state'
+  ) {
+    // Protocol Lab compares valid paths; post-response cleanup is not a warning.
+    return 'neutral'
   }
   if (section === 'hot-regions') {
     const score = numberValue(row.hotScore) ?? 0
@@ -1534,6 +1930,14 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
     ) &&
     projection.rows.length > 0
   )
+  const hasProtocolDetail = projections.some((projection) =>
+    (
+      projection.id === 'protocol-selection' ||
+      projection.id === 'protocol-client-path' ||
+      projection.id === 'protocol-region-state'
+    ) &&
+    projection.rows.length > 0
+  )
   installCityUiStyles(root.ownerDocument ?? document)
   installDiagnoseStyles(root.ownerDocument ?? document)
 
@@ -1582,7 +1986,11 @@ export function mountDiagnose(root: HTMLElement, options: DiagnoseOptions): void
 
   root.classList.add('tidb-surface', 'tidb-diagnose')
   root.setAttribute('lang', locale)
-  root.dataset.activeLab = hasRaftDetail ? 'raft' : 'none'
+  root.dataset.activeLab = hasProtocolDetail
+    ? 'protocol'
+    : hasRaftDetail
+      ? 'raft'
+      : 'none'
   root.replaceChildren(
     element('header', { className: 'tidb-diagnose__head' },
       element('div', { className: 'tidb-diagnose__head-copy' },
