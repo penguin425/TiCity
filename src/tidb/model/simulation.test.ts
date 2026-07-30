@@ -238,18 +238,22 @@ describe('transactions, Raft, GC, and TiFlash', () => {
     expect(tikvAggregate.events.some((event) => event.domain === 'tiflash')).toBe(false)
   })
 
-  it('clears modeled TiFlash pending lag after an MPP snapshot catches up', () => {
+  it('does not advance node-global resolved-ts to a query snapshot on demand', () => {
     const sim = createTiDBSimulation()
     sim.setControl('qps', 0)
     sim.setControl('tiflashLagSeconds', 2)
     sim.submitSql('INSERT INTO events (id, account_id) VALUES (1, 7)')
+    const resolvedBefore = sim.state.tiflash.resolvedTs
+    const pendingBefore = sim.state.tiflash.pendingVersions
 
     const receipt = sim.submitSql('SELECT count(*) FROM events').receipt!
 
     expect(receipt.succeeded).toBe(true)
-    expect(sim.state.tiflash.resolvedTs).toBe(sim.state.tiflash.targetTs)
-    expect(sim.state.tiflash.pendingVersions).toBe(0)
-    expect(sim.state.tiflash.lagSeconds).toBe(0)
+    expect(sim.state.tiflash.resolvedTs).toBe(resolvedBefore)
+    expect(sim.state.tiflash.pendingVersions).toBe(pendingBefore)
+    expect(receipt.events.some((event) =>
+      event.kind === 'learner_snapshot_gate' &&
+      event.metadata.nodeGlobalResolvedTsAdvanced === false)).toBe(true)
   })
 })
 
@@ -269,7 +273,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-6')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-7')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))

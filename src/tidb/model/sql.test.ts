@@ -96,11 +96,18 @@ describe('conservative TiDB SQL classifier', () => {
   it('uses TiFlash MPP only for the events table replica', () => {
     const tiflash = analyzeSql('SELECT count(*) FROM events')
     const tikv = analyzeSql('SELECT count(*) FROM accounts')
+    const tiflashPlan = JSON.stringify(tiflash.plan)
 
     expect(tiflash.accessPath).toBe('tiflash_mpp')
     expect(tiflash.plan.flatMap((node) => node.children).some(
       (node) => node.task === 'mpp[tiflash]',
     )).toBe(true)
+    expect(tiflashPlan).toContain('MPPGather')
+    expect(tiflashPlan).toContain('HashAgg(Partial)')
+    expect(tiflashPlan).toContain('ExchangeSender(HashPartition)')
+    expect(tiflashPlan).toContain('ExchangeReceiver(HashPartition)')
+    expect(tiflashPlan).toContain('HashAgg(Final)')
+    expect(tiflashPlan).toContain('ExchangeSender(PassThrough)')
     expect(tikv.accessPath).toBe('table_scan')
     expect(JSON.stringify(tikv.plan)).not.toContain('mpp[tiflash]')
     expect(JSON.stringify(tikv.plan)).toContain('cop[tikv]')
