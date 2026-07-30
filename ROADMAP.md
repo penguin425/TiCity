@@ -44,7 +44,17 @@
 - Reciprocal language navigation and bilingual GitHub Release archives
 - Documentation-only release with no simulation or runtime behavior changes
 
-## Deliberately outside v0.3.x
+## v0.4
+
+- A model-2 causal event graph with immutable post-event snapshots and typed deltas
+- A mechanism-level two-Region pessimistic transaction vertical slice
+- Parallel prewrite, independent per-Region Raft quorum/apply, conceptual MVCC state,
+  primary response, and background secondary cleanup
+- An Inspect-mode 3D Transaction Lab cutaway synchronized with the Trace Dock
+- Causal fork/join rendering in Machine and shared selected-event URLs with Diagnose
+- Bilingual, accessible, reduced-motion, fixed-capacity presentation and release gates
+
+## Deliberately outside the current offline model
 
 - Connecting to or changing a live TiDB cluster
 - Executing SQL, showing real `EXPLAIN`, returning rows, or querying metrics

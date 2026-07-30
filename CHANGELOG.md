@@ -10,8 +10,8 @@ recorded in `NOTICE`.
   two-Region pessimistic transaction can be inspected from coordinator
   routing through parallel prewrite, per-Region Raft quorum/apply, conceptual
   MVCC state, primary response, and background secondary cleanup.
-- Keep the 3D cutaway, Trace Dock, Machine causal graph, and Diagnose
-  event-time projection synchronized to the same immutable event cursor.
+- Keep the 3D cutaway and Trace Dock synchronized to City playback, and let
+  Machine and Diagnose share a stable selected-event URL.
 - Add bilingual and accessible Inspect controls, shareable event URLs,
   fixed-capacity rendering, reduced-motion behavior, release documentation,
   and a current Transaction Lab screenshot.
