@@ -57,6 +57,10 @@ export {
   type GcStorageLabPanel,
 } from './gc-storage-lab'
 export {
+  createTiFlashMppLabPanel,
+  type TiFlashMppLabPanel,
+} from './tiflash-mpp-lab'
+export {
   CONTROL_COPY,
   DEFAULT_CITY_CONTROLS,
   SCENARIOS,

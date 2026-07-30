@@ -1802,6 +1802,292 @@ a {
   margin-top: 0.5rem;
 }
 
+.tidb-tiflash-mpp-lab {
+  --tiflash-mpp-accent: var(--domain-tiflash);
+  position: absolute;
+  z-index: 19;
+  top: 5.6rem;
+  left: max(0.8rem, env(safe-area-inset-left));
+  display: none;
+  width: min(46rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 27rem);
+  max-height: calc(100dvh - 19rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.8rem;
+  border: 1px solid color-mix(
+    in srgb,
+    var(--tiflash-mpp-accent) 64%,
+    var(--city-line)
+  );
+  border-radius: 0.9rem;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--tiflash-mpp-accent) 12%, transparent),
+      transparent 48%
+    ),
+    color-mix(in srgb, var(--city-panel-solid) 96%, transparent);
+  box-shadow:
+    0 20px 52px rgba(0, 0, 0, 0.31),
+    0 0 30px color-mix(
+      in srgb,
+      var(--tiflash-mpp-accent) 10%,
+      transparent
+    );
+  font: 0.6rem/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  pointer-events: auto;
+  backdrop-filter: blur(20px) saturate(130%);
+  scrollbar-color: var(--city-line) transparent;
+  scrollbar-gutter: stable;
+}
+
+.tidb-layout[data-inspect="open"] .tidb-tiflash-mpp-lab:not([hidden]) {
+  display: block;
+}
+
+.tidb-tiflash-mpp-lab:focus-visible,
+.tidb-tiflash-mpp-lab__table-scroll:focus-visible {
+  outline: 3px solid var(--city-cyan);
+  outline-offset: 2px;
+}
+
+.tidb-tiflash-mpp-lab :is(h2, h3, h4, p, dl, table) {
+  margin-block-start: 0;
+}
+
+.tidb-tiflash-mpp-lab :is(h2, h3, h4) {
+  margin-block-end: 0;
+}
+
+.tidb-tiflash-mpp-lab__head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.tidb-tiflash-mpp-lab__head > div:first-child {
+  min-width: 0;
+}
+
+.tidb-tiflash-mpp-lab__head h2 {
+  font-size: 0.9rem;
+}
+
+.tidb-tiflash-mpp-lab h3 {
+  font-size: 0.72rem;
+}
+
+.tidb-tiflash-mpp-lab h4 {
+  font-size: 0.62rem;
+}
+
+.tidb-tiflash-mpp-lab__eyebrow {
+  margin-bottom: 0.15rem;
+  color: var(--tiflash-mpp-accent);
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.tidb-tiflash-mpp-lab__overview,
+.tidb-tiflash-mpp-lab__boundary-note {
+  margin: 0.35rem 0 0;
+  color: var(--city-muted);
+  overflow-wrap: anywhere;
+}
+
+.tidb-tiflash-mpp-lab__phase {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.2rem 0.42rem;
+  color: var(--tiflash-mpp-accent);
+  font-size: 0.52rem;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tidb-tiflash-mpp-lab > section {
+  margin-top: 0.55rem;
+  padding: 0.55rem;
+  border: 1px solid var(--city-line);
+  border-radius: 0.66rem;
+  background: color-mix(in srgb, var(--city-bg-deep) 72%, transparent);
+}
+
+.tidb-tiflash-mpp-lab__privacy {
+  border-left: 3px solid var(--city-cyan) !important;
+}
+
+.tidb-tiflash-mpp-lab__provisioning {
+  border-left: 3px solid var(--city-yellow) !important;
+}
+
+.tidb-tiflash-mpp-lab__planes,
+.tidb-tiflash-mpp-lab__learners {
+  border-left: 3px solid var(--domain-raft) !important;
+}
+
+.tidb-tiflash-mpp-lab__fragments,
+.tidb-tiflash-mpp-lab__tasks,
+.tidb-tiflash-mpp-lab__tunnels {
+  border-left: 3px solid var(--domain-tiflash) !important;
+}
+
+.tidb-tiflash-mpp-lab__root {
+  border-left: 3px solid var(--city-cyan) !important;
+}
+
+.tidb-tiflash-mpp-lab__retry {
+  border-left: 3px dashed var(--city-muted) !important;
+}
+
+.tidb-tiflash-mpp-lab__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.28rem;
+  margin: 0.38rem 0 0;
+}
+
+.tidb-tiflash-mpp-lab__metric {
+  min-width: 0;
+  padding: 0.32rem;
+  border: 1px solid var(--city-line);
+  border-radius: 0.42rem;
+  background: color-mix(in srgb, var(--city-panel) 84%, transparent);
+}
+
+.tidb-tiflash-mpp-lab :is(dt, dd) {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tidb-tiflash-mpp-lab dt {
+  color: var(--city-muted);
+  font-size: 0.49rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.tidb-tiflash-mpp-lab dd {
+  margin-top: 0.1rem;
+  color: var(--city-text);
+}
+
+.tidb-tiflash-mpp-lab__fragment-list,
+.tidb-tiflash-mpp-lab__task-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.42rem;
+  margin-top: 0.42rem;
+}
+
+.tidb-tiflash-mpp-lab__fragment,
+.tidb-tiflash-mpp-lab__task {
+  min-width: 0;
+  padding: 0.48rem;
+  border: 1px solid var(--city-line);
+  border-top: 3px solid var(--tiflash-mpp-accent);
+  border-radius: 0.54rem;
+  background: color-mix(in srgb, var(--city-panel-solid) 84%, transparent);
+}
+
+.tidb-tiflash-mpp-lab__fragment[data-fragment-kind="scan_partial_aggregate"],
+.tidb-tiflash-mpp-lab__task[data-fragment-id="fragment-scan"] {
+  border-top-color: var(--domain-sql);
+}
+
+.tidb-tiflash-mpp-lab__task:is(
+  [data-task-stage="snapshot_gating"],
+  [data-task-stage="exchange_sending"],
+  [data-task-stage="exchange_receiving"],
+  [data-task-stage="root_streaming"]
+) {
+  box-shadow: inset 0 0 0 1px color-mix(
+    in srgb,
+    var(--tiflash-mpp-accent) 35%,
+    transparent
+  );
+}
+
+.tidb-tiflash-mpp-lab__table-scroll {
+  max-width: 100%;
+  margin-top: 0.42rem;
+  overflow: auto;
+  border: 1px solid var(--city-line);
+  border-radius: 0.5rem;
+  scrollbar-color: var(--city-line) transparent;
+}
+
+.tidb-tiflash-mpp-lab__table {
+  width: 100%;
+  min-width: 48rem;
+  border-collapse: collapse;
+  color: var(--city-text);
+  font-size: 0.55rem;
+}
+
+.tidb-tiflash-mpp-lab__learners .tidb-tiflash-mpp-lab__table {
+  min-width: 76rem;
+}
+
+.tidb-tiflash-mpp-lab__table caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tidb-tiflash-mpp-lab__table :is(th, td) {
+  padding: 0.34rem 0.42rem;
+  border-right: 1px solid var(--city-line);
+  border-bottom: 1px solid var(--city-line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tidb-tiflash-mpp-lab__table :is(th, td):last-child {
+  border-right: 0;
+}
+
+.tidb-tiflash-mpp-lab__table thead th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--city-panel-solid);
+  color: var(--city-muted);
+  font-size: 0.49rem;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.tidb-tiflash-mpp-lab__table tbody th {
+  color: var(--tiflash-mpp-accent);
+}
+
+.tidb-tiflash-mpp-lab__table tr[data-read-gate="waiting_applied"] {
+  background: color-mix(in srgb, var(--city-yellow) 10%, transparent);
+}
+
+.tidb-tiflash-mpp-lab__table tr:is(
+  [data-read-gate="ready"],
+  [data-read-gate="mvcc_checked"],
+  [data-read-gate="validated"]
+) {
+  background: color-mix(in srgb, var(--city-green) 9%, transparent);
+}
+
+.tidb-tiflash-mpp-lab__table tr[data-tunnel-status="sent"] {
+  background: color-mix(in srgb, var(--domain-tiflash) 10%, transparent);
+}
+
 .tidb-trace-playback {
   --trace-color: var(--city-cyan);
   position: absolute;
@@ -2413,7 +2699,8 @@ a {
   .tidb-lock-lab,
   .tidb-raft-lab,
   .tidb-protocol-lab,
-  .tidb-gc-storage-lab {
+  .tidb-gc-storage-lab,
+  .tidb-tiflash-mpp-lab {
     right: max(0.5rem, env(safe-area-inset-right));
     bottom: calc(10.5rem + env(safe-area-inset-bottom));
     left: max(0.5rem, env(safe-area-inset-left));
@@ -2427,7 +2714,9 @@ a {
   }
 
   .tidb-gc-storage-lab__store-list,
-  .tidb-gc-storage-lab__chain-list {
+  .tidb-gc-storage-lab__chain-list,
+  .tidb-tiflash-mpp-lab__fragment-list,
+  .tidb-tiflash-mpp-lab__task-list {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2534,7 +2823,8 @@ a {
   .tidb-lock-lab,
   .tidb-raft-lab,
   .tidb-protocol-lab,
-  .tidb-gc-storage-lab {
+  .tidb-gc-storage-lab,
+  .tidb-tiflash-mpp-lab {
     top: 8.25rem;
   }
 
@@ -2551,14 +2841,16 @@ a {
   }
 
   .tidb-protocol-lab__head,
-  .tidb-gc-storage-lab__head {
+  .tidb-gc-storage-lab__head,
+  .tidb-tiflash-mpp-lab__head {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .tidb-protocol-lab__facts,
   .tidb-protocol-lab__mvcc,
-  .tidb-gc-storage-lab__facts {
+  .tidb-gc-storage-lab__facts,
+  .tidb-tiflash-mpp-lab__facts {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2689,7 +2981,8 @@ a {
   .tidb-lock-lab__head,
   .tidb-raft-lab__head,
   .tidb-protocol-lab__head,
-  .tidb-gc-storage-lab__head {
+  .tidb-gc-storage-lab__head,
+  .tidb-tiflash-mpp-lab__head {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -2697,7 +2990,8 @@ a {
   .tidb-lock-lab__facts,
   .tidb-raft-lab__facts,
   .tidb-protocol-lab__facts,
-  .tidb-gc-storage-lab__facts {
+  .tidb-gc-storage-lab__facts,
+  .tidb-tiflash-mpp-lab__facts {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -56,6 +56,12 @@ const STATIONARY_DISTANCE = 0.75
 const SCHEDULE_EPSILON_MS = 1e-3
 export const TRACE_LOOP_HOLD_MS = 1_800
 const FAILED_TRACE_LOOP_HOLD_MS = 2_600
+const TIFLASH_MPP_TASK_ENDPOINTS = Object.freeze([
+  'task-scan-1',
+  'task-scan-2',
+  'task-final-1',
+  'task-final-2',
+] as const)
 
 const _from = new THREE.Vector3()
 const _to = new THREE.Vector3()
@@ -337,6 +343,40 @@ function isLockDetectorEndpoint(
 function componentIdFor(rawValue: string, event: TraceEvent, side: 'source' | 'target'): string | null {
   const raw = rawValue.trim().toLowerCase()
   if (!raw) return null
+  if (event.snapshot?.tiflashMppLab) {
+    if (raw === 'tiflash-1') return 'tiflash.lab.store.0'
+    if (raw === 'tiflash-2') return 'tiflash.lab.store.1'
+    if (
+      raw === 'tiflash-proxy' ||
+      raw === 'tiflash-learners'
+    ) {
+      const regionId = event.regionId
+      const learners = event.snapshot.tiflashMppLab.learners
+      const index = regionId === undefined
+        ? 0
+        : learners.findIndex((learner) => learner.regionId === regionId)
+      return `tiflash.lab.learner.${Math.max(0, Math.min(2, index))}`
+    }
+    if (raw === 'tiflash-placement' || raw === 'tiflash-storage') {
+      return side === 'source'
+        ? 'tiflash.lab.store.0'
+        : 'tiflash.lab.store.1'
+    }
+    if (raw === 'tiflash-scheduler' || raw === 'fragment-scan') {
+      return 'tiflash.lab.fragment.scan'
+    }
+    if (raw === 'tiflash-mpp' || raw === 'fragment-final') {
+      return 'tiflash.lab.fragment.final'
+    }
+    const taskSlot = TIFLASH_MPP_TASK_ENDPOINTS.indexOf(
+      raw as typeof TIFLASH_MPP_TASK_ENDPOINTS[number],
+    )
+    if (taskSlot >= 0) return `tiflash.lab.task.${taskSlot}`
+    if (raw === 'tidb-root') return 'tiflash.lab.root'
+    if (/^tikv-region-?(\d+)$/.test(raw)) {
+      return regionPeerId(event, side === 'target' && event.domain === 'raft')
+    }
+  }
   if (
     raw === 'client' ||
     raw === 'clients' ||
@@ -351,7 +391,14 @@ function componentIdFor(rawValue: string, event: TraceEvent, side: 'source' | 't
     return 'pd.control'
   }
   if (raw === 'gc' || raw === 'gc-worker' || raw === 'safe-point') return 'gc.yard'
-  if (raw === 'tiflash' || raw === 'mpp' || raw === 'tiflash-1') return 'tiflash.0'
+  if (
+    raw === 'tiflash' ||
+    raw === 'mpp' ||
+    raw === 'tiflash-1' ||
+    raw === 'tiflash-2'
+  ) {
+    return 'tiflash.0'
+  }
   if (raw === 'tikv-raft') return regionPeerId(event, side === 'target')
   if (raw.startsWith('region')) return regionPeerId(event, side === 'target' && event.domain === 'raft')
 

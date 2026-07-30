@@ -15,6 +15,7 @@ import {
   LOCK_LAB_ORIGIN,
   PROTOCOL_LAB_ORIGIN,
   RAFT_LAB_ORIGIN,
+  TIFLASH_MPP_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
   TIKV_BOUNDS,
@@ -89,13 +90,16 @@ describe('TiCity layout', () => {
     expect(FOCUS_ANCHORS['raft.lab']).toBe(RAFT_LAB_ORIGIN)
     expect(FOCUS_ANCHORS['protocol.lab']).toBe(PROTOCOL_LAB_ORIGIN)
     expect(FOCUS_ANCHORS['gc.lab']).toBe(GC_STORAGE_LAB_ORIGIN)
+    expect(FOCUS_ANCHORS['tiflash.lab']).toBe(TIFLASH_MPP_LAB_ORIGIN)
     expect(LOCK_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(RAFT_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(PROTOCOL_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(GC_STORAGE_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
+    expect(TIFLASH_MPP_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
     expect(LOCK_LAB_ORIGIN[1]).toBeGreaterThan(0)
     expect(RAFT_LAB_ORIGIN[1]).toBeGreaterThan(0)
     expect(PROTOCOL_LAB_ORIGIN[1]).toBeGreaterThan(0)
     expect(GC_STORAGE_LAB_ORIGIN[1]).toBeGreaterThan(0)
+    expect(TIFLASH_MPP_LAB_ORIGIN[1]).toBeGreaterThan(0)
   })
 })

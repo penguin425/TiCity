@@ -760,4 +760,51 @@ describe('TraceReceipt-driven city flows', () => {
     expect(point.equals(city.registry.get('region.0.peer.1')!.anchor)).toBe(true)
     city.dispose()
   })
+
+  it('resolves every model-7 TiFlash store, task, fragment, and virtual root endpoint into the shared Lab', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const trace = simulation.runScenario('tiflash-mpp')
+    const city = createTiDBSceneGraph()
+    const point = new THREE.Vector3()
+    const fallback = new THREE.Vector3(0, 5, 0)
+
+    expect(trace.events.every((traceEvent) =>
+      traceEvent.snapshot?.tiflashMppLab !== undefined,
+    )).toBe(true)
+    for (const traceEvent of trace.events) {
+      for (const side of ['source', 'target'] as const) {
+        expect(
+          resolveTraceEndpoint(traceEvent, side, city, point),
+          `${traceEvent.id}:${traceEvent.kind}:${side}:${traceEvent[side] ?? '(default)'}`,
+        ).toBe(true)
+        expect(
+          point.equals(fallback),
+          `${traceEvent.id}:${traceEvent.kind}:${side} used the renderer fallback`,
+        ).toBe(false)
+      }
+    }
+
+    const taskEvent = trace.events.find((traceEvent) =>
+      traceEvent.target === 'task-scan-1' ||
+      traceEvent.source === 'task-scan-1')
+    expect(taskEvent).toBeDefined()
+    const taskSide = taskEvent!.target === 'task-scan-1'
+      ? 'target'
+      : 'source'
+    const taskAnchor = new THREE.Vector3()
+    city.tiflashMppLab.taskAnchors[0].getWorldPosition(taskAnchor)
+    expect(resolveTraceEndpoint(taskEvent!, taskSide, city, point)).toBe(true)
+    expect(point.equals(taskAnchor)).toBe(true)
+
+    const rootEvent = trace.events.find(
+      (traceEvent) => traceEvent.target === 'tidb-root',
+    )
+    expect(rootEvent).toBeDefined()
+    const rootAnchor = new THREE.Vector3()
+    city.tiflashMppLab.rootAnchor.getWorldPosition(rootAnchor)
+    expect(resolveTraceEndpoint(rootEvent!, 'target', city, point)).toBe(true)
+    expect(point.equals(rootAnchor)).toBe(true)
+
+    city.dispose()
+  })
 })
