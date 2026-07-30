@@ -15,9 +15,11 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 ![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.7.0はTiDB v8.5 LTSを対象にした静的・オフラインのモデルです。
-> SQLを実行せず、実データや架空の結果行も返しません。入力した単一SQL文を
-> ブラウザ内で分類し、モデル上の経路と説明だけを生成します。
+> 公開済みの最新releaseはTiCity v0.7.0です。この開発treeには、v0.8向けの
+> 未release model-6 GC/Storage Labも含まれます。どちらもTiDB v8.5 LTS系列を
+> 対象にした静的・オフラインのモデルです。SQLを実行せず、実データや架空の
+> 結果行も返しません。入力した単一SQL文をブラウザ内で分類し、モデル上の
+> 経路と説明だけを生成します。
 
 ## 観察できるもの
 
@@ -47,11 +49,23 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
   Regionで独立した2-of-3 Raft chainを通ります
 - 1PCにはcleanupを残さず、Async Commitでは両Regionのcommit record解決、
   通常2PCではsecondary commitをbackgroundへ残すclient response境界
+- 1つの43 eventの不変なreceiptを2回のGC roundへ展開する、未releaseの
+  model-6 GC/Storage Lab。最初はactive transactionが候補をglobal
+  `minStartTS - 1`へ制限し、明示的なfixture境界でtransactionが完了した後、
+  2回目の候補が前進します
+- `mysql.tidb`へstageしたstatus、TiDBが保存したvisibility safe pointと
+  実装上の100秒cache barrier、PDへ公開したglobal safe pointを、exact event
+  ごとに別の値として表示
+- Region単位のScanLockとResolveLock outcome、classic raftstore-v1のStore別
+  `UnsafeDestroyRange`、TiKVによる非同期safe-point観測、Put anchorを保持する
+  default Compaction Filter経路
+- 3 replica分へ乗算せず1回だけ数える論理MVCC chain。Deleteによる旧chainの
+  除去と、DEFAULT CFの長いvalueのcleanupも含みます
 - 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
   応答後のsecondary cleanupを持つ因果イベントグラフ
 - 3D City、Machine、Diagnoseへ投影される1つの不変なreceipt。Lock Labの
-  意味上のwait-for graphとRaft Failure Labの意味上の選出graphは、どちらも
-  因果依存graphとは分離されます
+  意味上のwait-for graph、Raft Failure Labの意味上の選出graph、GC/Storage
+  Labの2-round意味pipelineは、いずれも因果依存graphとは分離されます
 - 3画面の間を移動してもscenarioと選択eventを引き継ぐ安定したlink
 - TiProxy、TiDB Server、PD、TiKV、TiFlashからなる既定トポロジ
 - PDのTSO、Regionの範囲・Leader・3 voter、Raft複製とquorum
@@ -68,8 +82,8 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 | URL | 内容 |
 |---|---|
 | [`…/TiCity/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/?scenario=commit-protocols&event=trace-1-event-32) | Async Commitのclient応答境界における3D Cityとscenarioで選択した詳細Lab |
-| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | 因果event DAGと、選択Labから分離されたprotocol、lock、選出の意味graph |
-| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | exact event時点のtransaction、protocol、Raft、MVCC、lock wait、deadlock、retry診断 |
+| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | 因果event DAGと、選択Labから分離されたprotocol、lock、選出、GC／storageの意味graph |
+| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | exact event時点のtransaction、protocol、Raft、MVCC、lock／deadlock／retry、GC／storage診断 |
 
 3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
 不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。
@@ -134,6 +148,45 @@ eligibility判定は、対象client実装のdefaultである256 key、合計4,09
 
 ![1PC、Async Commit、通常2PCを比較するTiCity Protocol Lab](docs/protocol-lab.png)
 
+未releaseのGC/Storage Labは、`gc-safe-point` scenarioから直接開けます:
+[City](https://penguin425.github.io/TiCity/?scenario=gc-safe-point&event=trace-1-event-22)、
+[Machine](https://penguin425.github.io/TiCity/machine/?scenario=gc-safe-point&event=trace-1-event-22)、
+[Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=gc-safe-point&event=trace-1-event-22)。
+これらはv0.8向けrouteとexact eventを示します。公開siteで詳細projectionを
+利用できるのは、v0.8 prereleaseのdeploy後です。
+Cityは固定capacityの3D cutawayと日本語／英語のsemantic inspectorを使います。
+Machineは正確な因果DAGを置き換えず、2行の意味pipelineを追加します。Diagnoseは
+候補とbound、coordinator stage、lock、range、3つのStore detector／filter、
+論理version、機構境界のrowを表示します。3画面とも同じ選択event後snapshotを
+読み取ります。
+
+43 eventのreceiptは、2回の決定的なroundからなります。round 1ではGC lifetimeが
+候補を作り、報告されたactive transaction状態がglobal `minStartTS - 1`へ制限し、
+このfixtureにはさらに古いexternal service safe pointがありません。TiDBは
+`mysql.tidb`へ`tikv_gc_safe_point`をstageし、代表Regionをscanして2つの合成old
+lockを解決し、visibility safe pointを保存して、固定した実装上の100秒cache
+barrierを通過します。その後、1つの合成drop済みrangeを処理し、単調増加する
+global値をPDへ公開します。3つのTiKV storeは大きくなった値を非同期に観測し、
+Compaction Filterの進行を表示します。
+
+明示的な教育用境界で、blockerはtransaction commit protocolをこのslice内で
+再生せずに完了します。そのためround 2は後の候補を受け入れ、fixture上のlockも
+Delete Range taskも残っていないことを確認し、後の値を公開してStore filterを
+再実行できます。version boardは単一の論理projectionです。最後の対象Putを
+anchorとして残し、1つのold Delete chainを含むobsolete recordを除去し、filterが
+削除するDEFAULT CFの長いvalueを数えます。3 replica分の複製、disk byte測定、
+latency benchmarkではありません。
+
+このsliceは、TiDB/TiKV v8.5.0で使われるTiDB、TiKV、PD、client実装profileへ
+固定しています。ResolveLockはScanLockとcommit／rollback outcomeまでを表し、
+内部Raft entryは意図的に範囲外です。classic raftstore-v1 fixtureの
+`UnsafeDestroyRange`はRegion Raftを迂回し、RocksDB Compaction Filterはモデル上の
+Raft entryを作りません。後のpatch releaseやraftstore-v2では内部経路が異なる
+場合があります。正確なsource commitと行単位の参照は
+[モデル境界](docs/MODEL_BOUNDARY.md)に記録しています。
+
+![round 1のCompaction Filter eventを表示するTiCity GC/Storage Lab](docs/gc-storage-lab.png)
+
 ## 代表シナリオ
 
 1. Point Readとルーティング
@@ -143,7 +196,7 @@ eligibility判定は、対象client実装のdefaultである256 key、合計4,09
 5. 1PC／Async Commit／通常2PCの比較
 6. 連番キーhotspotとRegion split
 7. TiKV障害とleader election
-8. 長時間トランザクションとGC safe point
+8. 2-round、43 eventの長時間transactionとGC／storage trace
 9. TiFlash catch-upとMPP集約
 
 ## ローカル実行
@@ -201,18 +254,30 @@ src/tidb/
 - Protocol Labはtransaction commit coordinationと9本のRegion別Raft mutation
   chainを分離します。各chainはconceptual MVCC状態が変わる前に、propose、
   2 voterへのpersist、2-of-3 commit、applyを独立して示します。
+- 未releaseのmodel-6 GC/Storage Labでは、43 eventすべてがdeep-freezeされた
+  `gcLab`のevent後snapshotを持ち、City、Machine、Diagnoseが同じ選択snapshotを
+  投影します。最初のsafe pointは`globalMinStartTS - 1`へ制限され、service
+  point選択、`mysql.tidb`へのstage、Region ScanLock、visibility保存／cache
+  barrier、Delete Range、PD global公開、Store観測、Compaction Filterを別々の
+  stageとして扱います。
+- GC/Storage LabはTiDB/TiKV v8.5.0のdefault Compaction Filterとclassic
+  raftstore-v1 fixtureへ固定しています。ResolveLock内部のRaft詳細、
+  raftstore-v2のDelete Range挙動、compactionのschedule／時間、実SST layout、
+  physical byte、Raft log GCはモデル化しません。
 - 初期36 Regionは教育用の代表値です。split後の追加Regionは2D診断に現れ、
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-機構レベルの詳細projectionは、現時点では4 scenarioに適用されています。
+この開発treeでは、機構レベルの詳細projectionを5 scenarioへ適用しています。
 複数Regionトランザクションはtransaction 2PC、RegionごとのRaft、概念上のMVCCを
 展開します。Lock LabはLeaderメモリ上のlock競合を展開し、commit経路を前者の
 pipelineへhandoffします。Raft Failure Labは1 Regionの選出、current-term
 Leader no-op、PDの観測とrouting、TiDB内部request復旧を展開します。Protocol
 Labはeligibility、timestamp authority、1 Regionの1PC、2 RegionのAsync Commit、
 通常2PCを、client／background境界と独立したRegion Raft chainを含めて展開します。
-ほかの5 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
+未releaseのGC/Storage LabはResolve Locks、Delete Range、global公開、物理
+compactionを1つのstepへまとめず、2回のsafe-point／storage roundを展開します。
+ほかの4 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
 
 ブラウザコンソールの`window.TICITY`から、モデル、再生、シナリオ、
 最後の不変なトレースを操作・確認できます。

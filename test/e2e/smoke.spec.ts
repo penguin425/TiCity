@@ -746,6 +746,271 @@ test('Protocol Lab Diagnose preserves response and final snapshots in English an
   await expectNoSeriousAccessibilityViolations(page)
 })
 
+test('GC/Storage Lab exact Compaction Filter cursor stays exclusive and preserves navigation', async ({
+  page,
+}) => {
+  const scenario = 'gc-safe-point'
+  const eventId = 'trace-1-event-22'
+  await page.goto(`/?lang=en&scenario=${scenario}&event=${eventId}`)
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', {
+    timeout: 15_000,
+  })
+
+  const layout = page.locator('.tidb-layout')
+  const gcLab = page.locator('[data-gc-storage-lab]')
+  const dock = page.locator('[data-trace-dock]')
+  await expect(layout).toHaveAttribute('data-active-lab', 'gc-storage')
+  await expect(layout).toHaveAttribute('data-inspect', 'open')
+  await expect(gcLab).toBeVisible()
+  await expect(gcLab).toHaveAttribute('tabindex', '0')
+  await gcLab.focus()
+  await expect(gcLab).toBeFocused()
+  await expect(gcLab.locator('[data-gc-round]')).toHaveAttribute(
+    'data-gc-round',
+    '1',
+  )
+  await expect(gcLab.locator('[data-gc-phase]')).toHaveAttribute(
+    'data-gc-phase',
+    'compacting',
+  )
+  await expect(gcLab.locator('[data-safe-point-published]')).toHaveAttribute(
+    'data-safe-point-published',
+    '1000079999',
+  )
+  await expect(gcLab.locator(
+    '[data-gc-version-id="b-v1"]',
+  )).toHaveAttribute('data-gc-version-state', 'filtered')
+  await expect(gcLab.locator(
+    '[data-gc-store-id][data-compaction-state="running"]' +
+    '[data-filter-active="true"]',
+  )).toHaveCount(3)
+
+  await expect(page.locator('[data-transaction-lab]')).toBeHidden()
+  await expect(page.locator('[data-lock-lab]')).toBeHidden()
+  await expect(page.locator('[data-raft-lab]')).toBeHidden()
+  await expect(page.locator('[data-protocol-lab]')).toBeHidden()
+  await expect(dock).toHaveAttribute('data-phase', 'paused')
+  await expect(dock).toHaveAttribute('data-event-index', '21')
+  await expect(dock).toHaveAttribute('data-event-count', '43')
+  await expect(dock).toHaveAttribute('data-looping', 'true')
+  await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  expect(new URL(page.url()).searchParams.get('scenario')).toBe(scenario)
+  expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
+
+  await expectTraceLink(
+    page,
+    '.tidb-topbar [data-nav="machine"]',
+    scenario,
+    eventId,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-topbar [data-nav="diagnose"]',
+    scenario,
+    eventId,
+    'en',
+  )
+  await expect(gcLab.locator('.tidb-gc-storage-lab__privacy')).toContainText(
+    'Only aggregate counts and synthetic IDs are shown.',
+  )
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('GC/Storage Lab Machine keeps its semantic pipeline beside the causal DAG', async ({
+  page,
+}) => {
+  const scenario = 'gc-safe-point'
+  const eventId = 'trace-1-event-22'
+  await page.goto(
+    `/machine/?lang=en&scenario=${scenario}&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
+
+  const current = page.locator('[data-event-index][aria-current="step"]')
+  await expect(current).toHaveAttribute('data-event-index', '21')
+  await expect(current).toHaveAttribute('data-event-domain', 'kv')
+  await expect(current).toHaveAttribute(
+    'data-event-kind',
+    'gc_compaction_filter_apply',
+  )
+  await expect(current).toHaveAttribute('data-event-has-gc-snapshot', 'true')
+
+  const causal = page.locator('[data-graph-kind="causal-dag"]')
+  const state = page.locator('[data-gc-machine-state="true"]')
+  const pipeline = state.locator('[data-gc-semantic-graph="pipeline"]')
+  await expect(causal).toBeVisible()
+  await expect(state).toHaveAttribute('data-gc-event-id', eventId)
+  await expect(state).toHaveAttribute(
+    'data-gc-event-kind',
+    'gc_compaction_filter_apply',
+  )
+  await expect(state).toHaveAttribute('data-gc-phase', 'compacting')
+  await expect(state).toHaveAttribute('data-gc-round', '1')
+  await expect(state).toHaveAttribute('data-gc-model', 'model-6')
+  await expect(pipeline).toBeVisible()
+  await expect(pipeline).toHaveAttribute('tabindex', '0')
+  await expect(pipeline).toHaveAttribute('data-causal-dag-replaced', 'false')
+  await pipeline.focus()
+  await expect(pipeline).toBeFocused()
+  await expect(causal.locator('[data-gc-semantic-graph]')).toHaveCount(0)
+
+  const roundOne = pipeline.locator('[data-gc-pipeline-round="1"]')
+  await expect(roundOne).toHaveAttribute('data-gc-round-state', 'current')
+  await expect(roundOne.locator(
+    '[data-gc-pipeline-stage="compaction_filter"]',
+  )).toHaveAttribute('data-gc-pipeline-state', 'current')
+  await expect(state.locator(
+    '[data-safe-point-store][data-safe-point-value="1000079999"]',
+  )).toHaveCount(3)
+  await expect(state.locator(
+    '[data-gc-tikv-store][data-compaction-state="running"]' +
+    '[data-filter-active="true"]',
+  )).toHaveCount(3)
+  await expect(state.locator('[data-gc-version="b-v1"]')).toHaveAttribute(
+    'data-gc-version-state',
+    'filtered',
+  )
+  await expect(state.locator('[data-storage-representation]')).toHaveAttribute(
+    'data-storage-representation',
+    'logical_chains_counted_once',
+  )
+  await expect(state.locator('.tidb-machine__gc-boundaries')).toHaveAttribute(
+    'data-real-key-material',
+    'false',
+  )
+
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="city"]',
+    scenario,
+    eventId,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="diagnose"]',
+    scenario,
+    eventId,
+    'en',
+  )
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('GC/Storage Lab Diagnose preserves the exact Compaction Filter snapshot', async ({
+  page,
+}) => {
+  const scenario = 'gc-safe-point'
+  const eventId = 'trace-1-event-22'
+  await page.goto(
+    `/diagnose/?lang=en&scenario=${scenario}&event=${eventId}`,
+  )
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
+  await expect(page.locator('select[aria-label="State at event"]'))
+    .toHaveValue(eventId)
+  await expect(page.locator('.tidb-diagnose')).toHaveAttribute(
+    'data-active-lab',
+    'gc-storage',
+  )
+
+  const safePoint = page.locator(
+    '[data-table-section="gc-safe-point-stores"]',
+  )
+  const coordinator = page.locator(
+    '[data-table-section="gc-coordinator-path"]',
+  )
+  const resolveLocks = page.locator(
+    '[data-table-section="gc-resolve-locks"]',
+  )
+  const deleteRanges = page.locator(
+    '[data-table-section="gc-delete-ranges"]',
+  )
+  const storeCompaction = page.locator(
+    '[data-table-section="gc-store-compaction"]',
+  )
+  const mvccChains = page.locator(
+    '[data-table-section="gc-mvcc-chains"]',
+  )
+  await expect(safePoint.locator('tbody tr')).toHaveCount(1)
+  await expect(coordinator.locator('tbody tr')).toHaveCount(5)
+  await expect(resolveLocks.locator('tbody tr')).toHaveCount(2)
+  await expect(deleteRanges.locator('tbody tr')).toHaveCount(3)
+  await expect(storeCompaction.locator('tbody tr')).toHaveCount(3)
+  await expect(mvccChains.locator('tbody tr')).toHaveCount(4)
+
+  await expect(safePoint.locator('[data-column="phase"]')).toContainText(
+    'compacting',
+  )
+  await expect(safePoint.locator(
+    '[data-column="transactionBound"]',
+  )).toContainText('1000079999')
+  await expect(safePoint.locator(
+    '[data-column="visibilitySafePoint"]',
+  )).toContainText('1000079999')
+  await expect(safePoint.locator(
+    '[data-column="pdGlobalSafePoint"]',
+  )).toContainText('1000079999')
+  await expect(coordinator.locator(
+    '[data-column="pipelineState"]',
+  )).toHaveText(['complete', 'complete', 'complete', 'complete', 'complete'])
+  await expect(resolveLocks.locator(
+    '[data-column="implementation"]',
+  )).toHaveText(['Region ScanLock', 'Region ScanLock'])
+  await expect(resolveLocks.locator(
+    '[data-column="pendingLocks"]',
+  )).toHaveText(['0', '0'])
+  await expect(deleteRanges.locator('[data-column="request"]')).toHaveText([
+    'UnsafeDestroyRange',
+    'UnsafeDestroyRange',
+    'UnsafeDestroyRange',
+  ])
+  await expect(storeCompaction.locator(
+    '[data-column="compaction"]',
+  )).toHaveText(['running', 'running', 'running'])
+  await expect(storeCompaction.locator(
+    '[data-column="filterActive"]',
+  )).toHaveText(['true', 'true', 'true'])
+  await expect(mvccChains.locator(
+    '[data-column="eligibility"]',
+  ).first()).toContainText('commit_ts <= published safe point')
+
+  const gcSections = page.locator(
+    '[data-diagnose-section^="gc-"]',
+  )
+  await expect(gcSections).toHaveCount(6)
+  await expect(page.locator(
+    '[data-diagnose-section^="gc-"]' +
+    '[data-privacy-boundary="synthetic-aggregate-only"]',
+  )).toHaveCount(6)
+  await expect(deleteRanges.locator(
+    '[data-column="privacyBoundary"]',
+  )).toHaveText([
+    'no real key-range boundaries retained',
+    'no real key-range boundaries retained',
+    'no real key-range boundaries retained',
+  ])
+
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="machine"]',
+    scenario,
+    eventId,
+    'en',
+  )
+  await expectTraceLink(
+    page,
+    '.tidb-page-nav [data-nav="city"]',
+    scenario,
+    eventId,
+    'en',
+  )
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
 test('desktop controls start collapsed and toggle the panel accessibly', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')

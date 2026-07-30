@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { createTiDBSimulation } from '../model'
 import type { TraceEvent, TraceStateSnapshot } from '../model/types'
 import { resolveDiagnoseCursor } from './cursor'
 
@@ -72,5 +73,22 @@ describe('Diagnose event cursor', () => {
       resolution: 'final',
     })
     expect(cursor.snapshot?.tsoLastAllocated).toBe(102)
+  })
+
+  it('resolves every GC deep link to its own immutable 43-event snapshot', () => {
+    const gcEvents = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+      .events
+    expect(gcEvents).toHaveLength(43)
+    for (const [index, gcEvent] of gcEvents.entries()) {
+      const cursor = resolveDiagnoseCursor(gcEvents, gcEvent.id)
+      expect(cursor).toMatchObject({
+        event: gcEvent,
+        snapshotEvent: gcEvent,
+        resolution: 'exact',
+      })
+      expect(cursor.event?.id).toBe(gcEvents[index].id)
+      expect(cursor.snapshot?.gcLab).toBe(gcEvent.snapshot?.gcLab)
+    }
   })
 })
