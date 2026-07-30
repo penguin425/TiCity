@@ -142,6 +142,33 @@
 - Five mechanism-level scenarios in v0.8, with the remaining four scenarios
   explicitly retained as compact teaching traces
 
+## v0.9
+
+- A model-7 TiFlash/MPP Lab that expands `tiflash-mpp` from an eight-event
+  serial summary into one 56-event immutable exact-event causal receipt
+- A fixed steady-state backlog across Regions 24, 25, and 26, with normal
+  proxy-forwarded learner commands and no modeled client write or initial
+  snapshot ingestion inside the slice
+- Per-Region snapshot correctness gates: Region 24 uses the
+  `start_ts <= self_safe_ts` fast path, while Regions 25 and 26 obtain
+  ReadIndex and wait for the corresponding learner applied indexes
+- Persistent Region Raft / TiFlash apply / DeltaMerge state kept separate from
+  ephemeral MPP Exchange blocks, with no query-driven safe-ts advancement
+- A scenario-local two-TiFlash-Store fixture with two fragments, four tasks,
+  four all-to-all HashPartition tunnels, and two PassThrough root streams
+- One learner projection per selected query Region, explicitly excluding
+  unselected learners and any claim of a complete table or Store inventory
+- Explicit provisioning-versus-readiness, terminal wait-index timeout,
+  bounded Region/storage reconstruction, pre-data Exchange retry,
+  non-independent dispatch/root-stream retry, configured pre-output fallback,
+  client-streaming, privacy, non-benchmark, and synthetic-fixture boundaries
+- Exact-event City, Machine, and Diagnose projections over the same deeply
+  frozen snapshot, with fixed capacities and full bilingual accessibility
+- TiDB, TiKV, TiFlash, TiFlash proxy, client-go, and PD source provenance
+  pinned to the v8.5.0 implementation profile
+- Six mechanism-level scenarios in v0.9, with the remaining three scenarios
+  explicitly retained as compact teaching traces
+
 ## Deliberately outside the current offline model
 
 - Connecting to or changing a live TiDB cluster
