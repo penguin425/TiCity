@@ -2,7 +2,8 @@
 
 TiCity model-3 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
-which capabilities are not implemented.
+which capabilities are not implemented. TiCity is a deterministic educational
+model, not a TiDB emulator or a live-cluster observation tool.
 
 ## Claims represented directly
 
@@ -73,6 +74,13 @@ guarantee. The non-retryable victim receives Error 1213 and is fully rolled
 back. Only after its leader-memory locks and wait edges are removed can the
 survivor wake and continue.
 
+If a released resource has multiple eligible waiters, Lock Lab selects the
+smallest `start_ts` as its deterministic wake priority. Like the
+cycle-closing-waiter victim rule, this is a visibly labeled **TiCity model
+policy**, not a TiDB selection guarantee. The current two-transaction teaching
+trace has one waiter per resource, but the invariant is explicit so future
+traces cannot silently imply a different rule.
+
 The retry branch begins at an explicit application boundary after Error 1213.
 It creates a new transaction ID and `start_ts`; it is not presented as TiDB
 automatically retrying the failed transaction. TiDB's retryable
@@ -87,6 +95,12 @@ sequence already expanded by `cross-region-transaction`. Lock ownership, queue,
 deadlock, rollback, and application-retry events never advance Region Raft
 indexes. Their event-time projections contain no SQL text, literal, real key,
 value, result row, digest, or live-cluster observation.
+
+Every Lock Lab event publishes a deeply frozen post-event snapshot. The 3D
+City cutaway, semantic inspector, Machine, and Diagnose read that same snapshot
+rather than reconstructing independent state. Exact-event navigation and
+looping move a cursor over the same immutable `TraceReceipt`; they do not
+re-run the transactions or create a new detector outcome.
 
 The other seven scenarios retain compact teaching traces in this model
 revision. They use the same causal dependency field but do not yet claim the
