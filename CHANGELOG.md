@@ -4,6 +4,14 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.3.4] — 2026-07-30
+
+- Make English the default GitHub project README while preserving the complete
+  Japanese documentation as `README.ja.md` with reciprocal language links.
+- Include both language versions and their linked screenshot and model boundary
+  document in GitHub Release archives.
+- Keep the TiDB model and application behavior unchanged.
+
 ## [0.3.3] — 2026-07-30
 
 - Keep the current pose when entering Fly, move along the full view vector,

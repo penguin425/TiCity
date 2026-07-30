@@ -56,9 +56,10 @@ jobs:
           release_version="${GITHUB_REF_NAME#ticity-}"
           package_name="TiCity-${release_version}"
           package_dir="release/${package_name}"
-          mkdir -p "${package_dir}/site"
+          mkdir -p "${package_dir}/site" "${package_dir}/docs"
           cp -R dist/. "${package_dir}/site/"
           cp LICENSE NOTICE README.md README.ja.md CHANGELOG.md "${package_dir}/"
+          cp docs/MODEL_BOUNDARY.md docs/screenshot.png "${package_dir}/docs/"
           cp public/THIRD_PARTY_NOTICES.txt "${package_dir}/THIRD_PARTY_NOTICES"
           tar -C release -czf "release/${package_name}.tar.gz" "${package_name}"
           (

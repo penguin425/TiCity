@@ -16,7 +16,7 @@ Live site: <https://penguin425.github.io/TiCity/>
 ![Trace Dock showing the active Transaction 2PC route in TiCity's 3D city](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.3.3 is a static, offline model targeting TiDB v8.5 LTS. It does not
+> TiCity v0.3.4 is a static, offline model targeting TiDB v8.5 LTS. It does not
 > execute SQL or return real data or invented result rows. A single SQL
 > statement entered by the user is classified entirely in the browser, and
 > only a modeled route and explanation are generated.

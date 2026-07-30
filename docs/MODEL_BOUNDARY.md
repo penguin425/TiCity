@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity v0.3.3 targets **TiDB v8.5 LTS**. This document records which visible
+TiCity v0.3.4 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
 which capabilities are not implemented.
 
