@@ -193,9 +193,11 @@ export function createTransactionLabPanel(
   const render = () => {
     if (disposed) return
     const eventSnapshot = currentEvent?.snapshot
-    // Lock Lab snapshots deliberately retain the shared Region projection,
-    // but the dedicated lock view is their sole DOM detail surface.
-    const snapshot = eventSnapshot?.lockLab === undefined
+    // Dedicated Lab snapshots deliberately retain the shared Region projection,
+    // but their matching view is the sole DOM detail surface.
+    const snapshot =
+      eventSnapshot?.lockLab === undefined &&
+      eventSnapshot?.raftLab === undefined
       ? eventSnapshot
       : undefined
     const nextKey = snapshotKey(currentEvent, currentActive, locale)

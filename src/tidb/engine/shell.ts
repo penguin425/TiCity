@@ -29,6 +29,9 @@ import type { TransactionLabProjection } from '../world/transaction-lab'
 import { projectLockLab } from '../world/lock-lab-projection'
 import { EMPTY_LOCK_LAB_PROJECTION } from '../world/lock-lab'
 import type { LockLabProjection } from '../world/lock-lab'
+import { projectRaftLab } from '../world/raft-lab-projection'
+import { EMPTY_RAFT_LAB_PROJECTION } from '../world/raft-lab'
+import type { RaftLabProjection } from '../world/raft-lab'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
@@ -93,6 +96,7 @@ export function cityPixelRatio(width: number, devicePixelRatio: number): number 
 export interface CityLabProjections {
   readonly transaction: TransactionLabProjection
   readonly lock: LockLabProjection
+  readonly raft: RaftLabProjection
 }
 
 function hiddenTransactionLab(reducedMotion: boolean): TransactionLabProjection {
@@ -107,10 +111,16 @@ function hiddenLockLab(reducedMotion: boolean): LockLabProjection {
     : { ...EMPTY_LOCK_LAB_PROJECTION, reducedMotion }
 }
 
+function hiddenRaftLab(reducedMotion: boolean): RaftLabProjection {
+  return reducedMotion === EMPTY_RAFT_LAB_PROJECTION.reducedMotion
+    ? EMPTY_RAFT_LAB_PROJECTION
+    : { ...EMPTY_RAFT_LAB_PROJECTION, reducedMotion }
+}
+
 /**
  * Projects exactly one detailed 3D lab from the event-owned discriminator.
- * A Lock Lab snapshot also has two Region summaries, so checking the lock
- * discriminator first prevents it from leaking into Transaction Lab.
+ * Lock and Raft snapshots retain shared Region summaries, so their explicit
+ * discriminators take precedence over the generic transaction projection.
  */
 export function projectCityLabs(
   event: TraceEvent | null,
@@ -120,8 +130,24 @@ export function projectCityLabs(
 ): CityLabProjections {
   const hiddenTransaction = hiddenTransactionLab(reducedMotion)
   const hiddenLock = hiddenLockLab(reducedMotion)
+  const hiddenRaft = hiddenRaftLab(reducedMotion)
   if (!inspect || !event?.snapshot) {
-    return { transaction: hiddenTransaction, lock: hiddenLock }
+    return {
+      transaction: hiddenTransaction,
+      lock: hiddenLock,
+      raft: hiddenRaft,
+    }
+  }
+  if (event.snapshot.raftLab) {
+    return {
+      transaction: hiddenTransaction,
+      lock: hiddenLock,
+      raft: projectRaftLab(event, {
+        inspect: true,
+        reducedMotion,
+        pulse,
+      }) ?? hiddenRaft,
+    }
   }
   if (event.snapshot.lockLab) {
     return {
@@ -131,6 +157,7 @@ export function projectCityLabs(
         reducedMotion,
         pulse,
       }) ?? hiddenLock,
+      raft: hiddenRaft,
     }
   }
   if (event.snapshot.transaction) {
@@ -141,9 +168,14 @@ export function projectCityLabs(
         pulse,
       }) ?? hiddenTransaction,
       lock: hiddenLock,
+      raft: hiddenRaft,
     }
   }
-  return { transaction: hiddenTransaction, lock: hiddenLock }
+  return {
+    transaction: hiddenTransaction,
+    lock: hiddenLock,
+    raft: hiddenRaft,
+  }
 }
 
 function measure(container: HTMLElement): readonly [number, number] {
@@ -300,6 +332,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     )
     city.transactionLab.update(projection.transaction)
     city.lockLab.update(projection.lock)
+    city.raftLab.update(projection.raft)
   }
 
   function setTheme(next: CityTheme): void {

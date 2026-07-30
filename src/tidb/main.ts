@@ -26,6 +26,7 @@ import {
   type Locale,
 } from './ui'
 import { createLockLabPanel } from './ui/lock-lab'
+import { createRaftLabPanel } from './ui/raft-lab'
 import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTransactionLabPanel } from './ui/transaction-lab'
 import { createTiDBWorld, type WorldHandle } from './world'
@@ -172,15 +173,15 @@ function initialScenario(): ScenarioId {
     : 'point-read'
 }
 
-type DetailLab = 'transaction' | 'lock'
+type DetailLab = 'transaction' | 'lock' | 'raft'
 
 function detailLabForTrace(trace: TraceReceipt | null): DetailLab | null {
-  let hasDetailedSnapshot = false
-  for (const event of trace?.events ?? []) {
-    if (event.snapshot?.lockLab !== undefined) return 'lock'
-    if (event.snapshot !== undefined) hasDetailedSnapshot = true
-  }
-  return hasDetailedSnapshot ? 'transaction' : null
+  const snapshots = (trace?.events ?? [])
+    .map((event) => event.snapshot)
+    .filter((snapshot) => snapshot !== undefined)
+  if (snapshots.some((snapshot) => snapshot.raftLab !== undefined)) return 'raft'
+  if (snapshots.some((snapshot) => snapshot.lockLab !== undefined)) return 'lock'
+  return snapshots.length > 0 ? 'transaction' : null
 }
 
 function surfaceHref(
@@ -538,7 +539,12 @@ function boot(): void {
 
   const transactionLabPanel = createTransactionLabPanel(locale)
   const lockLabPanel = createLockLabPanel(locale)
-  worldHost.append(transactionLabPanel.root, lockLabPanel.root)
+  const raftLabPanel = createRaftLabPanel(locale)
+  worldHost.append(
+    transactionLabPanel.root,
+    lockLabPanel.root,
+    raftLabPanel.root,
+  )
 
   const traceDock = createTracePlaybackDock(locale, {
     onPrevious: () => {
@@ -608,7 +614,13 @@ function boot(): void {
       enabled ? copy[locale].hideInspect : copy[locale].showInspect,
     )
     if (enabled && focus && activeLab !== null) {
-      world?.focus(activeLab === 'lock' ? 'lock.lab' : 'transaction.lab')
+      world?.focus(
+        activeLab === 'lock'
+          ? 'lock.lab'
+          : activeLab === 'raft'
+            ? 'raft.lab'
+            : 'transaction.lab',
+      )
     }
   }
 
@@ -779,6 +791,7 @@ function boot(): void {
       traceDock.setLocale(next)
       transactionLabPanel.setLocale(next)
       lockLabPanel.setLocale(next)
+      raftLabPanel.setLocale(next)
       movementPad.setLocale(next)
       hint.textContent = copy[next].hint[currentView]
       surfaceLinkKey = ''
@@ -830,6 +843,7 @@ function boot(): void {
           .filter((event): event is NonNullable<typeof event> => event !== undefined)
         transactionLabPanel.update(playback.event, activeEvents)
         lockLabPanel.update(playback.event, activeEvents)
+        raftLabPanel.update(playback.event, activeEvents)
       }
     }
 
@@ -888,6 +902,7 @@ function boot(): void {
     setInspect(false)
     transactionLabPanel.update(null)
     lockLabPanel.update(null)
+    raftLabPanel.update(null)
     syncSurfaceLinks(null)
     world?.update(simulation.state, null)
   }
@@ -933,6 +948,7 @@ function boot(): void {
     traceDock.dispose()
     transactionLabPanel.dispose()
     lockLabPanel.dispose()
+    raftLabPanel.dispose()
     movementPad.dispose()
     world?.dispose()
   }, { once: true })

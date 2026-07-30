@@ -10,6 +10,7 @@ import { createTiDBSimulation } from '../model'
 import {
   COMPONENT_ANCHORS,
   LOCK_LAB_ORIGIN,
+  RAFT_LAB_ORIGIN,
   TICITY_LAYOUT,
 } from './layout'
 import { createTiDBSceneGraph } from './city'
@@ -56,6 +57,23 @@ describe('TiCity scene graph', () => {
     city.setTheme('day')
     city.dispose()
     expect(city.lockLab.debug.disposed).toBe(true)
+  })
+
+  it('mounts the fixed Raft Lab on the shared focus stage and owns its lifecycle', () => {
+    const city = createTiDBSceneGraph()
+    const focus = new THREE.Vector3()
+
+    expect(city.raftLab.object.parent).toBe(city.root)
+    expect(city.raftLab.object.visible).toBe(false)
+    expect(city.getAnchor('raft.lab', focus)).toBe(true)
+    expect(focus.toArray()).toEqual([...RAFT_LAB_ORIGIN])
+    expect(city.raftLab.object.userData.boundary).toContain(
+      'PD only observes',
+    )
+
+    city.setTheme('day')
+    city.dispose()
+    expect(city.raftLab.debug.disposed).toBe(true)
   })
 
   it('keeps PD out of every data-network segment', () => {
@@ -176,9 +194,14 @@ describe('TiCity scene graph', () => {
     // These are ceilings rather than golden counts: visual polish has room to
     // evolve, while an accidental mesh-per-window or shadow-per-detail change
     // still fails clearly.
-    expect(drawables).toBeLessThanOrEqual(225)
+    /*
+     * v0.6 adds one bounded, mutually exclusive Raft cutaway. Its detailed
+     * role/log/quorum geometry raises the authored ceiling without creating
+     * any mesh per Region, log event, or animation frame.
+     */
+    expect(drawables).toBeLessThanOrEqual(250)
     expect(geometries.size).toBeLessThanOrEqual(225)
-    expect(materials.size).toBeLessThanOrEqual(52)
+    expect(materials.size).toBeLessThanOrEqual(64)
     expect(shadowCasters).toBeLessThanOrEqual(55)
     expect(instancedMeshes).toBeGreaterThanOrEqual(30)
     expect(instances).toBeGreaterThanOrEqual(1_000)

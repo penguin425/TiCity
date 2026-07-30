@@ -65,6 +65,12 @@ export const TRANSACTION_LAB_ORIGIN: Point3 = [0, 48, 18]
  */
 export const LOCK_LAB_ORIGIN: Point3 = [0, 48, 18]
 
+/**
+ * Raft Lab reuses the authored cutaway stage. The shell's event-owned
+ * discriminator keeps Transaction, Lock, and Raft geometry mutually exclusive.
+ */
+export const RAFT_LAB_ORIGIN: Point3 = [0, 48, 18]
+
 export const COMPONENT_ANCHORS = {
   'client.terminal': [0, 3, -288],
   'tiproxy.0': [-34, 7, -220],
@@ -94,6 +100,7 @@ export const FOCUS_ANCHORS = {
   'txn.2pc': [0, 10, -20],
   'transaction.lab': TRANSACTION_LAB_ORIGIN,
   'lock.lab': LOCK_LAB_ORIGIN,
+  'raft.lab': RAFT_LAB_ORIGIN,
   'tikv.raft': COMPONENT_ANCHORS['tikv.1'],
   'pd.scheduler': COMPONENT_ANCHORS['pd.control'],
   'gc.yard': COMPONENT_ANCHORS['gc.yard'],

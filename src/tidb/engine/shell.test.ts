@@ -50,7 +50,7 @@ describe('city shell trace replay gate', () => {
     expect(cityPixelRatio(1440, 1)).toBe(1)
   })
 
-  it('uses the model discriminator to keep Transaction and Lock labs exclusive', () => {
+  it('uses model discriminators to keep Transaction, Lock, and Raft labs exclusive', () => {
     const simulation = createTiDBSimulation()
     const transactionTrace = simulation.runScenario('cross-region-transaction')
     const transactionEvent = transactionTrace.events.find(
@@ -60,23 +60,36 @@ describe('city shell trace replay gate', () => {
     )
     const lockTrace = simulation.runScenario('lock-deadlock')
     const lockEvent = lockTrace.events.find((event) => event.snapshot?.lockLab)
+    const raftTrace = simulation.runScenario('tikv-failover')
+    const raftEvent = raftTrace.events.find((event) => event.snapshot?.raftLab)
 
     expect(transactionEvent).toBeDefined()
     expect(lockEvent).toBeDefined()
+    expect(raftEvent).toBeDefined()
 
     const transaction = projectCityLabs(transactionEvent!, true, false, 0.5)
     expect(transaction.transaction.mode).toBe('inspect')
     expect(transaction.lock.mode).toBe('hidden')
+    expect(transaction.raft.mode).toBe('hidden')
 
     const lock = projectCityLabs(lockEvent!, true, true, 0.5)
     expect(lock.transaction.mode).toBe('hidden')
     expect(lock.lock.mode).toBe('inspect')
+    expect(lock.raft.mode).toBe('hidden')
     expect(lock.lock.reducedMotion).toBe(true)
 
-    const closed = projectCityLabs(lockEvent!, false, true, 0.5)
+    const raft = projectCityLabs(raftEvent!, true, true, 0.5)
+    expect(raft.transaction.mode).toBe('hidden')
+    expect(raft.lock.mode).toBe('hidden')
+    expect(raft.raft.mode).toBe('inspect')
+    expect(raft.raft.reducedMotion).toBe(true)
+
+    const closed = projectCityLabs(raftEvent!, false, true, 0.5)
     expect(closed.transaction.mode).toBe('hidden')
     expect(closed.lock.mode).toBe('hidden')
+    expect(closed.raft.mode).toBe('hidden')
     expect(closed.transaction.reducedMotion).toBe(true)
     expect(closed.lock.reducedMotion).toBe(true)
+    expect(closed.raft.reducedMotion).toBe(true)
   })
 })

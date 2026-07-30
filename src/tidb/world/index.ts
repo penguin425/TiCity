@@ -91,7 +91,13 @@ export type {
   CityRegistry,
   TiDBSceneGraph,
 } from './city'
-export { COMPONENT_ANCHORS, DISTRICT_BOUNDS, TICITY_LAYOUT, regionPeerPosition } from './layout'
+export {
+  COMPONENT_ANCHORS,
+  DISTRICT_BOUNDS,
+  RAFT_LAB_ORIGIN,
+  TICITY_LAYOUT,
+  regionPeerPosition,
+} from './layout'
 export {
   createTransactionLab,
   EMPTY_TRANSACTION_LAB_PROJECTION,
@@ -114,4 +120,16 @@ export type {
   LockLabTransactionProjection,
   LockLabWaitForEdgeProjection,
 } from './lock-lab'
+export {
+  createRaftLab,
+  EMPTY_RAFT_LAB_PROJECTION,
+} from './raft-lab'
+export { projectRaftLab } from './raft-lab-projection'
+export type {
+  RaftLab,
+  RaftLabElectionEdgeProjection,
+  RaftLabLogCellProjection,
+  RaftLabPeerProjection,
+  RaftLabProjection,
+} from './raft-lab'
 export type { CityTheme, SemanticDomain } from './palette'
