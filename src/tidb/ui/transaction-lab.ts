@@ -187,17 +187,25 @@ export function createTransactionLabPanel(
   let currentEvent: TraceEvent | null = null
   let currentActive: readonly TraceEvent[] = []
   let renderedKey = ''
+  let renderedSnapshot: TraceStateSnapshot | undefined
   let disposed = false
 
   const render = () => {
     if (disposed) return
+    const eventSnapshot = currentEvent?.snapshot
+    // Lock Lab snapshots deliberately retain the shared Region projection,
+    // but the dedicated lock view is their sole DOM detail surface.
+    const snapshot = eventSnapshot?.lockLab === undefined
+      ? eventSnapshot
+      : undefined
     const nextKey = snapshotKey(currentEvent, currentActive, locale)
-    if (nextKey === renderedKey) return
+    if (nextKey === renderedKey && snapshot === renderedSnapshot) return
     renderedKey = nextKey
-    const snapshot: TraceStateSnapshot | undefined = currentEvent?.snapshot
+    renderedSnapshot = snapshot
     root.hidden = snapshot === undefined
     if (!snapshot) {
       root.replaceChildren()
+      root.removeAttribute('aria-label')
       return
     }
 
@@ -270,6 +278,7 @@ export function createTransactionLabPanel(
       root.remove()
       currentEvent = null
       currentActive = []
+      renderedSnapshot = undefined
     },
   }
 }

@@ -126,6 +126,8 @@ export interface TraceFlowController {
   setPaused(paused: boolean): void
   setLooping(enabled: boolean): void
   step(direction: -1 | 1): void
+  /** Selects and pauses on an exact receipt event id, including a parallel sibling. */
+  seek(eventId: string): boolean
   replay(): void
   setTheme(theme: CityTheme): void
   stop(): void
@@ -311,10 +313,38 @@ function numberedComponent(prefix: string, raw: string, count: number): string |
   return `${prefix}.${Math.max(0, Math.min(count - 1, oneBased - 1))}`
 }
 
+function isLockDetectorEndpoint(
+  raw: string,
+  event: TraceEvent,
+  side: 'source' | 'target',
+): boolean {
+  const detectorStore = event.snapshot?.lockLab?.detectorLeaderStoreId
+    .trim()
+    .toLowerCase()
+  if (!detectorStore || raw !== detectorStore) return false
+  switch (event.kind) {
+    case 'lock_wait_enqueued':
+    case 'deadlock_detected':
+      return side === 'target'
+    case 'deadlock_victim_selected':
+    case 'deadlock_resolved':
+      return side === 'source'
+    default:
+      return false
+  }
+}
+
 function componentIdFor(rawValue: string, event: TraceEvent, side: 'source' | 'target'): string | null {
   const raw = rawValue.trim().toLowerCase()
   if (!raw) return null
-  if (raw === 'client' || raw === 'application' || raw === 'client-terminal') {
+  if (
+    raw === 'client' ||
+    raw === 'clients' ||
+    raw === 'client-a' ||
+    raw === 'client-b' ||
+    raw === 'application' ||
+    raw === 'client-terminal'
+  ) {
     return 'client.terminal'
   }
   if (raw === 'pd' || raw === 'tso' || raw === 'pd-leader' || raw === 'pd-control') {
@@ -331,6 +361,12 @@ function componentIdFor(rawValue: string, event: TraceEvent, side: 'source' | 't
   if (tidb) return tidb
   const tikv = numberedComponent('tikv', raw, 3)
   if (tikv) {
+    /*
+     * The cluster-wide deadlock detector belongs to a TiKV store, not to one
+     * Region peer. Other TiKV endpoints with a Region discriminator continue
+     * to resolve to the appropriate leader/follower cell.
+     */
+    if (isLockDetectorEndpoint(raw, event, side)) return tikv
     if (event.regionId === undefined) return tikv
     if (event.regionId >= TICITY_LAYOUT.regionCount) return tikv
     const store = tikv.charCodeAt(tikv.length - 1) - 48
@@ -468,6 +504,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   let presentationPaused = false
   let loopHoldMs = 0
   let iteration = 0
+  let selectedEventIndex: number | null = null
   let theme: CityTheme = 'night'
   const reducedMotion =
     typeof window !== 'undefined' &&
@@ -623,7 +660,12 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   }
 
   function syncPlaybackState(): void {
-    const index = currentIndex()
+    const scheduledIndex = currentIndex()
+    const index = selectedEventIndex !== null &&
+      eventStarts[selectedEventIndex] <= clockMs + SCHEDULE_EPSILON_MS &&
+      clockMs < eventStarts[selectedEventIndex] + eventLife[selectedEventIndex]
+      ? selectedEventIndex
+      : scheduledIndex
     const atEnd = eventCount > 0 && clockMs >= durationMs
     const holdDuration = events[terminalEventIndex]?.status === 'failed'
       ? FAILED_TRACE_LOOP_HOLD_MS
@@ -675,6 +717,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     clockMs = 0
     loopHoldMs = 0
     iteration = automatic ? iteration + 1 : eventCount > 0 ? 1 : 0
+    selectedEventIndex = null
     activeEventIds.length = 0
     completedEventIds.length = 0
   }
@@ -755,6 +798,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     loopHoldMs = 0
     dropped = 0
     presentationPaused = false
+    selectedEventIndex = null
     events = receipt.events
     eventCount = events.length
     iteration = eventCount > 0 ? 1 : 0
@@ -893,6 +937,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     },
     setPaused(paused: boolean): void {
       presentationPaused = paused
+      if (!paused) selectedEventIndex = null
       syncPlaybackState()
     },
     setLooping(enabled: boolean): void {
@@ -950,10 +995,22 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       clockMs = targetStart + targetGroupLife * 0.55
       update(0)
     },
+    seek(eventId: string): boolean {
+      const target = events.findIndex((event) => event.id === eventId)
+      if (target < 0) return false
+      presentationPaused = true
+      restartIteration(false)
+      const targetStart = eventStarts[target]
+      clockMs = targetStart + eventLife[target] * 0.55
+      selectedEventIndex = target
+      update(0)
+      return true
+    },
     replay(): void {
       if (eventCount === 0) return
       restartIteration(false)
       presentationPaused = false
+      selectedEventIndex = null
       syncPlaybackState()
       updateGuide(playbackState.currentIndex, playbackState.eventProgress)
     },
@@ -977,6 +1034,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       loopHoldMs = 0
       iteration = 0
       presentationPaused = false
+      selectedEventIndex = null
       syncPlaybackState()
     },
     dispose(): void {

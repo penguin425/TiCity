@@ -204,7 +204,14 @@ function railSymbol(state: RailState, status: TraceEventStatus): string {
 function endpointLabel(rawValue: string | undefined, event: TraceEvent): string {
   if (!rawValue) return '—'
   const raw = rawValue.trim().toLowerCase()
-  if (raw === 'client' || raw === 'application' || raw === 'client-terminal') {
+  const clientBranch = /^client[-._]([a-z0-9]+)$/i.exec(raw)
+  if (clientBranch) return `CLIENT ${clientBranch[1].toUpperCase()}`
+  if (
+    raw === 'client' ||
+    raw === 'clients' ||
+    raw === 'application' ||
+    raw === 'client-terminal'
+  ) {
     return 'CLIENTS'
   }
   if (raw === 'pd' || raw === 'tso' || /^pd[-._]?\d*$/.test(raw)) {

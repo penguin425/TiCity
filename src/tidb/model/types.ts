@@ -290,6 +290,9 @@ export interface TraceDeadlockSnapshot {
   selectionPolicy: 'cycle_closing_waiter_model_policy'
   retryable: false
   resolution: 'detected' | 'rolling_back' | 'resolved'
+  /** Set only after Error 1213 has actually crossed the client boundary. */
+  clientErrorCode: 1213 | null
+  clientErrorTransactionId: string | null
 }
 
 export interface TraceApplicationRetrySnapshot {
@@ -423,6 +426,13 @@ export type TraceStateDelta =
     cycleTransactionIds: readonly string[]
     victimTransactionId: string | null
     selectionPolicy: 'cycle_closing_waiter_model_policy'
+    retryable: false
+  }>
+  | Readonly<{
+    kind: 'deadlock_client_error'
+    deadlockId: string
+    transactionId: string
+    errorCode: 1213
     retryable: false
   }>
   | Readonly<{

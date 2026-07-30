@@ -58,6 +58,13 @@ export const TIKV_BOUNDS: readonly PlanBounds[] = [
 /** Elevated overlay origin for the selected two-Region internal cutaway. */
 export const TRANSACTION_LAB_ORIGIN: Point3 = [0, 48, 18]
 
+/**
+ * Lock Lab occupies the same authored cutaway stage as Transaction Lab. The
+ * shell discriminator guarantees that the two fixed-capacity projections are
+ * never visible together.
+ */
+export const LOCK_LAB_ORIGIN: Point3 = [0, 48, 18]
+
 export const COMPONENT_ANCHORS = {
   'client.terminal': [0, 3, -288],
   'tiproxy.0': [-34, 7, -220],
@@ -86,6 +93,7 @@ export const FOCUS_ANCHORS = {
   'tikv.mvcc': COMPONENT_ANCHORS['tikv.0'],
   'txn.2pc': [0, 10, -20],
   'transaction.lab': TRANSACTION_LAB_ORIGIN,
+  'lock.lab': LOCK_LAB_ORIGIN,
   'tikv.raft': COMPONENT_ANCHORS['tikv.1'],
   'pd.scheduler': COMPONENT_ANCHORS['pd.control'],
   'gc.yard': COMPONENT_ANCHORS['gc.yard'],

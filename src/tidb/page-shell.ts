@@ -119,6 +119,7 @@ export interface NavigationHandle {
   root: HTMLElement
   themeButton: HTMLButtonElement
   setLocale(locale: Locale): void
+  setTraceContext(scenario: string | null, eventId: string | null): void
 }
 
 export function createNavigation(
@@ -126,6 +127,9 @@ export function createNavigation(
   initialLocale: Locale,
 ): NavigationHandle {
   let locale = initialLocale
+  const initialSearch = new URLSearchParams(window.location.search)
+  let scenario = initialSearch.get('scenario')
+  let eventId = initialSearch.get('event')
   const root = document.createElement('nav')
   root.className = 'tidb-top-actions'
   root.setAttribute('aria-label', locale === 'ja' ? '主要ナビゲーション' : 'Primary navigation')
@@ -140,12 +144,35 @@ export function createNavigation(
     sync()
   })
 
+  const traceHref = (path: string): string => {
+    const search = new URLSearchParams()
+    if (scenario) search.set('scenario', scenario)
+    if (eventId) search.set('event', eventId)
+    search.set('lang', locale)
+    return `${path}?${search.toString()}`
+  }
+
   const sync = () => {
     root.setAttribute('aria-label', locale === 'ja' ? '主要ナビゲーション' : 'Primary navigation')
     root.replaceChildren(
-      navLink('city', text[locale].city, surface === 'city' ? './' : '../', surface === 'city'),
-      navLink('machine', text[locale].machine, surface === 'city' ? 'machine/' : surface === 'machine' ? './' : '../machine/', surface === 'machine'),
-      navLink('diagnose', text[locale].diagnose, surface === 'city' ? 'diagnose/' : surface === 'diagnose' ? './' : '../diagnose/', surface === 'diagnose'),
+      navLink(
+        'city',
+        text[locale].city,
+        traceHref(surface === 'city' ? './' : '../'),
+        surface === 'city',
+      ),
+      navLink(
+        'machine',
+        text[locale].machine,
+        traceHref(surface === 'city' ? 'machine/' : surface === 'machine' ? './' : '../machine/'),
+        surface === 'machine',
+      ),
+      navLink(
+        'diagnose',
+        text[locale].diagnose,
+        traceHref(surface === 'city' ? 'diagnose/' : surface === 'diagnose' ? './' : '../diagnose/'),
+        surface === 'diagnose',
+      ),
       navLink('github', text[locale].source, 'https://github.com/penguin425/TiCity', false, true),
       themeButton,
     )
@@ -166,10 +193,21 @@ export function createNavigation(
       locale = next
       sync()
     },
+    setTraceContext(nextScenario, nextEventId) {
+      scenario = nextScenario
+      eventId = nextEventId
+      sync()
+    },
   }
 }
 
 export function prepareDocument(locale: Locale): void {
   document.documentElement.lang = locale
+  const skip = document.querySelector<HTMLElement>('.skip-link')
+  if (skip) {
+    skip.textContent = locale === 'ja'
+      ? 'メインコンテンツへ移動'
+      : 'Skip to main content'
+  }
   applyTheme(resolveTheme())
 }

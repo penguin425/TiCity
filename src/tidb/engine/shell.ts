@@ -8,7 +8,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
-import type { TiCityState, TraceReceipt } from '../model/types'
+import type { TiCityState, TraceEvent, TraceReceipt } from '../model/types'
 import { FOCUS_COMPONENT_TARGETS, TICITY_LAYOUT } from '../world/layout'
 import { createTiDBSceneGraph } from '../world/city'
 import type { CityComponent, TiDBSceneGraph } from '../world/city'
@@ -25,12 +25,18 @@ import { createTraceFlows } from './trace-flows'
 import type { TraceFlowController } from './trace-flows'
 import { projectTransactionLab } from '../world/transaction-lab-projection'
 import { EMPTY_TRANSACTION_LAB_PROJECTION } from '../world/transaction-lab'
+import type { TransactionLabProjection } from '../world/transaction-lab'
+import { projectLockLab } from '../world/lock-lab-projection'
+import { EMPTY_LOCK_LAB_PROJECTION } from '../world/lock-lab'
+import type { LockLabProjection } from '../world/lock-lab'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
   readonly autoStart?: boolean
+  readonly inspectLab?: boolean
+  /** @deprecated Use `inspectLab`. */
   readonly inspectTransactionLab?: boolean
   readonly onSelect?: (component: CityComponent | null) => void
 }
@@ -48,6 +54,8 @@ export interface CityShell {
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
   setMode(mode: CityViewMode): void
+  setLabInspect(enabled: boolean): void
+  /** @deprecated Use `setLabInspect`. */
   setTransactionLabInspect(enabled: boolean): void
   setHudExpanded(expanded: boolean): void
   resize(): void
@@ -80,6 +88,62 @@ export function cityProjectionAspect(
 export function cityPixelRatio(width: number, devicePixelRatio: number): number {
   const cap = width <= 900 ? 1.25 : 1.5
   return Math.max(1, Math.min(cap, devicePixelRatio || 1))
+}
+
+export interface CityLabProjections {
+  readonly transaction: TransactionLabProjection
+  readonly lock: LockLabProjection
+}
+
+function hiddenTransactionLab(reducedMotion: boolean): TransactionLabProjection {
+  return reducedMotion === EMPTY_TRANSACTION_LAB_PROJECTION.reducedMotion
+    ? EMPTY_TRANSACTION_LAB_PROJECTION
+    : { ...EMPTY_TRANSACTION_LAB_PROJECTION, reducedMotion }
+}
+
+function hiddenLockLab(reducedMotion: boolean): LockLabProjection {
+  return reducedMotion === EMPTY_LOCK_LAB_PROJECTION.reducedMotion
+    ? EMPTY_LOCK_LAB_PROJECTION
+    : { ...EMPTY_LOCK_LAB_PROJECTION, reducedMotion }
+}
+
+/**
+ * Projects exactly one detailed 3D lab from the event-owned discriminator.
+ * A Lock Lab snapshot also has two Region summaries, so checking the lock
+ * discriminator first prevents it from leaking into Transaction Lab.
+ */
+export function projectCityLabs(
+  event: TraceEvent | null,
+  inspect: boolean,
+  reducedMotion: boolean,
+  pulse = 0,
+): CityLabProjections {
+  const hiddenTransaction = hiddenTransactionLab(reducedMotion)
+  const hiddenLock = hiddenLockLab(reducedMotion)
+  if (!inspect || !event?.snapshot) {
+    return { transaction: hiddenTransaction, lock: hiddenLock }
+  }
+  if (event.snapshot.lockLab) {
+    return {
+      transaction: hiddenTransaction,
+      lock: projectLockLab(event, {
+        inspect: true,
+        reducedMotion,
+        pulse,
+      }) ?? hiddenLock,
+    }
+  }
+  if (event.snapshot.transaction) {
+    return {
+      transaction: projectTransactionLab(event, {
+        inspect: true,
+        reducedMotion,
+        pulse,
+      }) ?? hiddenTransaction,
+      lock: hiddenLock,
+    }
+  }
+  return { transaction: hiddenTransaction, lock: hiddenLock }
 }
 
 function measure(container: HTMLElement): readonly [number, number] {
@@ -206,8 +270,8 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   let lastStateTick = -1
   let lastTrace: TraceReceipt | null = null
   let networkEmphasis = false
-  let transactionLabInspect = options.inspectTransactionLab ?? false
-  let transactionLabProjectionKey = ''
+  let labInspect = options.inspectLab ?? options.inspectTransactionLab ?? false
+  let labProjectionKey = ''
   const focusAnchor = new THREE.Vector3()
 
   function syncNetworkEmphasis(): void {
@@ -218,29 +282,24 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     city.setNetworkEmphasis(next)
   }
 
-  function syncTransactionLab(): void {
+  function syncDetailedLabs(): void {
     const playback = flows.playback
     const event = playback.event
     const key = [
-      transactionLabInspect ? 'inspect' : 'hidden',
+      labInspect ? 'inspect' : 'hidden',
       playback.motion,
       event?.id ?? '',
     ].join('|')
-    if (key === transactionLabProjectionKey) return
-    transactionLabProjectionKey = key
-    const projection = transactionLabInspect
-      ? projectTransactionLab(event, {
-          inspect: true,
-          reducedMotion: playback.motion === 'reduced',
-          pulse: 0.72,
-        })
-      : null
-    city.transactionLab.update(
-      projection ?? {
-        ...EMPTY_TRANSACTION_LAB_PROJECTION,
-        reducedMotion: playback.motion === 'reduced',
-      },
+    if (key === labProjectionKey) return
+    labProjectionKey = key
+    const projection = projectCityLabs(
+      event,
+      labInspect,
+      playback.motion === 'reduced',
+      0.72,
     )
+    city.transactionLab.update(projection.transaction)
+    city.lockLab.update(projection.lock)
   }
 
   function setTheme(next: CityTheme): void {
@@ -315,7 +374,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     controls.update(delta)
     city.updateVisuals(delta)
     flows.update(delta)
-    syncTransactionLab()
+    syncDetailedLabs()
     syncNetworkEmphasis()
     audio.update(flows.activity)
     picker.update()
@@ -345,7 +404,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       lastTrace = null
       flows.stop()
     }
-    syncTransactionLab()
+    syncDetailedLabs()
     syncNetworkEmphasis()
   }
 
@@ -393,11 +452,17 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       labels.setMode(mode)
       if (mode === 'walk') picker.select(null)
     },
+    setLabInspect(enabled: boolean): void {
+      if (labInspect === enabled) return
+      labInspect = enabled
+      labProjectionKey = ''
+      syncDetailedLabs()
+    },
     setTransactionLabInspect(enabled: boolean): void {
-      if (transactionLabInspect === enabled) return
-      transactionLabInspect = enabled
-      transactionLabProjectionKey = ''
-      syncTransactionLab()
+      if (labInspect === enabled) return
+      labInspect = enabled
+      labProjectionKey = ''
+      syncDetailedLabs()
     },
     setHudExpanded(expanded: boolean): void {
       if (hudExpanded === expanded) return

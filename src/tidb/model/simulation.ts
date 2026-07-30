@@ -2641,6 +2641,13 @@ export function createTiDBSimulation(
         transactionId: transactionBId,
         dependsOn: [victimRollback.id],
         branchId: clientB,
+        deltas: [{
+          kind: 'deadlock_client_error',
+          deadlockId,
+          transactionId: transactionBId,
+          errorCode: 1213,
+          retryable: false,
+        }],
         metadata: {
           errorCode: 1213,
           retryable: false,

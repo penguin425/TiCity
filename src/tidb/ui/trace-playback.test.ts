@@ -215,6 +215,35 @@ describe('trace playback dock', () => {
     ).toContain('2 / 4: route label')
   })
 
+  it('normalizes independent Lock Lab client endpoints', () => {
+    installTestDom()
+    const base = receipt()
+    const branch = traceEvent(
+      'client-branch',
+      'client',
+      'success',
+      'client-a',
+      'client-b',
+    )
+    const trace: TraceReceipt = {
+      ...base,
+      events: [branch],
+      durationMs: branch.durationMs,
+    }
+    const dock = createTracePlaybackDock('en', noActions())
+
+    dock.update(playback(trace, {
+      currentIndex: 0,
+      total: 1,
+      event: branch,
+    }), trace)
+
+    expect(dock.root.querySelector('[data-trace-route]')?.textContent)
+      .toContain('CLIENT A→CLIENT B')
+    expect(dock.root.querySelector('[data-trace-route]')?.getAttribute('aria-label'))
+      .toBe('Route: CLIENT A → CLIENT B')
+  })
+
   it('marks every event complete while retaining a replay action', () => {
     const dom = installTestDom()
     const trace = receipt()

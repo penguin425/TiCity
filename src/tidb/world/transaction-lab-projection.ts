@@ -135,7 +135,14 @@ export function projectTransactionLab(
   options: TransactionLabProjectionOptions,
 ): TransactionLabProjection | null {
   const snapshot = event?.snapshot
-  if (!event || !snapshot || snapshot.regions.length !== 2) return null
+  if (
+    !event ||
+    !snapshot ||
+    snapshot.lockLab !== undefined ||
+    snapshot.regions.length !== 2
+  ) {
+    return null
+  }
   const first = regionProjection(snapshot.regions[0])
   const second = regionProjection(snapshot.regions[1])
   return {

@@ -178,6 +178,43 @@ describe('TraceReceipt-driven city flows', () => {
     city.dispose()
   })
 
+  it('seeks an exact parallel sibling by stable event id and pauses there', () => {
+    const city = createTiDBSceneGraph()
+    const flows = createTraceFlows(city)
+    flows.play(receipt([
+      event({
+        id: 'branch-a',
+        atMs: 0,
+        durationMs: 100,
+        domain: 'raft',
+        regionId: 0,
+      }),
+      event({
+        id: 'branch-b',
+        atMs: 0,
+        durationMs: 100,
+        domain: 'raft',
+        regionId: 18,
+      }),
+    ]))
+
+    expect(flows.playback.event?.id).toBe('branch-b')
+    expect(flows.seek('branch-a')).toBe(true)
+    expect(flows.playback).toMatchObject({
+      phase: 'paused',
+      currentIndex: 0,
+    })
+    expect(flows.playback.event?.id).toBe('branch-a')
+    expect(flows.playback.activeEventIds).toEqual(['branch-a', 'branch-b'])
+    expect(flows.seek('missing-event')).toBe(false)
+    expect(flows.playback.event?.id).toBe('branch-a')
+
+    flows.setPaused(false)
+    expect(flows.playback.event?.id).toBe('branch-b')
+    flows.dispose()
+    city.dispose()
+  })
+
   it('starts a causal join after every declared parent while leaving siblings parallel', () => {
     const parentA = event({
       id: 'apply-region-0',
@@ -610,6 +647,74 @@ describe('TraceReceipt-driven city flows', () => {
       traceEvent.source?.startsWith('txn-') ||
       traceEvent.target?.startsWith('txn-'),
     )).toBe(false)
+    city.dispose()
+  })
+
+  it('resolves every Lock Lab endpoint without the world-origin fallback', () => {
+    const simulation = createTiDBSimulation()
+    const trace = simulation.runScenario('lock-deadlock')
+    const city = createTiDBSceneGraph()
+    const point = new THREE.Vector3()
+    const fallback = new THREE.Vector3(0, 5, 0)
+
+    for (const traceEvent of trace.events) {
+      for (const side of ['source', 'target'] as const) {
+        expect(
+          resolveTraceEndpoint(traceEvent, side, city, point),
+          `${traceEvent.kind}:${side}:${traceEvent[side] ?? '(default)'}`,
+        ).toBe(true)
+        expect(
+          point.equals(fallback),
+          `${traceEvent.kind}:${side} used the renderer fallback`,
+        ).toBe(false)
+      }
+    }
+
+    const error = trace.events.find(
+      (traceEvent) => traceEvent.kind === 'deadlock_error_1213',
+    )!
+    expect(resolveTraceEndpoint(error, 'target', city, point)).toBe(true)
+    expect(point.equals(city.registry.get('client.terminal')!.anchor)).toBe(true)
+
+    const clientAliases = event({
+      source: 'client-a',
+      target: 'client-b',
+      snapshot: error.snapshot,
+    })
+    expect(resolveTraceEndpoint(clientAliases, 'source', city, point)).toBe(true)
+    expect(point.equals(city.registry.get('client.terminal')!.anchor)).toBe(true)
+    expect(resolveTraceEndpoint(clientAliases, 'target', city, point)).toBe(true)
+    expect(point.equals(city.registry.get('client.terminal')!.anchor)).toBe(true)
+
+    const detectorEndpoints: Array<{
+      readonly traceEvent: TraceEvent
+      readonly side: 'source' | 'target'
+    }> = []
+    for (const traceEvent of trace.events) {
+      switch (traceEvent.kind) {
+        case 'lock_wait_enqueued':
+        case 'deadlock_detected':
+          detectorEndpoints.push({ traceEvent, side: 'target' })
+          break
+        case 'deadlock_victim_selected':
+        case 'deadlock_resolved':
+          detectorEndpoints.push({ traceEvent, side: 'source' })
+          break
+      }
+    }
+    expect(detectorEndpoints.length).toBeGreaterThanOrEqual(5)
+    for (const { traceEvent, side } of detectorEndpoints) {
+      expect(traceEvent[side]).toBe('tikv-3')
+      expect(resolveTraceEndpoint(traceEvent, side, city, point)).toBe(true)
+      expect(point.equals(city.registry.get('tikv.2')!.anchor)).toBe(true)
+      if (traceEvent.regionId !== undefined) {
+        expect(
+          point.equals(
+            city.registry.get(`region.${traceEvent.regionId}.peer.2`)!.anchor,
+          ),
+        ).toBe(false)
+      }
+    }
     city.dispose()
   })
 })

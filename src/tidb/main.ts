@@ -25,6 +25,7 @@ import {
   resolveLocale,
   type Locale,
 } from './ui'
+import { createLockLabPanel } from './ui/lock-lab'
 import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTransactionLabPanel } from './ui/transaction-lab'
 import { createTiDBWorld, type WorldHandle } from './world'
@@ -35,6 +36,7 @@ const SCENARIOS: readonly ScenarioId[] = [
   'point-read',
   'cross-region-transaction',
   'optimistic-conflict',
+  'lock-deadlock',
   'commit-protocols',
   'hotspot-split',
   'tikv-failover',
@@ -60,8 +62,8 @@ const copy = {
     walk: '歩行',
     sound: '音',
     inspect: '内部',
-    showInspect: 'Transaction Labの内部断面を開く',
-    hideInspect: 'Transaction Labの内部断面を閉じる',
+    showInspect: '現在の詳細ラボを開く',
+    hideInspect: '現在の詳細ラボを閉じる',
     panel: '操作',
     showPanel: '操作パネルを開く',
     hidePanel: '操作パネルを閉じる',
@@ -109,8 +111,8 @@ const copy = {
     walk: 'Walk',
     sound: 'Sound',
     inspect: 'Inspect',
-    showInspect: 'Open the Transaction Lab cutaway',
-    hideInspect: 'Close the Transaction Lab cutaway',
+    showInspect: 'Open the active detail lab',
+    hideInspect: 'Close the active detail lab',
     panel: 'Panel',
     showPanel: 'Open control panel',
     hidePanel: 'Close control panel',
@@ -168,6 +170,31 @@ function initialScenario(): ScenarioId {
   return SCENARIOS.includes(value as ScenarioId)
     ? value as ScenarioId
     : 'point-read'
+}
+
+type DetailLab = 'transaction' | 'lock'
+
+function detailLabForTrace(trace: TraceReceipt | null): DetailLab | null {
+  let hasDetailedSnapshot = false
+  for (const event of trace?.events ?? []) {
+    if (event.snapshot?.lockLab !== undefined) return 'lock'
+    if (event.snapshot !== undefined) hasDetailedSnapshot = true
+  }
+  return hasDetailedSnapshot ? 'transaction' : null
+}
+
+function surfaceHref(
+  surface: 'machine' | 'diagnose',
+  scenario: ScenarioId,
+  eventId: string | null,
+  locale: Locale,
+): string {
+  const params = new URLSearchParams({
+    scenario,
+    lang: locale,
+  })
+  if (eventId) params.set('event', eventId)
+  return `${surface}/?${params.toString()}`
 }
 
 function deepFreezeSnapshot<T>(value: T): T {
@@ -436,7 +463,15 @@ function boot(): void {
   let locale = resolveLocale()
   prepareDocument(locale)
   const simulation = createTiDBSimulation({ seed: 425 })
-  let currentTrace: TraceReceipt | null = simulation.runScenario(initialScenario())
+  const bootScenario = initialScenario()
+  let currentTrace: TraceReceipt | null = simulation.runScenario(bootScenario)
+  let currentScenario: ScenarioId = currentTrace.scenarioId ?? bootScenario
+  const requestedEventId = new URLSearchParams(location.search).get('event')
+  const initialEventId = requestedEventId !== null &&
+    currentTrace.events.some((event) => event.id === requestedEventId)
+    ? requestedEventId
+    : null
+  let activeLab = detailLabForTrace(currentTrace)
   let traceRevision = 0
   let world: WorldHandle | null = null
   let disposed = false
@@ -450,6 +485,7 @@ function boot(): void {
   layout.dataset.panel = panelExpanded ? 'open' : 'closed'
   layout.dataset.cameraView = 'orbit'
   layout.dataset.inspect = 'closed'
+  layout.dataset.activeLab = activeLab ?? 'none'
 
   const pageTitle = document.createElement('h1')
   pageTitle.className = 'visually-hidden'
@@ -488,6 +524,10 @@ function boot(): void {
       onSelect,
     })
     world.shell.renderer.domElement.setAttribute('aria-label', copy[locale].canvas)
+    world.update(simulation.state, currentTrace)
+    if (initialEventId !== null && world.shell.flows.seek(initialEventId)) {
+      world.shell.flows.setPaused(true)
+    }
   } catch (error) {
     console.warn('3D world unavailable:', error)
     const fallback = document.createElement('p')
@@ -497,7 +537,8 @@ function boot(): void {
   }
 
   const transactionLabPanel = createTransactionLabPanel(locale)
-  worldHost.append(transactionLabPanel.root)
+  const lockLabPanel = createLockLabPanel(locale)
+  worldHost.append(transactionLabPanel.root, lockLabPanel.root)
 
   const traceDock = createTracePlaybackDock(locale, {
     onPrevious: () => {
@@ -560,13 +601,15 @@ function boot(): void {
   const setInspect = (enabled: boolean, focus = false): void => {
     inspectOpen = enabled
     layout.dataset.inspect = enabled ? 'open' : 'closed'
-    world?.setTransactionLabInspect(enabled)
+    world?.setLabInspect(enabled)
     inspectButton?.setAttribute('aria-pressed', String(enabled))
     inspectButton?.setAttribute(
       'aria-label',
       enabled ? copy[locale].hideInspect : copy[locale].showInspect,
     )
-    if (enabled && focus) world?.focus('transaction.lab')
+    if (enabled && focus && activeLab !== null) {
+      world?.focus(activeLab === 'lock' ? 'lock.lab' : 'transaction.lab')
+    }
   }
 
   const panelButton = button(copy[locale].panel, () => {
@@ -620,7 +663,7 @@ function boot(): void {
   })
   audioButton.dataset.action = 'audio'
   viewActions.append(inspectButton, panelButton, audioButton)
-  const initialDetailedTrace = currentTrace.events.some((event) => event.snapshot !== undefined)
+  const initialDetailedTrace = activeLab !== null
   setInspect(initialDetailedTrace, initialDetailedTrace)
   topCluster.append(navigation.root, viewActions)
   topbar.append(wordmarkHost, topCluster)
@@ -639,6 +682,22 @@ function boot(): void {
   uiHost.className = 'tidb-ui-host'
   uiHost.id = 'tidb-control-panel'
 
+  let surfaceLinkKey = ''
+  const syncSurfaceLinks = (eventId: string | null): void => {
+    const nextKey = `${currentScenario}|${eventId ?? ''}|${locale}`
+    if (nextKey === surfaceLinkKey) return
+    surfaceLinkKey = nextKey
+    navigation.setTraceContext(currentScenario, eventId)
+    uiHost.querySelector<HTMLAnchorElement>('[data-nav="machine"]')?.setAttribute(
+      'href',
+      surfaceHref('machine', currentScenario, eventId, locale),
+    )
+    uiHost.querySelector<HTMLAnchorElement>('[data-nav="diagnose"]')?.setAttribute(
+      'href',
+      surfaceHref('diagnose', currentScenario, eventId, locale),
+    )
+  }
+
   const applyReceipt = (candidate: unknown): void => {
     if (
       candidate &&
@@ -647,9 +706,13 @@ function boot(): void {
       'id' in candidate
     ) {
       currentTrace = candidate as TraceReceipt
+      currentScenario = currentTrace.scenarioId ?? currentScenario
+      activeLab = detailLabForTrace(currentTrace)
+      layout.dataset.activeLab = activeLab ?? 'none'
       traceRevision++
       world?.update(simulation.state, currentTrace)
-      const hasDetailedSnapshot = currentTrace.events.some((event) => event.snapshot !== undefined)
+      syncSurfaceLinks(null)
+      const hasDetailedSnapshot = activeLab !== null
       setInspect(hasDetailedSnapshot, hasDetailedSnapshot)
     }
   }
@@ -667,7 +730,7 @@ function boot(): void {
   }
 
   let lastTourFocus = 'city.overview'
-  mountCityUi(uiHost, {
+  const cityUi = mountCityUi(uiHost, {
     locale,
     simulation: {
       state: simulation.state,
@@ -715,13 +778,22 @@ function boot(): void {
       if (world) world.shell.renderer.domElement.setAttribute('aria-label', copy[next].canvas)
       traceDock.setLocale(next)
       transactionLabPanel.setLocale(next)
+      lockLabPanel.setLocale(next)
       movementPad.setLocale(next)
       hint.textContent = copy[next].hint[currentView]
+      surfaceLinkKey = ''
+      queueMicrotask(() => {
+        if (!disposed) {
+          syncSurfaceLinks(world?.shell.flows.playback.event?.id ?? null)
+        }
+      })
     },
-    machineHref: 'machine/',
-    diagnoseHref: 'diagnose/',
+    machineHref: surfaceHref('machine', currentScenario, initialEventId, locale),
+    diagnoseHref: surfaceHref('diagnose', currentScenario, initialEventId, locale),
     githubHref: 'https://github.com/penguin425/TiCity/',
   })
+
+  syncSurfaceLinks(initialEventId)
 
   hud.append(status, uiHost)
   const legend = createLegend(locale)
@@ -730,7 +802,7 @@ function boot(): void {
 
   let last = performance.now()
   let lastStatus = 0
-  let transactionLabPanelKey = ''
+  let labPanelKey = ''
   let animationFrame = 0
   const frame = (now: number) => {
     if (disposed) return
@@ -741,6 +813,7 @@ function boot(): void {
     const playback = world?.shell.flows.playback
     if (playback) {
       traceDock.update(playback, currentTrace)
+      syncSurfaceLinks(playback.event?.id ?? null)
       layout.dataset.traceState = playback.phase
       const activeEventIds = playback.activeEventIds ?? NO_ACTIVE_TRACE_EVENTS
       const panelKey = [
@@ -748,15 +821,15 @@ function boot(): void {
         currentTrace === null ? '' : String(currentTrace.events.length),
         playback.event?.id ?? '',
         activeEventIds.join(','),
-        String(playback.iteration),
       ].join('|')
-      if (panelKey !== transactionLabPanelKey) {
-        transactionLabPanelKey = panelKey
+      if (panelKey !== labPanelKey) {
+        labPanelKey = panelKey
         const byId = new Map(currentTrace?.events.map((event) => [event.id, event]))
         const activeEvents = activeEventIds
           .map((id) => byId.get(id))
           .filter((event): event is NonNullable<typeof event> => event !== undefined)
         transactionLabPanel.update(playback.event, activeEvents)
+        lockLabPanel.update(playback.event, activeEvents)
       }
     }
 
@@ -810,6 +883,12 @@ function boot(): void {
   const reset = () => {
     simulation.reset()
     currentTrace = null
+    activeLab = null
+    layout.dataset.activeLab = 'none'
+    setInspect(false)
+    transactionLabPanel.update(null)
+    lockLabPanel.update(null)
+    syncSurfaceLinks(null)
     world?.update(simulation.state, null)
   }
   const publicModel: TiDBSimulationApi = {
@@ -850,8 +929,10 @@ function boot(): void {
     disposed = true
     cancelAnimationFrame(animationFrame)
     themeObserver.disconnect()
+    cityUi.dispose()
     traceDock.dispose()
     transactionLabPanel.dispose()
+    lockLabPanel.dispose()
     movementPad.dispose()
     world?.dispose()
   }, { once: true })

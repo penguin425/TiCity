@@ -11,6 +11,8 @@ import {
   DISTRICT_BOUNDS,
   FOCUS_ANCHORS,
   HTAP_PATHS,
+  LOCK_LAB_ORIGIN,
+  TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
   TIKV_BOUNDS,
   boundsContain,
@@ -76,5 +78,12 @@ describe('TiCity layout', () => {
       expect(Math.abs(point[0])).toBeLessThan(half)
       expect(Math.abs(point[2])).toBeLessThan(half)
     }
+  })
+
+  it('publishes a shared, elevated cutaway stage for mutually exclusive labs', () => {
+    expect(FOCUS_ANCHORS['transaction.lab']).toBe(TRANSACTION_LAB_ORIGIN)
+    expect(FOCUS_ANCHORS['lock.lab']).toBe(LOCK_LAB_ORIGIN)
+    expect(LOCK_LAB_ORIGIN).toEqual(TRANSACTION_LAB_ORIGIN)
+    expect(LOCK_LAB_ORIGIN[1]).toBeGreaterThan(0)
   })
 })

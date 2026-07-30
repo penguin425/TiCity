@@ -3,12 +3,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TraceReceipt } from '../model/types'
+import { createTiDBSimulation } from '../model/simulation'
 import { CITY_ORBIT } from './camera'
 import {
   cityPixelRatio,
   cityProjectionAspect,
   cityViewOcclusion,
   hasTraceChanged,
+  projectCityLabs,
 } from './shell'
 
 describe('city shell trace replay gate', () => {
@@ -46,5 +48,35 @@ describe('city shell trace replay gate', () => {
     expect(cityPixelRatio(1440, 2)).toBe(1.5)
     expect(cityPixelRatio(390, 3)).toBe(1.25)
     expect(cityPixelRatio(1440, 1)).toBe(1)
+  })
+
+  it('uses the model discriminator to keep Transaction and Lock labs exclusive', () => {
+    const simulation = createTiDBSimulation()
+    const transactionTrace = simulation.runScenario('cross-region-transaction')
+    const transactionEvent = transactionTrace.events.find(
+      (event) => event.snapshot?.transaction !== null &&
+        event.snapshot?.transaction !== undefined &&
+        event.snapshot.regions.length === 2,
+    )
+    const lockTrace = simulation.runScenario('lock-deadlock')
+    const lockEvent = lockTrace.events.find((event) => event.snapshot?.lockLab)
+
+    expect(transactionEvent).toBeDefined()
+    expect(lockEvent).toBeDefined()
+
+    const transaction = projectCityLabs(transactionEvent!, true, false, 0.5)
+    expect(transaction.transaction.mode).toBe('inspect')
+    expect(transaction.lock.mode).toBe('hidden')
+
+    const lock = projectCityLabs(lockEvent!, true, true, 0.5)
+    expect(lock.transaction.mode).toBe('hidden')
+    expect(lock.lock.mode).toBe('inspect')
+    expect(lock.lock.reducedMotion).toBe(true)
+
+    const closed = projectCityLabs(lockEvent!, false, true, 0.5)
+    expect(closed.transaction.mode).toBe('hidden')
+    expect(closed.lock.mode).toBe('hidden')
+    expect(closed.transaction.reducedMotion).toBe(true)
+    expect(closed.lock.reducedMotion).toBe(true)
   })
 })

@@ -41,6 +41,10 @@ export {
   type TransactionLabPanel,
 } from './transaction-lab'
 export {
+  createLockLabPanel,
+  type LockLabPanel,
+} from './lock-lab'
+export {
   CONTROL_COPY,
   DEFAULT_CITY_CONTROLS,
   SCENARIOS,
