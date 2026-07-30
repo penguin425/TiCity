@@ -58,7 +58,7 @@ jobs:
           package_dir="release/${package_name}"
           mkdir -p "${package_dir}/site"
           cp -R dist/. "${package_dir}/site/"
-          cp LICENSE NOTICE README.md CHANGELOG.md "${package_dir}/"
+          cp LICENSE NOTICE README.md README.ja.md CHANGELOG.md "${package_dir}/"
           cp public/THIRD_PARTY_NOTICES.txt "${package_dir}/THIRD_PARTY_NOTICES"
           tar -C release -czf "release/${package_name}.tar.gz" "${package_name}"
           (
