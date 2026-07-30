@@ -50,6 +50,9 @@ function projectionAtEvent(
         }],
     ...(snapshot.lockLab === undefined ? {} : { lockLab: snapshot.lockLab }),
     ...(snapshot.raftLab === undefined ? {} : { raftLab: snapshot.raftLab }),
+    ...(snapshot.protocolLab === undefined
+      ? {}
+      : { protocolLab: snapshot.protocolLab }),
     regions: finalState.regions.map((region) => {
       const detail = detailedRegions.get(region.id)
       if (!detail) return region

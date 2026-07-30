@@ -344,6 +344,309 @@ describe('TiDB diagnostic projections', () => {
     expect(japanese.textContent).toContain('TiDB内部')
   })
 
+  it('projects Protocol Lab selection, timestamp provenance, and client boundaries', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('commit-protocols')
+    const comparisonStart = receipt.events.find((event) =>
+      event.kind === 'protocol_comparison_start')!
+    const asyncResponse = receipt.events.find((event) =>
+      event.kind === 'protocol_client_response' &&
+      event.branchId === 'async_commit')!
+    const twoPcResponse = receipt.events.find((event) =>
+      event.kind === 'protocol_client_response' &&
+      event.branchId === 'two_pc')!
+
+    const atComparisonStart = projectDiagnostics({
+      ...simulation.state,
+      protocolLab: comparisonStart.snapshot?.protocolLab,
+    })
+    expect(
+      atComparisonStart.find((projection) =>
+        projection.id === 'protocol-selection')?.rows,
+    ).toEqual([
+      expect.objectContaining({
+        lane: 'one_pc',
+        profileScope:
+          'declared_fixture_profile_visible_from_comparison_start',
+        selected: '1pc',
+      }),
+      expect.objectContaining({
+        lane: 'async_commit',
+        profileScope:
+          'declared_fixture_profile_visible_from_comparison_start',
+        selected: 'async_commit',
+      }),
+      expect.objectContaining({
+        lane: 'two_pc',
+        profileScope:
+          'declared_fixture_profile_visible_from_comparison_start',
+        selected: '2pc',
+      }),
+    ])
+    expect(
+      atComparisonStart.find((projection) =>
+        projection.id === 'protocol-client-path')?.rows,
+    ).toEqual([
+      expect.objectContaining({
+        lane: 'one_pc',
+        stage: 'idle',
+        startTs: '—',
+        clientResponded: 'false',
+      }),
+      expect.objectContaining({
+        lane: 'async_commit',
+        stage: 'idle',
+        startTs: '—',
+        clientResponded: 'false',
+      }),
+      expect.objectContaining({
+        lane: 'two_pc',
+        stage: 'idle',
+        startTs: '—',
+        clientResponded: 'false',
+      }),
+    ])
+
+    const atAsyncResponse = projectDiagnostics({
+      ...simulation.state,
+      protocolLab: asyncResponse.snapshot?.protocolLab,
+    })
+    expect(
+      atAsyncResponse.find((projection) =>
+        projection.id === 'protocol-selection')?.rows,
+    ).toEqual([
+      expect.objectContaining({
+        lane: 'one_pc',
+        profileScope:
+          'declared_fixture_profile_visible_from_comparison_start',
+        selected: '1pc',
+        onePcEligible: 'true',
+        asyncCommitEligible: 'true',
+        regionCount: '1',
+        mutationCount: '2',
+        asyncKeyCountLimit: '256',
+        asyncTotalKeyBytesLimit: '4096',
+        runtimeFallback: 'false',
+        representation: 'aggregate_counts_only',
+      }),
+      expect.objectContaining({
+        lane: 'async_commit',
+        selected: 'async_commit',
+        onePcEligible: 'false',
+        asyncCommitEligible: 'true',
+        onePcRejectedBeforeRpc: 'true',
+      }),
+      expect.objectContaining({
+        lane: 'two_pc',
+        selected: '2pc',
+        mutationCount: '257',
+        asyncCommitEligible: 'false',
+        asyncRejectedAtClientPrecheck: 'true',
+      }),
+    ])
+    expect(
+      atAsyncResponse.find((projection) =>
+        projection.id === 'protocol-client-path')?.rows[1],
+    ).toMatchObject({
+      lane: 'async_commit',
+      stage: 'client_acknowledged',
+      startTsSource: 'pd_tso',
+      latestTsSource: 'pd_tso',
+      requestMinCommitTsSource: 'latest_ts_plus_one',
+      maxCommitTsSource: 'representative_safe_window_model_bound',
+      commitTsSource: 'max_prewrite_min_commit_ts',
+      clientResponded: 'true',
+      backgroundState: 'in_progress_after_response',
+      clientBoundary: 'response_before_cleanup_completion',
+      backgroundScheduling:
+        'deterministic_after_client_boundary_model_policy',
+    })
+
+    const atTwoPcResponse = projectDiagnostics({
+      ...simulation.state,
+      protocolLab: twoPcResponse.snapshot?.protocolLab,
+    })
+    expect(
+      atTwoPcResponse.find((projection) =>
+        projection.id === 'protocol-client-path')?.rows[2],
+    ).toMatchObject({
+      lane: 'two_pc',
+      stage: 'client_acknowledged',
+      latestTs: '—',
+      latestTsSource: '—',
+      requestMinCommitTs: '—',
+      maxCommitTs: '—',
+      commitTsSource: 'pd_tso_after_prewrite',
+      clientResponded: 'true',
+      backgroundState: 'in_progress_after_response',
+    })
+  })
+
+  it('keeps transaction coordination separate from per-Region Raft and MVCC state', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('commit-protocols')
+    const asyncResponse = receipt.events.find((event) =>
+      event.kind === 'protocol_client_response' &&
+      event.branchId === 'async_commit')!
+    const twoPcResponse = receipt.events.find((event) =>
+      event.kind === 'protocol_client_response' &&
+      event.branchId === 'two_pc')!
+    const persisted = receipt.events.find((event) =>
+      event.kind === 'protocol_raft_persist_quorum' &&
+      event.branchId === 'one_pc-region-24')!
+
+    const atPersist = projectDiagnostics({
+      protocolLab: persisted.snapshot?.protocolLab,
+    })
+    expect(
+      atPersist.find((projection) =>
+        projection.id === 'protocol-region-state')?.rows[0],
+    ).toMatchObject({
+      lane: 'one_pc',
+      region: '24',
+      raftOperation: 'one_pc_prewrite',
+      raftStage: 'persisted_quorum',
+      raftAcks: '2/2',
+      coordinatorLayer: 'tidb_transaction_commit',
+      raftLayer: 'per_region_consensus',
+      cfDefault: 'empty',
+      cfLock: 'empty',
+      cfWrite: 'empty',
+    })
+
+    const atAsyncResponse = projectDiagnostics({
+      protocolLab: asyncResponse.snapshot?.protocolLab,
+    })
+    const asyncRegions = atAsyncResponse.find((projection) =>
+      projection.id === 'protocol-region-state')?.rows
+      .filter((row) => row.lane === 'async_commit')
+    expect(asyncRegions).toEqual([
+      expect.objectContaining({
+        region: '25',
+        role: 'primary',
+        mutationCount: '1',
+        raftOperation: 'prewrite',
+        raftStage: 'applied',
+        cfDefault: 'value',
+        cfLock: 'prewrite',
+        cfWrite: 'empty',
+        asyncCommit: 'true',
+        secondaryCount: '1',
+        returnedMinCommitTsSource: 'tikv_prewrite_result',
+        asyncApplyPrewrite: 'false',
+      }),
+      expect.objectContaining({
+        region: '26',
+        role: 'secondary',
+        secondaryCount: '0',
+        returnedMinCommitTsSource: 'tikv_prewrite_result',
+      }),
+    ])
+
+    const atTwoPcResponse = projectDiagnostics({
+      protocolLab: twoPcResponse.snapshot?.protocolLab,
+    })
+    const twoPcRegions = atTwoPcResponse.find((projection) =>
+      projection.id === 'protocol-region-state')?.rows
+      .filter((row) => row.lane === 'two_pc')
+    expect(twoPcRegions).toEqual([
+      expect.objectContaining({
+        role: 'primary',
+        raftOperation: 'commit_primary',
+        cfLock: 'empty',
+        cfWrite: 'commit',
+      }),
+      expect.objectContaining({
+        role: 'secondary',
+        raftOperation: 'prewrite',
+        cfLock: 'prewrite',
+        cfWrite: 'empty',
+      }),
+    ])
+  })
+
+  it('renders Protocol Lab bilingually and treats post-response work as neutral', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('commit-protocols')
+    const background = receipt.events.find((event) =>
+      event.kind === 'async_commit_background_dispatch' &&
+      event.regionId === 25)!
+    const dom = installTestDom()
+
+    const english = dom.mount('protocol-diagnose-en')
+    mountDiagnose(english as unknown as HTMLElement, {
+      locale: 'en',
+      snapshot: {
+        ...simulation.state,
+        protocolLab: background.snapshot?.protocolLab,
+      },
+    })
+    expect(english.dataset.activeLab).toBe('protocol')
+    expect(english.textContent).toContain(
+      'Declared fixture profile / outcome (static)',
+    )
+    expect(english.textContent).toContain(
+      'Declared representative profile / outcome; visible from comparison start',
+    )
+    expect(english.textContent).toContain(
+      'Exact-event client path and timestamps',
+    )
+    expect(english.textContent).toContain(
+      'Exact-event Region Raft / MVCC state',
+    )
+    expect(english.textContent).toContain('PD TSO')
+    expect(english.textContent).toContain('running after client response')
+    expect(
+      english.querySelector(
+        '[data-diagnose-section="protocol-client-path"]',
+      )?.getAttribute('data-tone'),
+    ).toBe('neutral')
+    expect(
+      english.querySelector(
+        '[data-table-section="protocol-client-path"] tbody tr:nth-child(2)',
+      )?.getAttribute('data-tone'),
+    ).toBe('neutral')
+
+    const japanese = dom.mount('protocol-diagnose-ja')
+    mountDiagnose(japanese as unknown as HTMLElement, {
+      locale: 'ja',
+      snapshot: {
+        ...simulation.state,
+        protocolLab: background.snapshot?.protocolLab,
+      },
+    })
+    expect(japanese.textContent).toContain(
+      '宣言済みfixture profile / outcome（固定）',
+    )
+    expect(japanese.textContent).toContain(
+      '宣言済みの代表profile / outcome（比較開始時から表示）',
+    )
+    expect(japanese.textContent).toContain(
+      'Exact-event client応答 / timestamp',
+    )
+    expect(japanese.textContent).toContain(
+      'Exact-event Region Raft / MVCC状態',
+    )
+    expect(japanese.textContent).toContain('client応答後に進行中')
+    expect(japanese.textContent).toContain('集計数のみ（SQL・key・value・rowなし）')
+  })
+
+  it('projects only aggregate Protocol Lab teaching data at every detailed event', () => {
+    const simulation = createTiDBSimulation({ seed: 425 })
+    const receipt = simulation.runScenario('commit-protocols')
+    for (const event of receipt.events) {
+      if (!event.snapshot?.protocolLab) continue
+      const protocolProjections = projectDiagnostics({
+        protocolLab: event.snapshot.protocolLab,
+      }).filter((projection) => projection.id.startsWith('protocol-'))
+      expect(protocolProjections.every((projection) =>
+        projection.label === 'MODEL / SIMULATED')).toBe(true)
+      expect(JSON.stringify(protocolProjections)).not.toMatch(
+        /\b(?:SELECT|INSERT|UPDATE|DELETE)\b|KEY_INFO|SQL_DIGEST|row value|result row|inventory|accounts/i,
+      )
+    }
+  })
+
   it('projects event-time transaction, Raft, lock, and MVCC detail', () => {
     const projections = projectDiagnostics({
       transaction: {
@@ -447,6 +750,9 @@ describe('TiDB diagnostic projections', () => {
     expect(DIAGNOSE_CSS).toContain('"cluster raft-peers"')
     expect(DIAGNOSE_CSS).toContain('"cluster raft-election"')
     expect(DIAGNOSE_CSS).toContain('"cluster region-request-retry"')
+    expect(DIAGNOSE_CSS).toContain('"protocol-selection protocol-selection"')
+    expect(DIAGNOSE_CSS).toContain('"protocol-client-path protocol-client-path"')
+    expect(DIAGNOSE_CSS).toContain('"protocol-region-state protocol-region-state"')
     expect(DIAGNOSE_CSS).toContain('td[data-column="lockWaitTimeout"]')
   })
 })

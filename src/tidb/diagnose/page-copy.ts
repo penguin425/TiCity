@@ -94,9 +94,95 @@ const LOCK_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
   'Lock Lab completed': 'Lock Labが完了',
 }
 
+const PROTOCOL_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
+  'Begin the commit-protocol comparison': 'commit protocol比較を開始',
+  'Start the 1PC fixture': '1PC代表ケースを開始',
+  'PD allocated 1PC start_ts': 'PDが1PCのstart_tsを採番',
+  'Choose the TryOnePc candidate': 'TryOnePc候補を選択',
+  'Get latest TSO and calculate the 1PC floor':
+    '最新TSOから1PCのtimestamp下限を算出',
+  'Send Prewrite with TryOnePc': 'TryOnePc付きPrewriteを送信',
+  'Region leader proposed the mutation': 'Region Leaderがmutationを提案',
+  'Two voters persisted the Raft entry': '2つのvoterがRaft entryを永続化',
+  'Region Raft committed the entry': 'Region Raftがentryをcommit',
+  'Apply 1PC MVCC records atomically': '1PCのMVCC recordを原子的にapply',
+  'Apply tentative value and prewrite lock':
+    'tentative valueとPrewrite lockをapply',
+  'Apply commit record and remove lock':
+    'commit recordをapplyしてlockを削除',
+  'TiKV returned one_pc_commit_ts': 'TiKVがone_pc_commit_tsを返却',
+  '1PC returned committed': '1PCがclientへcommit完了を返却',
+  '1PC fixture complete': '1PC代表ケースが完了',
+  'Start the Async Commit fixture': 'Async Commit代表ケースを開始',
+  'PD allocated Async Commit start_ts':
+    'PDがAsync Commitのstart_tsを採番',
+  'Check 1PC and Async Commit candidates':
+    '1PCとAsync Commitの適格性を判定',
+  'Select Async Commit': 'Async Commitを選択',
+  'Get latest TSO and calculate the Async floor':
+    '最新TSOからAsync Commitのtimestamp下限を算出',
+  'All prewrites established Async Commit':
+    '全Prewrite応答からAsync Commitを確定',
+  'Async Commit returned committed':
+    'Async Commitがclientへcommit完了を返却',
+  'Async Commit background cleanup complete':
+    'Async Commitの応答後cleanupが完了',
+  'Start the regular 2PC fixture': '通常2PC代表ケースを開始',
+  'PD allocated regular 2PC start_ts': 'PDが通常2PCのstart_tsを採番',
+  'Reject optimization candidates before RPC':
+    'RPC前にcommit最適化候補を除外',
+  'Select regular 2PC': '通常2PCを選択',
+  'All regular 2PC prewrites completed': '通常2PCの全Prewriteが完了',
+  'PD allocated regular 2PC commit_ts': 'PDが通常2PCのcommit_tsを採番',
+  'Commit the primary Region': 'primary RegionをCommit',
+  'Regular 2PC returned after primary commit':
+    'primary commit後に通常2PCの結果をclientへ返却',
+  'Dispatch secondary Commit in background':
+    'secondary Commitを応答後に送信',
+  'Regular 2PC background cleanup complete': '通常2PCの応答後cleanupが完了',
+  'Commit-protocol comparison complete': 'commit protocol比較が完了',
+}
+
+function protocolEventNameJa(label: string): string | undefined {
+  const exact = PROTOCOL_EVENT_LABELS_JA[label]
+  if (exact) return exact
+  const dynamicLabels: readonly [
+    RegExp,
+    (regionId: string) => string,
+  ][] = [
+    [
+      /^Send Async Prewrite to Region (\d+)$/,
+      (regionId) => `Region ${regionId}へAsync Prewriteを送信`,
+    ],
+    [
+      /^Region (\d+) returned min_commit_ts$/,
+      (regionId) => `Region ${regionId}がmin_commit_tsを返却`,
+    ],
+    [
+      /^Dispatch background Commit to Region (\d+)$/,
+      (regionId) => `Region ${regionId}へ応答後Commitを送信`,
+    ],
+    [
+      /^Send regular Prewrite to Region (\d+)$/,
+      (regionId) => `Region ${regionId}へ通常Prewriteを送信`,
+    ],
+    [
+      /^Region (\d+) completed regular Prewrite$/,
+      (regionId) => `Region ${regionId}の通常Prewriteが完了`,
+    ],
+  ]
+  for (const [pattern, translate] of dynamicLabels) {
+    const match = pattern.exec(label)
+    if (match?.[1]) return translate(match[1])
+  }
+  return undefined
+}
+
 export function diagnoseEventName(locale: Locale, event: TraceEvent): string {
   return locale === 'ja'
-    ? LOCK_EVENT_LABELS_JA[event.label] ?? event.label
+    ? LOCK_EVENT_LABELS_JA[event.label] ??
+      protocolEventNameJa(event.label) ??
+      event.label
     : event.label
 }
 

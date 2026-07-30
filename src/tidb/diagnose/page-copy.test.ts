@@ -49,6 +49,25 @@ describe('Diagnose page copy', () => {
     }
   })
 
+  it('covers every visible Protocol Lab event option in both locales', () => {
+    const events = createTiDBSimulation({ seed: 425 })
+      .runScenario('commit-protocols')
+      .events
+    for (const [index, candidate] of events.entries()) {
+      const cursor: DiagnoseCursor = {
+        event: candidate,
+        snapshot: candidate.snapshot ?? null,
+        snapshotEvent: candidate.snapshot ? candidate : null,
+        resolution: candidate.snapshot ? 'exact' : 'scenario-start',
+      }
+      expect(diagnoseEventName('ja', candidate)).not.toBe(candidate.label)
+      expect(diagnoseEventOptionLabel('ja', candidate, index, cursor))
+        .toContain(diagnoseEventName('ja', candidate))
+      expect(diagnoseEventOptionLabel('en', candidate, index, cursor))
+        .toContain(candidate.label)
+    }
+  })
+
   it('marks snapshotless event options and explains the cursor rule visibly', () => {
     const cursor: DiagnoseCursor = {
       event,
