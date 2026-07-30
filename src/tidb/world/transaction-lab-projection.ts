@@ -139,6 +139,8 @@ export function projectTransactionLab(
     !event ||
     !snapshot ||
     snapshot.lockLab !== undefined ||
+    snapshot.raftLab !== undefined ||
+    snapshot.protocolLab !== undefined ||
     snapshot.regions.length !== 2
   ) {
     return null

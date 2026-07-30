@@ -49,6 +49,10 @@ export {
   type RaftLabPanel,
 } from './raft-lab'
 export {
+  createProtocolLabPanel,
+  type ProtocolLabPanel,
+} from './protocol-lab'
+export {
   CONTROL_COPY,
   DEFAULT_CITY_CONTROLS,
   SCENARIOS,

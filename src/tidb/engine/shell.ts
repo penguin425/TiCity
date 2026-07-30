@@ -32,6 +32,9 @@ import type { LockLabProjection } from '../world/lock-lab'
 import { projectRaftLab } from '../world/raft-lab-projection'
 import { EMPTY_RAFT_LAB_PROJECTION } from '../world/raft-lab'
 import type { RaftLabProjection } from '../world/raft-lab'
+import { projectProtocolLab } from '../world/protocol-lab-projection'
+import { EMPTY_PROTOCOL_LAB_PROJECTION } from '../world/protocol-lab'
+import type { ProtocolLabProjection } from '../world/protocol-lab'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
@@ -97,6 +100,7 @@ export interface CityLabProjections {
   readonly transaction: TransactionLabProjection
   readonly lock: LockLabProjection
   readonly raft: RaftLabProjection
+  readonly protocol: ProtocolLabProjection
 }
 
 function hiddenTransactionLab(reducedMotion: boolean): TransactionLabProjection {
@@ -117,6 +121,12 @@ function hiddenRaftLab(reducedMotion: boolean): RaftLabProjection {
     : { ...EMPTY_RAFT_LAB_PROJECTION, reducedMotion }
 }
 
+function hiddenProtocolLab(reducedMotion: boolean): ProtocolLabProjection {
+  return reducedMotion === EMPTY_PROTOCOL_LAB_PROJECTION.reducedMotion
+    ? EMPTY_PROTOCOL_LAB_PROJECTION
+    : { ...EMPTY_PROTOCOL_LAB_PROJECTION, reducedMotion }
+}
+
 /**
  * Projects exactly one detailed 3D lab from the event-owned discriminator.
  * Lock and Raft snapshots retain shared Region summaries, so their explicit
@@ -131,11 +141,25 @@ export function projectCityLabs(
   const hiddenTransaction = hiddenTransactionLab(reducedMotion)
   const hiddenLock = hiddenLockLab(reducedMotion)
   const hiddenRaft = hiddenRaftLab(reducedMotion)
+  const hiddenProtocol = hiddenProtocolLab(reducedMotion)
   if (!inspect || !event?.snapshot) {
     return {
       transaction: hiddenTransaction,
       lock: hiddenLock,
       raft: hiddenRaft,
+      protocol: hiddenProtocol,
+    }
+  }
+  if (event.snapshot.protocolLab) {
+    return {
+      transaction: hiddenTransaction,
+      lock: hiddenLock,
+      raft: hiddenRaft,
+      protocol: projectProtocolLab(event, {
+        inspect: true,
+        reducedMotion,
+        pulse,
+      }) ?? hiddenProtocol,
     }
   }
   if (event.snapshot.raftLab) {
@@ -147,6 +171,7 @@ export function projectCityLabs(
         reducedMotion,
         pulse,
       }) ?? hiddenRaft,
+      protocol: hiddenProtocol,
     }
   }
   if (event.snapshot.lockLab) {
@@ -158,6 +183,7 @@ export function projectCityLabs(
         pulse,
       }) ?? hiddenLock,
       raft: hiddenRaft,
+      protocol: hiddenProtocol,
     }
   }
   if (event.snapshot.transaction) {
@@ -169,12 +195,14 @@ export function projectCityLabs(
       }) ?? hiddenTransaction,
       lock: hiddenLock,
       raft: hiddenRaft,
+      protocol: hiddenProtocol,
     }
   }
   return {
     transaction: hiddenTransaction,
     lock: hiddenLock,
     raft: hiddenRaft,
+    protocol: hiddenProtocol,
   }
 }
 
@@ -333,6 +361,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     city.transactionLab.update(projection.transaction)
     city.lockLab.update(projection.lock)
     city.raftLab.update(projection.raft)
+    city.protocolLab.update(projection.protocol)
   }
 
   function setTheme(next: CityTheme): void {

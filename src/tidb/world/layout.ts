@@ -71,6 +71,12 @@ export const LOCK_LAB_ORIGIN: Point3 = [0, 48, 18]
  */
 export const RAFT_LAB_ORIGIN: Point3 = [0, 48, 18]
 
+/**
+ * Protocol Lab shares the authored cutaway stage. The event discriminator
+ * keeps its three comparison lanes exclusive with the other detailed labs.
+ */
+export const PROTOCOL_LAB_ORIGIN: Point3 = [0, 48, 18]
+
 export const COMPONENT_ANCHORS = {
   'client.terminal': [0, 3, -288],
   'tiproxy.0': [-34, 7, -220],
@@ -101,6 +107,7 @@ export const FOCUS_ANCHORS = {
   'transaction.lab': TRANSACTION_LAB_ORIGIN,
   'lock.lab': LOCK_LAB_ORIGIN,
   'raft.lab': RAFT_LAB_ORIGIN,
+  'protocol.lab': PROTOCOL_LAB_ORIGIN,
   'tikv.raft': COMPONENT_ANCHORS['tikv.1'],
   'pd.scheduler': COMPONENT_ANCHORS['pd.control'],
   'gc.yard': COMPONENT_ANCHORS['gc.yard'],

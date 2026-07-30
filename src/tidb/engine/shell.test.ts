@@ -50,7 +50,7 @@ describe('city shell trace replay gate', () => {
     expect(cityPixelRatio(1440, 1)).toBe(1)
   })
 
-  it('uses model discriminators to keep Transaction, Lock, and Raft labs exclusive', () => {
+  it('uses model discriminators to keep all detailed labs exclusive', () => {
     const simulation = createTiDBSimulation()
     const transactionTrace = simulation.runScenario('cross-region-transaction')
     const transactionEvent = transactionTrace.events.find(
@@ -62,20 +62,27 @@ describe('city shell trace replay gate', () => {
     const lockEvent = lockTrace.events.find((event) => event.snapshot?.lockLab)
     const raftTrace = simulation.runScenario('tikv-failover')
     const raftEvent = raftTrace.events.find((event) => event.snapshot?.raftLab)
+    const protocolTrace = simulation.runScenario('commit-protocols')
+    const protocolEvent = protocolTrace.events.find(
+      (event) => event.snapshot?.protocolLab,
+    )
 
     expect(transactionEvent).toBeDefined()
     expect(lockEvent).toBeDefined()
     expect(raftEvent).toBeDefined()
+    expect(protocolEvent).toBeDefined()
 
     const transaction = projectCityLabs(transactionEvent!, true, false, 0.5)
     expect(transaction.transaction.mode).toBe('inspect')
     expect(transaction.lock.mode).toBe('hidden')
     expect(transaction.raft.mode).toBe('hidden')
+    expect(transaction.protocol.mode).toBe('hidden')
 
     const lock = projectCityLabs(lockEvent!, true, true, 0.5)
     expect(lock.transaction.mode).toBe('hidden')
     expect(lock.lock.mode).toBe('inspect')
     expect(lock.raft.mode).toBe('hidden')
+    expect(lock.protocol.mode).toBe('hidden')
     expect(lock.lock.reducedMotion).toBe(true)
 
     const raft = projectCityLabs(raftEvent!, true, true, 0.5)
@@ -83,13 +90,23 @@ describe('city shell trace replay gate', () => {
     expect(raft.lock.mode).toBe('hidden')
     expect(raft.raft.mode).toBe('inspect')
     expect(raft.raft.reducedMotion).toBe(true)
+    expect(raft.protocol.mode).toBe('hidden')
+
+    const protocol = projectCityLabs(protocolEvent!, true, true, 0.5)
+    expect(protocol.transaction.mode).toBe('hidden')
+    expect(protocol.lock.mode).toBe('hidden')
+    expect(protocol.raft.mode).toBe('hidden')
+    expect(protocol.protocol.mode).toBe('inspect')
+    expect(protocol.protocol.reducedMotion).toBe(true)
 
     const closed = projectCityLabs(raftEvent!, false, true, 0.5)
     expect(closed.transaction.mode).toBe('hidden')
     expect(closed.lock.mode).toBe('hidden')
     expect(closed.raft.mode).toBe('hidden')
+    expect(closed.protocol.mode).toBe('hidden')
     expect(closed.transaction.reducedMotion).toBe(true)
     expect(closed.lock.reducedMotion).toBe(true)
     expect(closed.raft.reducedMotion).toBe(true)
+    expect(closed.protocol.reducedMotion).toBe(true)
   })
 })
