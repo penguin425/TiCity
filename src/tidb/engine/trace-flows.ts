@@ -53,6 +53,7 @@ const MAX_LIFE_MS = 1050
 const EVENT_DWELL_MS = 110
 const MAX_MODEL_GAP_BONUS_MS = 520
 const STATIONARY_DISTANCE = 0.75
+const SCHEDULE_EPSILON_MS = 1e-3
 export const TRACE_LOOP_HOLD_MS = 1_800
 const FAILED_TRACE_LOOP_HOLD_MS = 2_600
 
@@ -89,11 +90,21 @@ export interface TraceFlowPlayback {
   readonly looping: boolean
   readonly iteration: number
   readonly holdProgress: number
+  /** Current position on the renderer-only teaching clock. */
+  readonly cursorMs?: number
+  /**
+   * Stable arrays, mutated in place, in presentation order. Parallel events
+   * may therefore expose more than one active id.
+   */
+  readonly activeEventIds?: readonly string[]
+  readonly completedEventIds?: readonly string[]
 }
 
 export interface TracePresentationSchedule {
   readonly starts: Float32Array
   readonly lives: Float32Array
+  /** Event indexes sorted by presentation start, then receipt order. */
+  readonly order: Int32Array
   readonly durationMs: number
 }
 
@@ -103,6 +114,10 @@ export interface TraceFlowController {
   readonly active: number
   readonly dropped: number
   readonly playback: TraceFlowPlayback
+  /** Stable presentation-state views for parallel-aware integrations. */
+  readonly cursorMs: number
+  readonly activeEventIds: readonly string[]
+  readonly completedEventIds: readonly string[]
   /** Per-domain active counts in TRACE_DOMAIN_ORDER. Mutated in place. */
   readonly activity: Float32Array
   play(receipt: TraceReceipt): void
@@ -121,10 +136,25 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value))
 }
 
+function modelStart(event: TraceEvent): number {
+  return Number.isFinite(event.atMs) ? Math.max(0, event.atMs) : 0
+}
+
+function modelDuration(event: TraceEvent): number {
+  return Number.isFinite(event.durationMs) ? Math.max(0, event.durationMs) : 0
+}
+
+function dependenciesFor(event: TraceEvent): readonly string[] {
+  const dependencies = event.dependsOn
+  return Array.isArray(dependencies) ? dependencies : []
+}
+
 /**
  * Build a renderer-only teaching clock. Receipt timestamps remain untouched:
  * Machine and Diagnose still show the deterministic model time, while City
- * gives each causal hop enough wall time to be read.
+ * gives each causal hop enough wall time to be read. Overlapping model
+ * intervals remain overlapping presentation intervals. A declared dependency
+ * is stronger than timestamps and starts only after all known parents finish.
  */
 export function buildTracePresentationSchedule(
   events: readonly TraceEvent[],
@@ -132,32 +162,134 @@ export function buildTracePresentationSchedule(
 ): TracePresentationSchedule {
   const starts = new Float32Array(events.length)
   const lives = new Float32Array(events.length)
-  let cursor = 0
 
   for (let index = 0; index < events.length; index++) {
     const event = events[index]
     const distance = Math.max(0, routeDistances[index] ?? 0)
     const failedHold = event.status === 'failed' ? 140 : event.status === 'warning' ? 70 : 0
     const life = clamp(
-      455 + Math.sqrt(distance) * 20 + Math.min(500, event.durationMs) * 0.1 + failedHold,
+      455 + Math.sqrt(distance) * 20 +
+        Math.min(500, modelDuration(event)) * 0.1 +
+        failedHold,
       MIN_LIFE_MS,
       MAX_LIFE_MS,
     )
-    starts[index] = cursor
     lives[index] = life
-
-    const next = events[index + 1]
-    const modelGap = next
-      ? Math.max(0, next.atMs - (event.atMs + event.durationMs))
-      : 0
-    const gapBonus = Math.min(MAX_MODEL_GAP_BONUS_MS, modelGap * 0.28)
-    cursor += life + EVENT_DWELL_MS + gapBonus
   }
 
-  const durationMs = events.length === 0
-    ? 0
-    : starts[events.length - 1] + lives[events.length - 1]
-  return { starts, lives, durationMs }
+  if (events.length === 0) {
+    return {
+      starts,
+      lives,
+      order: new Int32Array(0),
+      durationMs: 0,
+    }
+  }
+
+  /*
+   * Work in chronological order without changing receipt order. Events are
+   * partitioned into connected interval groups. Inside a group one scale maps
+   * model offsets onto the teaching clock; choosing the smallest life/duration
+   * ratio guarantees that every model overlap remains a visual overlap.
+   * Disjoint groups retain the previous readable dwell and bounded gap.
+   */
+  const ordered = events.map((_event, index) => index)
+  ordered.sort((a, b) => modelStart(events[a]) - modelStart(events[b]) || a - b)
+
+  let cursor = 0
+  let orderedIndex = 0
+  while (orderedIndex < ordered.length) {
+    const groupBegin = orderedIndex
+    const firstIndex = ordered[groupBegin]
+    const groupModelStart = modelStart(events[firstIndex])
+    let groupModelEnd = groupModelStart + modelDuration(events[firstIndex])
+    orderedIndex++
+
+    while (orderedIndex < ordered.length) {
+      const nextIndex = ordered[orderedIndex]
+      const nextStart = modelStart(events[nextIndex])
+      const sameStart = Math.abs(nextStart - groupModelStart) <= SCHEDULE_EPSILON_MS
+      if (!sameStart && nextStart >= groupModelEnd - SCHEDULE_EPSILON_MS) break
+      groupModelEnd = Math.max(
+        groupModelEnd,
+        nextStart + modelDuration(events[nextIndex]),
+      )
+      orderedIndex++
+    }
+
+    let modelScale = Number.POSITIVE_INFINITY
+    for (let position = groupBegin; position < orderedIndex; position++) {
+      const eventIndex = ordered[position]
+      const duration = modelDuration(events[eventIndex])
+      if (duration > SCHEDULE_EPSILON_MS) {
+        modelScale = Math.min(modelScale, lives[eventIndex] / duration)
+      }
+    }
+    if (!Number.isFinite(modelScale)) modelScale = 0
+
+    let groupVisualEnd = cursor
+    for (let position = groupBegin; position < orderedIndex; position++) {
+      const eventIndex = ordered[position]
+      starts[eventIndex] =
+        cursor + (modelStart(events[eventIndex]) - groupModelStart) * modelScale
+      groupVisualEnd = Math.max(
+        groupVisualEnd,
+        starts[eventIndex] + lives[eventIndex],
+      )
+    }
+    cursor = groupVisualEnd
+
+    if (orderedIndex < ordered.length) {
+      const nextStart = modelStart(events[ordered[orderedIndex]])
+      const modelGap = Math.max(0, nextStart - groupModelEnd)
+      cursor += EVENT_DWELL_MS + Math.min(MAX_MODEL_GAP_BONUS_MS, modelGap * 0.28)
+    }
+  }
+
+  /*
+   * Dependencies are optional for legacy receipts. Resolve them recursively so
+   * a child may appear before its parent in receipt order. Cyclic edges are
+   * ignored at the back-edge rather than making the presentation diverge.
+   */
+  const eventById = new Map<string, number>()
+  for (let index = 0; index < events.length; index++) {
+    if (!eventById.has(events[index].id)) eventById.set(events[index].id, index)
+  }
+  const dependencyState = new Uint8Array(events.length)
+  const resolveDependencies = (eventIndex: number): void => {
+    if (dependencyState[eventIndex] === 2) return
+    if (dependencyState[eventIndex] === 1) return
+    dependencyState[eventIndex] = 1
+    for (const dependencyId of dependenciesFor(events[eventIndex])) {
+      const dependencyIndex = eventById.get(dependencyId)
+      if (
+        dependencyIndex === undefined ||
+        dependencyIndex === eventIndex ||
+        dependencyState[dependencyIndex] === 1
+      ) {
+        continue
+      }
+      resolveDependencies(dependencyIndex)
+      starts[eventIndex] = Math.max(
+        starts[eventIndex],
+        starts[dependencyIndex] + lives[dependencyIndex] + EVENT_DWELL_MS,
+      )
+    }
+    dependencyState[eventIndex] = 2
+  }
+  for (let index = 0; index < events.length; index++) resolveDependencies(index)
+
+  ordered.sort((a, b) => starts[a] - starts[b] || a - b)
+  let durationMs = 0
+  for (let index = 0; index < events.length; index++) {
+    durationMs = Math.max(durationMs, starts[index] + lives[index])
+  }
+  return {
+    starts,
+    lives,
+    order: Int32Array.from(ordered),
+    durationMs,
+  }
 }
 
 function normalizedRegion(event: TraceEvent): number {
@@ -249,9 +381,9 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   root.name = 'ticity:trace-flows'
 
   /*
-   * One large freight pod carries the current event. The old two-world-unit
-   * pod was only a few pixels wide from the overview camera and disappeared
-   * against the architectural network lines.
+   * One large freight pod carries each active event. Parallel branches share
+   * this bounded pool. The old two-world-unit pod was only a few pixels wide
+   * from the overview camera and disappeared against the network lines.
    */
   const geometry = new THREE.BoxGeometry(4.2, 2.7, 6.4)
   const material = new THREE.MeshBasicMaterial({
@@ -323,9 +455,11 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
   let eventRoutes = new Float32Array(0)
   let eventDistance = new Float32Array(0)
   let eventScheduled = new Uint8Array(0)
+  let eventOrder: Int32Array<ArrayBufferLike> = new Int32Array(0)
   let events: readonly TraceEvent[] = []
   let eventCount = 0
   let durationMs = 0
+  let terminalEventIndex = -1
   let freeCount = MAX_PARTICLES
   let activeCount = 0
   let dropped = 0
@@ -340,6 +474,8 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   let looping = !reducedMotion
+  const activeEventIds: string[] = []
+  const completedEventIds: string[] = []
   const playbackState = {
     phase: 'idle' as TracePlaybackPhase,
     currentIndex: -1,
@@ -354,6 +490,9 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     looping,
     iteration: 0,
     holdProgress: 0,
+    cursorMs: 0,
+    activeEventIds,
+    completedEventIds,
   }
 
   for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -474,26 +613,42 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
 
   function currentIndex(): number {
     if (eventCount === 0) return -1
-    let result = 0
-    while (result + 1 < eventCount && eventStarts[result + 1] <= clockMs) result++
+    let result = -1
+    for (let position = 0; position < eventOrder.length; position++) {
+      const eventIndex = eventOrder[position]
+      if (eventStarts[eventIndex] > clockMs + SCHEDULE_EPSILON_MS) break
+      result = eventIndex
+    }
     return result
   }
 
   function syncPlaybackState(): void {
     const index = currentIndex()
     const atEnd = eventCount > 0 && clockMs >= durationMs
-    const holdDuration = events[eventCount - 1]?.status === 'failed'
+    const holdDuration = events[terminalEventIndex]?.status === 'failed'
       ? FAILED_TRACE_LOOP_HOLD_MS
       : TRACE_LOOP_HOLD_MS
+    activeEventIds.length = 0
+    completedEventIds.length = 0
+    for (let position = 0; position < eventOrder.length; position++) {
+      const eventIndex = eventOrder[position]
+      const start = eventStarts[eventIndex]
+      if (start > clockMs + SCHEDULE_EPSILON_MS) break
+      if (clockMs + SCHEDULE_EPSILON_MS >= start + eventLife[eventIndex]) {
+        completedEventIds.push(events[eventIndex].id)
+      } else {
+        activeEventIds.push(events[eventIndex].id)
+      }
+    }
     playbackState.currentIndex = index
     playbackState.total = eventCount
     playbackState.event = index >= 0 ? events[index] : null
     playbackState.eventProgress = index < 0
       ? 0
       : clamp((clockMs - eventStarts[index]) / eventLife[index], 0, 1)
-    playbackState.overallProgress = eventCount === 0
+    playbackState.overallProgress = durationMs <= 0
       ? 0
-      : clamp((index + playbackState.eventProgress) / eventCount, 0, 1)
+      : clamp(clockMs / durationMs, 0, 1)
     playbackState.elapsedMs = Math.min(clockMs, durationMs)
     playbackState.durationMs = durationMs
     playbackState.atEnd = atEnd
@@ -502,6 +657,7 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     playbackState.holdProgress = atEnd && looping
       ? clamp(loopHoldMs / holdDuration, 0, 1)
       : 0
+    playbackState.cursorMs = clockMs
     playbackState.phase = eventCount === 0
       ? 'idle'
       : presentationPaused || playbackRate === 0
@@ -519,6 +675,8 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     clockMs = 0
     loopHoldMs = 0
     iteration = automatic ? iteration + 1 : eventCount > 0 ? 1 : 0
+    activeEventIds.length = 0
+    completedEventIds.length = 0
   }
 
   function updateGuide(eventIndex: number, eventProgress: number): void {
@@ -631,7 +789,18 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     const schedule = buildTracePresentationSchedule(events, eventDistance)
     eventStarts = schedule.starts
     eventLife = schedule.lives
+    eventOrder = schedule.order
     durationMs = schedule.durationMs
+    terminalEventIndex = -1
+    let terminalEnd = -1
+    for (let position = 0; position < eventOrder.length; position++) {
+      const eventIndex = eventOrder[position]
+      const end = eventStarts[eventIndex] + eventLife[eventIndex]
+      if (end >= terminalEnd) {
+        terminalEnd = end
+        terminalEventIndex = eventIndex
+      }
+    }
     syncPlaybackState()
     updateGuide(playbackState.currentIndex, playbackState.eventProgress)
   }
@@ -644,13 +813,20 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       clockMs = Math.min(durationMs, clockMs + deltaMs)
     } else if (eventCount > 0 && looping && effectiveRate > 0) {
       loopHoldMs += realDeltaMs
-      const holdDuration = events[eventCount - 1]?.status === 'failed'
+      const holdDuration = events[terminalEventIndex]?.status === 'failed'
         ? FAILED_TRACE_LOOP_HOLD_MS
         : TRACE_LOOP_HOLD_MS
       if (loopHoldMs >= holdDuration) restartIteration(true)
     }
-    for (let eventIndex = 0; eventIndex < eventCount; eventIndex++) {
-      if (!eventScheduled[eventIndex] && eventStarts[eventIndex] <= clockMs) spawn(eventIndex)
+    for (let position = 0; position < eventOrder.length; position++) {
+      const eventIndex = eventOrder[position]
+      if (eventStarts[eventIndex] > clockMs + SCHEDULE_EPSILON_MS) break
+      if (
+        !eventScheduled[eventIndex] &&
+        eventStarts[eventIndex] <= clockMs + SCHEDULE_EPSILON_MS
+      ) {
+        spawn(eventIndex)
+      }
     }
 
     activity.fill(0)
@@ -703,6 +879,11 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       return dropped
     },
     playback: playbackState,
+    get cursorMs(): number {
+      return clockMs
+    },
+    activeEventIds,
+    completedEventIds,
     activity,
     play,
     update,
@@ -721,11 +902,52 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
     },
     step(direction: -1 | 1): void {
       if (eventCount === 0) return
-      const from = playbackState.currentIndex < 0 ? 0 : playbackState.currentIndex
-      const target = clamp(from + direction, 0, eventCount - 1)
+      const current = playbackState.currentIndex
+      const currentStart = current < 0 ? -Infinity : eventStarts[current]
+      let target = current < 0 ? eventOrder[0] : current
+      if (direction > 0) {
+        for (let position = 0; position < eventOrder.length; position++) {
+          const candidate = eventOrder[position]
+          if (eventStarts[candidate] > currentStart + SCHEDULE_EPSILON_MS) {
+            target = candidate
+            /*
+             * One step selects a complete parallel start group. Use its final
+             * receipt-ordered member as the primary event; activeEventIds
+             * exposes every sibling in that group.
+             */
+            while (
+              position + 1 < eventOrder.length &&
+              Math.abs(eventStarts[eventOrder[position + 1]] - eventStarts[target]) <=
+                SCHEDULE_EPSILON_MS
+            ) {
+              target = eventOrder[++position]
+            }
+            break
+          }
+        }
+      } else {
+        for (let position = eventOrder.length - 1; position >= 0; position--) {
+          const candidate = eventOrder[position]
+          if (eventStarts[candidate] < currentStart - SCHEDULE_EPSILON_MS) {
+            target = candidate
+            break
+          }
+        }
+      }
+      const targetStart = eventStarts[target]
+      let targetGroupLife = eventLife[target]
+      for (let position = 0; position < eventOrder.length; position++) {
+        const candidate = eventOrder[position]
+        if (
+          Math.abs(eventStarts[candidate] - targetStart) <=
+          SCHEDULE_EPSILON_MS
+        ) {
+          targetGroupLife = Math.min(targetGroupLife, eventLife[candidate])
+        }
+      }
       presentationPaused = true
       restartIteration(false)
-      clockMs = eventStarts[target] + eventLife[target] * 0.55
+      clockMs = targetStart + targetGroupLife * 0.55
       update(0)
     },
     replay(): void {
@@ -749,6 +971,8 @@ export function createTraceFlows(city: TiDBSceneGraph): TraceFlowController {
       events = []
       eventCount = 0
       durationMs = 0
+      terminalEventIndex = -1
+      eventOrder = new Int32Array(0)
       clockMs = 0
       loopHoldMs = 0
       iteration = 0

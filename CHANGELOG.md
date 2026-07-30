@@ -4,6 +4,19 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [0.4.0-alpha.1] — 2026-07-31
+
+- Introduce the model-2 causal event graph with immutable post-event snapshots
+  and typed state deltas.
+- Model a two-Region pessimistic 2PC transaction with different Region
+  leaders, leader-memory pessimistic locks, parallel prewrite branches,
+  independent 2-of-3 Raft quorum/apply paths, conceptual MVCC column families,
+  and background secondary cleanup after the client response.
+- Preserve overlapping causal branches on the renderer teaching clock and
+  expose stable active/completed event IDs without re-executing a receipt.
+- Document and test the TiDB v8.5 model boundary, deterministic DAG,
+  transaction/Raft separation, immutable projections, and privacy invariants.
+
 ## [0.3.4] — 2026-07-30
 
 - Make English the default GitHub project README while preserving the complete

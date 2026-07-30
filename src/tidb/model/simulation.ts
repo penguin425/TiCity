@@ -38,8 +38,14 @@ import type {
   TraceEventStatus,
   TraceMetadataValue,
   TraceOutcome,
+  TracePath,
+  TraceRegionSnapshot,
   TraceReceipt,
   TraceRequest,
+  TraceStateDelta,
+  TraceStateSnapshot,
+  TraceTransactionSnapshot,
+  TraceTransactionStage,
   TransactionState,
 } from './types'
 
@@ -68,6 +74,27 @@ interface PendingTiFlashVersion {
   versions: number
 }
 
+interface DetailedRegionProjection {
+  readonly region: RegionState
+  proposedIndex: number | null
+  persistedStoreIds: StoreId[]
+  acknowledgements: number
+  pessimisticLock: {
+    transactionId: string
+    leaderStoreId: StoreId
+    storage: 'leader_memory'
+    replicated: false
+  } | null
+  mvcc: {
+    defaultCf: 'empty' | 'value'
+    lockCf: 'empty' | 'prewrite'
+    writeCf: 'empty' | 'commit'
+    startTs: number | null
+    commitTs: number | null
+    primary: boolean
+  }
+}
+
 interface EventOptions {
   durationMs?: number
   status?: TraceEventStatus
@@ -75,6 +102,11 @@ interface EventOptions {
   target?: string
   regionId?: number
   transactionId?: string
+  dependsOn?: readonly string[]
+  path?: TracePath
+  branchId?: string
+  snapshot?: TraceStateSnapshot
+  deltas?: readonly TraceStateDelta[]
   metadata?: Readonly<Record<string, TraceMetadataValue>>
 }
 
@@ -93,9 +125,42 @@ function freezeAnalysis(analysis: SqlAnalysis): SqlAnalysis {
   })
 }
 
+function freezeTraceDelta(delta: TraceStateDelta): TraceStateDelta {
+  if (delta.kind === 'raft_persist') {
+    return Object.freeze({
+      ...delta,
+      storeIds: Object.freeze([...delta.storeIds]),
+    })
+  }
+  return Object.freeze({ ...delta })
+}
+
+function freezeTraceSnapshot(snapshot: TraceStateSnapshot): TraceStateSnapshot {
+  return Object.freeze({
+    ...snapshot,
+    transaction: snapshot.transaction === null
+      ? null
+      : Object.freeze({
+        ...snapshot.transaction,
+        regionIds: Object.freeze([...snapshot.transaction.regionIds]),
+      }),
+    regions: Object.freeze(snapshot.regions.map((region) => Object.freeze({
+      ...region,
+      persistedStoreIds: Object.freeze([...region.persistedStoreIds]),
+      peers: Object.freeze(region.peers.map((peer) => Object.freeze({ ...peer }))),
+      pessimisticLock: region.pessimisticLock === null
+        ? null
+        : Object.freeze({ ...region.pessimisticLock }),
+      mvcc: Object.freeze({ ...region.mvcc }),
+    }))),
+  })
+}
+
 class TraceBuilder {
   readonly events: TraceEvent[] = []
   private cursorMs = 0
+  private lastEventId: string | null = null
+  private readonly eventById = new Map<string, TraceEvent>()
 
   constructor(
     private readonly receiptId: string,
@@ -108,11 +173,24 @@ class TraceBuilder {
     label: string,
     detail: string,
     options: EventOptions = {},
-  ): void {
+  ): TraceEvent {
     const durationMs = options.durationMs ?? Math.max(8, this.networkLatencyMs)
+    const dependsOn = options.dependsOn === undefined
+      ? this.lastEventId === null ? [] : [this.lastEventId]
+      : [...options.dependsOn]
+    const dependencyEndMs = dependsOn.reduce((latest, dependencyId) => {
+      const dependency = this.eventById.get(dependencyId)
+      if (!dependency) {
+        throw new Error(`Unknown trace dependency: ${dependencyId}`)
+      }
+      return Math.max(latest, dependency.atMs + dependency.durationMs)
+    }, 0)
+    const atMs = options.dependsOn === undefined
+      ? this.cursorMs
+      : dependencyEndMs
     const event: TraceEvent = Object.freeze({
       id: `${this.receiptId}-event-${this.events.length + 1}`,
-      atMs: this.cursorMs,
+      atMs,
       durationMs,
       domain,
       kind,
@@ -123,10 +201,20 @@ class TraceBuilder {
       ...(options.target ? { target: options.target } : {}),
       ...(options.regionId !== undefined ? { regionId: options.regionId } : {}),
       ...(options.transactionId ? { transactionId: options.transactionId } : {}),
+      dependsOn: Object.freeze(dependsOn),
+      path: options.path ?? 'critical',
+      ...(options.branchId ? { branchId: options.branchId } : {}),
+      ...(options.snapshot ? { snapshot: options.snapshot } : {}),
+      ...(options.deltas
+        ? { deltas: Object.freeze(options.deltas.map(freezeTraceDelta)) }
+        : {}),
       metadata: Object.freeze({ ...(options.metadata ?? {}) }),
     })
     this.events.push(event)
-    this.cursorMs += durationMs
+    this.eventById.set(event.id, event)
+    this.lastEventId = event.id
+    this.cursorMs = Math.max(this.cursorMs, atMs + durationMs)
+    return event
   }
 
   get durationMs(): number {
@@ -469,7 +557,11 @@ export function createTiDBSimulation(
     advanceGc()
   }
 
-  function ensureLeader(region: RegionState, builder?: TraceBuilder): boolean {
+  function ensureLeader(
+    region: RegionState,
+    builder?: TraceBuilder,
+    path: TracePath = 'critical',
+  ): boolean {
     const eligibleVoters = region.peers.filter((peer) =>
       peer.healthy && peer.matchIndex >= region.commitIndex,
     )
@@ -500,6 +592,7 @@ export function createTiDBSimulation(
         source: previous,
         target: replacement.storeId,
         regionId: region.id,
+        path,
         metadata: { term: region.term, quorum: 2 },
       },
     )
@@ -511,8 +604,9 @@ export function createTiDBSimulation(
     operation: string,
     transactionId: string,
     builder: TraceBuilder,
+    path: TracePath = 'critical',
   ): boolean {
-    if (!ensureLeader(region, builder)) {
+    if (!ensureLeader(region, builder, path)) {
       builder.add(
         'raft',
         'quorum_unavailable',
@@ -522,6 +616,7 @@ export function createTiDBSimulation(
           status: 'failed',
           regionId: region.id,
           transactionId,
+          path,
           metadata: { term: region.term },
         },
       )
@@ -545,6 +640,7 @@ export function createTiDBSimulation(
         target: liveFollower?.storeId ?? region.leaderStoreId,
         regionId: region.id,
         transactionId,
+        path,
         metadata: { term: region.term, index: nextIndex, operation },
       },
     )
@@ -570,6 +666,7 @@ export function createTiDBSimulation(
         target: region.leaderStoreId,
         regionId: region.id,
         transactionId,
+        path,
         metadata: {
           term: region.term,
           index: nextIndex,
@@ -1002,6 +1099,7 @@ export function createTiDBSimulation(
     transaction: TransactionState,
     tidbId: string,
     builder: TraceBuilder,
+    path: TracePath = 'critical',
   ): boolean {
     builder.add(
       'kv',
@@ -1013,10 +1111,909 @@ export function createTiDBSimulation(
         target: region.leaderStoreId,
         regionId: region.id,
         transactionId: transaction.id,
+        path,
         metadata: { operation },
       },
     )
-    return replicateRaft(region, operation, transaction.id, builder)
+    return replicateRaft(region, operation, transaction.id, builder, path)
+  }
+
+  /**
+   * The first model-2 vertical slice. Unlike the compact write tracer below,
+   * this path records a causal event graph and a post-event state projection
+   * for every step. The projections are deliberately small: two representative
+   * Regions, their three voters, and conceptual MVCC column-family state.
+   */
+  function traceDetailedCrossRegionTransaction(
+    id: string,
+    analysis: SqlAnalysis,
+    regions: readonly [RegionState, RegionState],
+    builder: TraceBuilder,
+    warnings: string[],
+  ): TraceReceipt {
+    const proxyId = state.topology.tiproxy[state.metrics.statements % 2].id
+    const tidbId = state.topology.tidb[state.metrics.statements % 3].id
+    const transactionId = `txn-${++transactionCounter}`
+    let transactionProjection: TraceTransactionSnapshot | null = null
+    const projectedRegions: DetailedRegionProjection[] = regions.map((region, index) => ({
+      region,
+      proposedIndex: null,
+      persistedStoreIds: [],
+      acknowledgements: 0,
+      pessimisticLock: null,
+      mvcc: {
+        defaultCf: 'empty',
+        lockCf: 'empty',
+        writeCf: 'empty',
+        startTs: null,
+        commitTs: null,
+        primary: index === 0,
+      },
+    }))
+
+    function projection(): TraceStateSnapshot {
+      const transaction = transactionProjection === null
+        ? null
+        : {
+          ...transactionProjection,
+          regionIds: [...transactionProjection.regionIds],
+        }
+      const regionSnapshots: TraceRegionSnapshot[] = projectedRegions.map((projected) => ({
+        regionId: projected.region.id,
+        leaderStoreId: projected.region.leaderStoreId,
+        term: projected.region.term,
+        proposedIndex: projected.proposedIndex,
+        persistedStoreIds: [...projected.persistedStoreIds],
+        acknowledgements: projected.acknowledgements,
+        quorum: 2,
+        commitIndex: projected.region.commitIndex,
+        appliedIndex: projected.region.appliedIndex,
+        peers: projected.region.peers.map((peer) => ({
+          storeId: peer.storeId,
+          raftRole: peer.raftRole,
+          matchIndex: peer.matchIndex,
+          appliedIndex: peer.appliedIndex,
+          healthy: peer.healthy,
+        })),
+        pessimisticLock: projected.pessimisticLock === null
+          ? null
+          : { ...projected.pessimisticLock },
+        mvcc: { ...projected.mvcc },
+      }))
+      return freezeTraceSnapshot({
+        modelVersion: state.modelVersion,
+        tsoLastAllocated: state.tso.lastAllocated,
+        transaction,
+        regions: regionSnapshots,
+      })
+    }
+
+    function addDetailedEvent(
+      domain: TraceDomain,
+      kind: string,
+      label: string,
+      detail: string,
+      options: EventOptions = {},
+    ): TraceEvent {
+      return builder.add(domain, kind, label, detail, {
+        ...options,
+        path: options.path ?? 'critical',
+        snapshot: projection(),
+        deltas: options.deltas ?? [],
+      })
+    }
+
+    const submit = addDetailedEvent(
+      'client',
+      'submit',
+      'Client submitted a modeled transaction',
+      'The browser keeps SQL text private and sends only its classified teaching operation into the model.',
+      {
+        source: 'client',
+        target: proxyId,
+      },
+    )
+    const route = addDetailedEvent(
+      'sql',
+      'route',
+      'TiProxy routed the session',
+      `${proxyId} selected stateless ${tidbId}.`,
+      {
+        source: proxyId,
+        target: tidbId,
+        dependsOn: [submit.id],
+      },
+    )
+    const optimize = addDetailedEvent(
+      'sql',
+      'parse_optimize',
+      'Build the modeled mutation plan',
+      'TiDB identified two representative key mutations without retaining SQL text or row values.',
+      {
+        source: tidbId,
+        target: tidbId,
+        dependsOn: [route.id],
+        metadata: {
+          statementKind: analysis.statementKind,
+          accessPath: analysis.accessPath,
+          mutationCount: 2,
+        },
+      },
+    )
+
+    const startTs = allocateTs()
+    transactionProjection = {
+      id: transactionId,
+      mode: 'pessimistic',
+      protocol: '2pc',
+      stage: 'active',
+      startTs,
+      commitTs: null,
+      regionIds: regions.map((region) => region.id),
+      primaryRegionId: regions[0].id,
+      clientResponded: false,
+    }
+    const transaction: TransactionState = {
+      id: transactionId,
+      mode: 'pessimistic',
+      protocol: '2pc',
+      startTs,
+      commitTs: null,
+      regionIds: regions.map((region) => region.id),
+      primaryRegionId: regions[0].id,
+      phase: 'active',
+      conflict: false,
+    }
+    state.transactions.push(transaction)
+    trimTransactions()
+    const start = addDetailedEvent(
+      'tso',
+      'start_ts',
+      'PD allocated start_ts',
+      `The explicit pessimistic transaction starts at logical timestamp ${startTs}.`,
+      {
+        source: tidbId,
+        target: 'pd-1',
+        transactionId,
+        dependsOn: [optimize.id],
+        deltas: [{
+          kind: 'tso_allocate',
+          purpose: 'start_ts',
+          timestamp: startTs,
+        }],
+        metadata: { startTs },
+      },
+    )
+    const protocol = addDetailedEvent(
+      'txn2pc',
+      'protocol_selection',
+      'Select classic two-phase commit',
+      'Two Regions participate in transaction 2PC; each Region will use its own independent Raft group.',
+      {
+        source: tidbId,
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        transactionId,
+        dependsOn: [start.id],
+        metadata: {
+          requested: '2pc',
+          selected: '2pc',
+          regionCount: 2,
+          distinctLeaders: regions[0].leaderStoreId !== regions[1].leaderStoreId,
+        },
+      },
+    )
+
+    let previousLockEvent = protocol
+    for (const projected of projectedRegions) {
+      const raftIndexBefore = projected.region.commitIndex
+      const previousStage = transactionProjection.stage
+      transactionProjection.stage = 'locking'
+      projected.pessimisticLock = {
+        transactionId,
+        leaderStoreId: projected.region.leaderStoreId,
+        storage: 'leader_memory',
+        replicated: false,
+      }
+      const lock = addDetailedEvent(
+        'txn2pc',
+        'pessimistic_lock',
+        'Acquire leader-local pessimistic lock',
+        `Region ${projected.region.id}'s leader keeps the lock in memory; no Raft entry is proposed.`,
+        {
+          source: tidbId,
+          target: projected.region.leaderStoreId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [previousLockEvent.id],
+          branchId: `region-${projected.region.id}`,
+          deltas: [
+            ...(previousStage === 'locking'
+              ? []
+              : [{
+                kind: 'transaction_stage' as const,
+                from: previousStage,
+                to: 'locking' as const,
+              }]),
+            {
+              kind: 'pessimistic_lock',
+              action: 'acquire',
+              regionId: projected.region.id,
+              leaderStoreId: projected.region.leaderStoreId,
+              storage: 'leader_memory',
+            },
+          ],
+          metadata: {
+            storage: 'leader_memory',
+            replicated: false,
+            raftIndexBefore,
+            raftIndexAfter: projected.region.commitIndex,
+          },
+        },
+      )
+      previousLockEvent = lock
+    }
+
+    const commitRequested = addDetailedEvent(
+      'txn2pc',
+      'commit_requested',
+      'COMMIT enters the 2PC coordinator',
+      'TiDB chooses the first mutation as primary and dispatches both Region prewrites.',
+      {
+        source: tidbId,
+        target: regions[0].leaderStoreId,
+        regionId: regions[0].id,
+        transactionId,
+        dependsOn: [previousLockEvent.id],
+        metadata: {
+          primaryRegionId: regions[0].id,
+          secondaryRegionId: regions[1].id,
+        },
+      },
+    )
+
+    const previousStage = transactionProjection.stage
+    transactionProjection.stage = 'prewriting'
+    transaction.phase = 'prewriting'
+    const branches = projectedRegions.map((projected, index) => {
+      const role = index === 0 ? 'primary' : 'secondary'
+      const branchId = `region-${projected.region.id}`
+      const prewrite = addDetailedEvent(
+        'txn2pc',
+        'prewrite',
+        `Dispatch ${role} prewrite`,
+        `TiDB sends the ${role} mutation to Region ${projected.region.id}.`,
+        {
+          source: tidbId,
+          target: projected.region.leaderStoreId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [commitRequested.id],
+          branchId,
+          deltas: index === 0
+            ? [{
+              kind: 'transaction_stage',
+              from: previousStage,
+              to: 'prewriting',
+            }]
+            : [],
+          metadata: {
+            primary: index === 0,
+            primaryRegionId: regions[0].id,
+            startTs,
+          },
+        },
+      )
+      return {
+        projected,
+        role,
+        branchId,
+        operation: 'prewrite' as const,
+        index: projected.region.commitIndex + 1,
+        terminal: prewrite,
+      }
+    })
+
+    for (const branch of branches) {
+      branch.projected.proposedIndex = branch.index
+      branch.projected.persistedStoreIds = []
+      branch.projected.acknowledgements = 0
+      state.metrics.raftEntries++
+      branch.terminal = addDetailedEvent(
+        'raft',
+        'raft_propose',
+        'Propose prewrite to Region Raft',
+        `Region ${branch.projected.region.id}'s leader proposes index ${branch.index}.`,
+        {
+          source: branch.projected.region.leaderStoreId,
+          target: branch.projected.region.leaderStoreId,
+          regionId: branch.projected.region.id,
+          transactionId,
+          dependsOn: [branch.terminal.id],
+          branchId: branch.branchId,
+          deltas: [{
+            kind: 'raft_propose',
+            regionId: branch.projected.region.id,
+            index: branch.index,
+            operation: 'prewrite',
+          }],
+          metadata: {
+            term: branch.projected.region.term,
+            index: branch.index,
+            operation: 'prewrite',
+          },
+        },
+      )
+    }
+
+    for (const branch of branches) {
+      const region = branch.projected.region
+      const leader = region.peers.find((peer) =>
+        peer.storeId === region.leaderStoreId && peer.healthy,
+      )
+      const follower = region.peers.find((peer) =>
+        peer.storeId !== region.leaderStoreId && peer.healthy,
+      )
+      if (!leader || !follower) {
+        throw new Error(`Detailed scenario Region ${region.id} unexpectedly lost quorum.`)
+      }
+      leader.matchIndex = branch.index
+      follower.matchIndex = branch.index
+      branch.projected.persistedStoreIds = [leader.storeId, follower.storeId]
+      branch.projected.acknowledgements = 2
+      branch.terminal = addDetailedEvent(
+        'raft',
+        'raft_persist',
+        'Persist Raft entry on two voters',
+        `The leader and one follower persisted Region ${region.id} index ${branch.index}.`,
+        {
+          source: leader.storeId,
+          target: follower.storeId,
+          regionId: region.id,
+          transactionId,
+          dependsOn: [branch.terminal.id],
+          branchId: branch.branchId,
+          deltas: [{
+            kind: 'raft_persist',
+            regionId: region.id,
+            index: branch.index,
+            storeIds: [leader.storeId, follower.storeId],
+          }],
+          metadata: {
+            index: branch.index,
+            acknowledgements: 2,
+            voters: 3,
+          },
+        },
+      )
+    }
+
+    for (const branch of branches) {
+      const region = branch.projected.region
+      region.commitIndex = branch.index
+      branch.terminal = addDetailedEvent(
+        'raft',
+        'quorum_commit',
+        'Raft quorum commits prewrite',
+        `Exactly 2 of 3 voters form the modeled quorum for Region ${region.id}.`,
+        {
+          source: branch.projected.persistedStoreIds[1],
+          target: region.leaderStoreId,
+          regionId: region.id,
+          transactionId,
+          dependsOn: [branch.terminal.id],
+          branchId: branch.branchId,
+          deltas: [{
+            kind: 'raft_commit',
+            regionId: region.id,
+            index: branch.index,
+            acknowledgements: 2,
+            quorum: 2,
+          }],
+          metadata: {
+            index: branch.index,
+            acknowledgements: 2,
+            voters: 3,
+            quorum: 2,
+            operation: 'prewrite',
+          },
+        },
+      )
+    }
+
+    for (const branch of branches) {
+      const region = branch.projected.region
+      region.appliedIndex = branch.index
+      for (const peer of region.peers) {
+        if (branch.projected.persistedStoreIds.includes(peer.storeId)) {
+          peer.appliedIndex = branch.index
+        }
+      }
+      branch.terminal = addDetailedEvent(
+        'raft',
+        'raft_apply',
+        'Apply committed prewrite',
+        `Region ${region.id} applies committed index ${branch.index} to its KV state machine.`,
+        {
+          source: region.leaderStoreId,
+          target: region.leaderStoreId,
+          regionId: region.id,
+          transactionId,
+          dependsOn: [branch.terminal.id],
+          branchId: branch.branchId,
+          deltas: [{
+            kind: 'raft_apply',
+            regionId: region.id,
+            index: branch.index,
+          }],
+          metadata: {
+            index: branch.index,
+            commitIndex: region.commitIndex,
+            appliedIndex: region.appliedIndex,
+            operation: 'prewrite',
+          },
+        },
+      )
+    }
+
+    for (const branch of branches) {
+      const projected = branch.projected
+      projected.pessimisticLock = null
+      projected.mvcc.defaultCf = 'value'
+      projected.mvcc.lockCf = 'prewrite'
+      projected.mvcc.startTs = startTs
+      branch.terminal = addDetailedEvent(
+        'kv',
+        'mvcc_prewrite',
+        'Materialize MVCC prewrite',
+        `Region ${projected.region.id} writes the tentative value to default CF and the durable transaction lock to lock CF.`,
+        {
+          source: projected.region.leaderStoreId,
+          target: projected.region.leaderStoreId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [branch.terminal.id],
+          branchId: branch.branchId,
+          deltas: [
+            {
+              kind: 'pessimistic_lock',
+              action: 'release',
+              regionId: projected.region.id,
+              leaderStoreId: projected.region.leaderStoreId,
+              storage: 'leader_memory',
+            },
+            {
+              kind: 'mvcc',
+              regionId: projected.region.id,
+              cf: 'default',
+              action: 'put',
+              timestamp: startTs,
+            },
+            {
+              kind: 'mvcc',
+              regionId: projected.region.id,
+              cf: 'lock',
+              action: 'put',
+              timestamp: startTs,
+            },
+          ],
+          metadata: {
+            defaultCf: 'value',
+            lockCf: 'prewrite',
+            writeCf: 'empty',
+            primary: projected.mvcc.primary,
+            startTs,
+          },
+        },
+      )
+    }
+
+    const prewriteStage = transactionProjection.stage
+    transactionProjection.stage = 'prewritten'
+    const allPrewritten = addDetailedEvent(
+      'txn2pc',
+      'all_prewrite_complete',
+      'Both Region prewrites completed',
+      'The 2PC coordinator joins both independent Raft branches before requesting commit_ts.',
+      {
+        source: regions[1].leaderStoreId,
+        target: tidbId,
+        transactionId,
+        dependsOn: branches.map((branch) => branch.terminal.id),
+        deltas: [{
+          kind: 'transaction_stage',
+          from: prewriteStage,
+          to: 'prewritten',
+        }],
+        metadata: {
+          prewrittenRegions: 2,
+          primaryRegionId: regions[0].id,
+        },
+      },
+    )
+
+    const commitTs = allocateTs()
+    const prewrittenStage = transactionProjection.stage
+    transactionProjection.stage = 'committing_primary'
+    transactionProjection.commitTs = commitTs
+    transaction.phase = 'committing'
+    const commitTimestamp = addDetailedEvent(
+      'tso',
+      'commit_ts',
+      'PD allocated commit_ts',
+      `Only after both prewrites, PD allocates logical commit timestamp ${commitTs}.`,
+      {
+        source: tidbId,
+        target: 'pd-1',
+        transactionId,
+        dependsOn: [allPrewritten.id],
+        deltas: [
+          {
+            kind: 'tso_allocate',
+            purpose: 'commit_ts',
+            timestamp: commitTs,
+          },
+          {
+            kind: 'transaction_stage',
+            from: prewrittenStage,
+            to: 'committing_primary',
+          },
+        ],
+        metadata: { startTs, commitTs, prewrittenRegions: 2 },
+      },
+    )
+
+    function appendSerialRaftOperation(
+      projected: DetailedRegionProjection,
+      operation: 'commit_primary' | 'commit_secondary',
+      parent: TraceEvent,
+      path: TracePath,
+    ): TraceEvent {
+      const branchId = `region-${projected.region.id}`
+      const index = projected.region.commitIndex + 1
+      projected.proposedIndex = index
+      projected.persistedStoreIds = []
+      projected.acknowledgements = 0
+      state.metrics.raftEntries++
+      let terminal = addDetailedEvent(
+        'raft',
+        'raft_propose',
+        `Propose ${operation.replace('_', ' ')}`,
+        `Region ${projected.region.id}'s leader proposes index ${index}.`,
+        {
+          source: projected.region.leaderStoreId,
+          target: projected.region.leaderStoreId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [parent.id],
+          branchId,
+          path,
+          deltas: [{
+            kind: 'raft_propose',
+            regionId: projected.region.id,
+            index,
+            operation,
+          }],
+          metadata: { index, operation, term: projected.region.term },
+        },
+      )
+      const leader = projected.region.peers.find((peer) =>
+        peer.storeId === projected.region.leaderStoreId && peer.healthy,
+      )
+      const follower = projected.region.peers.find((peer) =>
+        peer.storeId !== projected.region.leaderStoreId && peer.healthy,
+      )
+      if (!leader || !follower) {
+        throw new Error(`Detailed scenario Region ${projected.region.id} unexpectedly lost quorum.`)
+      }
+      leader.matchIndex = index
+      follower.matchIndex = index
+      projected.persistedStoreIds = [leader.storeId, follower.storeId]
+      projected.acknowledgements = 2
+      terminal = addDetailedEvent(
+        'raft',
+        'raft_persist',
+        `Persist ${operation.replace('_', ' ')}`,
+        `Two voters persisted Region ${projected.region.id} index ${index}.`,
+        {
+          source: leader.storeId,
+          target: follower.storeId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [terminal.id],
+          branchId,
+          path,
+          deltas: [{
+            kind: 'raft_persist',
+            regionId: projected.region.id,
+            index,
+            storeIds: [leader.storeId, follower.storeId],
+          }],
+          metadata: { index, operation, acknowledgements: 2, voters: 3 },
+        },
+      )
+      projected.region.commitIndex = index
+      terminal = addDetailedEvent(
+        'raft',
+        'quorum_commit',
+        `Quorum commits ${operation.replace('_', ' ')}`,
+        `Exactly 2 of 3 voters commit Region ${projected.region.id} index ${index}.`,
+        {
+          source: follower.storeId,
+          target: leader.storeId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [terminal.id],
+          branchId,
+          path,
+          deltas: [{
+            kind: 'raft_commit',
+            regionId: projected.region.id,
+            index,
+            acknowledgements: 2,
+            quorum: 2,
+          }],
+          metadata: {
+            index,
+            operation,
+            acknowledgements: 2,
+            voters: 3,
+            quorum: 2,
+          },
+        },
+      )
+      projected.region.appliedIndex = index
+      for (const peer of projected.region.peers) {
+        if (projected.persistedStoreIds.includes(peer.storeId)) {
+          peer.appliedIndex = index
+        }
+      }
+      return addDetailedEvent(
+        'raft',
+        'raft_apply',
+        `Apply ${operation.replace('_', ' ')}`,
+        `Region ${projected.region.id} applies committed index ${index}.`,
+        {
+          source: leader.storeId,
+          target: leader.storeId,
+          regionId: projected.region.id,
+          transactionId,
+          dependsOn: [terminal.id],
+          branchId,
+          path,
+          deltas: [{
+            kind: 'raft_apply',
+            regionId: projected.region.id,
+            index,
+          }],
+          metadata: {
+            index,
+            operation,
+            commitIndex: projected.region.commitIndex,
+            appliedIndex: projected.region.appliedIndex,
+          },
+        },
+      )
+    }
+
+    const primary = projectedRegions[0]
+    const primaryDispatch = addDetailedEvent(
+      'txn2pc',
+      'commit_primary',
+      'Commit the primary',
+      `The primary decision is sent to Region ${primary.region.id} first.`,
+      {
+        source: tidbId,
+        target: primary.region.leaderStoreId,
+        regionId: primary.region.id,
+        transactionId,
+        dependsOn: [commitTimestamp.id],
+        branchId: `region-${primary.region.id}`,
+        metadata: { commitTs, primary: true },
+      },
+    )
+    const primaryApplied = appendSerialRaftOperation(
+      primary,
+      'commit_primary',
+      primaryDispatch,
+      'critical',
+    )
+    primary.mvcc.lockCf = 'empty'
+    primary.mvcc.writeCf = 'commit'
+    primary.mvcc.commitTs = commitTs
+    transaction.phase = 'committed'
+    transaction.commitTs = commitTs
+    const primaryCommitted = addDetailedEvent(
+      'kv',
+      'mvcc_primary_commit',
+      'Publish the primary commit record',
+      `Region ${primary.region.id} removes the lock-CF entry and writes the commit record to write CF.`,
+      {
+        source: primary.region.leaderStoreId,
+        target: tidbId,
+        regionId: primary.region.id,
+        transactionId,
+        dependsOn: [primaryApplied.id],
+        branchId: `region-${primary.region.id}`,
+        deltas: [
+          {
+            kind: 'mvcc',
+            regionId: primary.region.id,
+            cf: 'lock',
+            action: 'delete',
+            timestamp: startTs,
+          },
+          {
+            kind: 'mvcc',
+            regionId: primary.region.id,
+            cf: 'write',
+            action: 'put',
+            timestamp: commitTs,
+          },
+        ],
+        metadata: {
+          defaultCf: 'value',
+          lockCf: 'empty',
+          writeCf: 'commit',
+          primary: true,
+          startTs,
+          commitTs,
+        },
+      },
+    )
+
+    const primaryStage = transactionProjection.stage
+    transactionProjection.stage = 'client_acknowledged'
+    transactionProjection.clientResponded = true
+    const response = addDetailedEvent(
+      'return',
+      'complete',
+      'Primary decision acknowledged to client',
+      'The transaction is committed once the primary decision is durable; secondary cleanup continues in the background.',
+      {
+        source: tidbId,
+        target: 'client',
+        transactionId,
+        dependsOn: [primaryCommitted.id],
+        deltas: [
+          {
+            kind: 'transaction_stage',
+            from: primaryStage,
+            to: 'client_acknowledged',
+          },
+          {
+            kind: 'client_response',
+            committed: true,
+          },
+        ],
+        metadata: { commitTs, secondaryCleanupPending: true },
+      },
+    )
+
+    const secondary = projectedRegions[1]
+    const responseStage = transactionProjection.stage
+    transactionProjection.stage = 'committing_secondary'
+    const secondaryDispatch = addDetailedEvent(
+      'txn2pc',
+      'commit_secondary',
+      'Resolve the secondary after response',
+      `Region ${secondary.region.id}'s secondary lock is committed off the client critical path.`,
+      {
+        source: tidbId,
+        target: secondary.region.leaderStoreId,
+        regionId: secondary.region.id,
+        transactionId,
+        dependsOn: [response.id],
+        branchId: `region-${secondary.region.id}`,
+        path: 'background',
+        deltas: [{
+          kind: 'transaction_stage',
+          from: responseStage,
+          to: 'committing_secondary',
+        }],
+        metadata: {
+          commitTs,
+          primary: false,
+          clientAlreadyResponded: true,
+        },
+      },
+    )
+    const secondaryApplied = appendSerialRaftOperation(
+      secondary,
+      'commit_secondary',
+      secondaryDispatch,
+      'background',
+    )
+    secondary.mvcc.lockCf = 'empty'
+    secondary.mvcc.writeCf = 'commit'
+    secondary.mvcc.commitTs = commitTs
+    const secondaryCommitted = addDetailedEvent(
+      'kv',
+      'mvcc_secondary_commit',
+      'Publish the secondary commit record',
+      `Region ${secondary.region.id} removes its lock-CF entry and writes the same commit decision to write CF.`,
+      {
+        source: secondary.region.leaderStoreId,
+        target: secondary.region.leaderStoreId,
+        regionId: secondary.region.id,
+        transactionId,
+        dependsOn: [secondaryApplied.id],
+        branchId: `region-${secondary.region.id}`,
+        path: 'background',
+        deltas: [
+          {
+            kind: 'mvcc',
+            regionId: secondary.region.id,
+            cf: 'lock',
+            action: 'delete',
+            timestamp: startTs,
+          },
+          {
+            kind: 'mvcc',
+            regionId: secondary.region.id,
+            cf: 'write',
+            action: 'put',
+            timestamp: commitTs,
+          },
+        ],
+        metadata: {
+          defaultCf: 'value',
+          lockCf: 'empty',
+          writeCf: 'commit',
+          primary: false,
+          startTs,
+          commitTs,
+        },
+      },
+    )
+    const cleanupStage = transactionProjection.stage
+    transactionProjection.stage = 'complete'
+    addDetailedEvent(
+      'txn2pc',
+      'secondary_cleanup_complete',
+      'Secondary cleanup complete',
+      'Both Regions now expose commit records and retain no modeled transaction locks.',
+      {
+        source: secondary.region.leaderStoreId,
+        target: tidbId,
+        regionId: secondary.region.id,
+        transactionId,
+        dependsOn: [secondaryCommitted.id],
+        branchId: `region-${secondary.region.id}`,
+        path: 'background',
+        deltas: [{
+          kind: 'transaction_stage',
+          from: cleanupStage,
+          to: 'complete',
+        }],
+        metadata: {
+          committedRegions: 2,
+          remainingLocks: 0,
+          clientAlreadyResponded: true,
+        },
+      },
+    )
+
+    state.metrics.statements++
+    state.metrics.writes++
+    state.metrics.commits++
+    for (const region of regions) {
+      region.sizeMiB += 0.05
+      region.hotScore += 2
+    }
+    state.gc.obsoleteVersions += regions.length
+    advanceGc()
+    return recordReceipt(
+      id,
+      'cross-region-transaction',
+      analysis,
+      startTs,
+      commitTs,
+      'committed',
+      '2pc',
+      builder,
+      warnings,
+    )
   }
 
   function traceWrite(
@@ -1114,25 +2111,13 @@ export function createTiDBSimulation(
 
     if (transaction.mode === 'pessimistic') {
       for (const region of regions) {
-        builder.add(
-          'txn2pc',
-          'pessimistic_lock',
-          'Acquire pessimistic lock',
-          `Transaction ${transaction.id} locks its key in Region ${region.id}.`,
-          {
-            source: tidbId,
-            target: region.leaderStoreId,
-            regionId: region.id,
-            transactionId: transaction.id,
-          },
-        )
-        if (!raftMutation(region, 'pessimistic_lock', transaction, tidbId, builder)) {
+        if (!ensureLeader(region, builder)) {
           failTransaction(
             transaction,
             builder,
             tidbId,
             warnings,
-            `Region ${region.id} could not replicate the pessimistic lock.`,
+            `Region ${region.id} has no available leader for its in-memory pessimistic lock.`,
           )
           addReturn(builder, false, tidbId)
           state.metrics.statements++
@@ -1149,6 +2134,25 @@ export function createTiDBSimulation(
             warnings,
           )
         }
+        const raftIndexBefore = region.commitIndex
+        builder.add(
+          'txn2pc',
+          'pessimistic_lock',
+          'Acquire leader-local pessimistic lock',
+          `Transaction ${transaction.id} locks its key in Region ${region.id}'s leader memory without Raft replication.`,
+          {
+            source: tidbId,
+            target: region.leaderStoreId,
+            regionId: region.id,
+            transactionId: transaction.id,
+            metadata: {
+              storage: 'leader_memory',
+              replicated: false,
+              raftIndexBefore,
+              raftIndexAfter: region.commitIndex,
+            },
+          },
+        )
       }
     }
 
@@ -1313,13 +2317,21 @@ export function createTiDBSimulation(
               target: region.leaderStoreId,
               regionId: region.id,
               transactionId: transaction.id,
+              path: 'background',
               metadata: {
                 commitTs: commitTs ?? startTs,
                 criticalPath: false,
               },
             },
           )
-          if (!raftMutation(region, 'commit_background', transaction, tidbId, builder)) {
+          if (!raftMutation(
+            region,
+            'commit_background',
+            transaction,
+            tidbId,
+            builder,
+            'background',
+          )) {
             warnings.push(
               `Region ${region.id} needs later lock resolution after the Async Commit response.`,
             )
@@ -1428,9 +2440,18 @@ export function createTiDBSimulation(
     const warnings: string[] = []
 
     const regionIds = asRegionIds(request.regionIds, analysis, state.regions)
-    const regions = regionIds
+    let regions = regionIds
       .map((regionId) => state.regions.find((region) => region.id === regionId))
       .filter((region): region is RegionState => Boolean(region))
+    if (scenarioId === 'cross-region-transaction' && regions.length > 0) {
+      const first = regions[0]
+      const second = regions.find((region) =>
+        region.id !== first.id && region.leaderStoreId !== first.leaderStoreId,
+      ) ?? state.regions.find((region) =>
+        region.id !== first.id && region.leaderStoreId !== first.leaderStoreId,
+      )
+      regions = second ? [first, second] : regions
+    }
     if (regions.length === 0) {
       warnings.push('No representative Region matched this request.')
       return recordReceipt(
@@ -1451,6 +2472,20 @@ export function createTiDBSimulation(
     }
     if (analysis.readOnly) {
       return traceRead(id, analysis, scenarioId, regions, builder, warnings)
+    }
+    if (
+      scenarioId === 'cross-region-transaction' &&
+      regions.length === 2 &&
+      state.controls.transactionMode === 'pessimistic' &&
+      (request.forceProtocol ?? state.controls.commitProtocol) === '2pc'
+    ) {
+      return traceDetailedCrossRegionTransaction(
+        id,
+        analysis,
+        [regions[0], regions[1]],
+        builder,
+        warnings,
+      )
     }
     return traceWrite(id, request, scenarioId, regions, builder, warnings)
   }

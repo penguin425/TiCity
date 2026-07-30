@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity v0.3.4 targets **TiDB v8.5 LTS**. This document records which visible
+TiCity model-2 targets **TiDB v8.5 LTS**. This document records which visible
 claims are architectural, which values are deliberately representative, and
 which capabilities are not implemented.
 
@@ -12,6 +12,7 @@ which capabilities are not implemented.
 | PD owns cluster metadata, scheduling, and transaction timestamps | PD appears only on control/TSO paths, never on the row-data route | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture) |
 | A Region covers a left-closed, right-open key range and normally has three replicas | Region ranges are contiguous; every Region has exactly three voter peers | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture) |
 | TiDB supports pessimistic and optimistic distributed transactions | Both modes have separate scenario paths and conflict behavior | [Transactions](https://docs.pingcap.com/tidb/v8.5/transaction-overview) |
+| In-memory pessimistic locks normally remain on the Region leader instead of being persisted or replicated through Raft | The detailed cross-Region scenario records leader-memory lock ownership and proves that acquisition does not advance any Raft index; prewrite later replaces it with a durable lock-CF entry | [Pessimistic transactions](https://docs.pingcap.com/tidb/v8.5/pessimistic-transaction) |
 | Optimistic distributed transactions use 2PC | Prewrite precedes commit; a modeled conflict moves the transaction to `rolled_back` without claiming a per-key lock inventory | [Optimistic transaction model](https://docs.pingcap.com/tidb/v8.5/optimistic-transaction) |
 | 1PC and Async Commit are transaction optimizations | They alter transaction events but never change Region Raft quorum. Async Commit returns after successful prewrite and shows commit-record resolution as background work; it has no normal Get-commit-ts/Commit phase on the client path | [Latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
 | Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
@@ -42,6 +43,27 @@ The model treats its accepted single-row, primary-key-constrained mutation as
 small enough for Async Commit when that mode is enabled. Real eligibility also
 depends on feature settings, mutation/key size limits, timestamp bounds, and
 other runtime conditions—not simply on the number of Regions.
+
+## Detailed transaction trace
+
+The model-2 `cross-region-transaction` scenario is the first mechanism-level
+vertical slice. It uses two representative Regions with different leaders and
+publishes an immutable causal event graph. Both prewrite branches begin from the
+same coordinator event and independently proceed through Raft propose, two-voter
+persistence, 2-of-3 quorum, apply, and conceptual MVCC state. `commit_ts` is
+allocated only after both branches join. The primary commit gates the modeled
+client response; secondary commit and lock cleanup are explicitly marked as
+background work after that response.
+
+Every event in this detailed receipt has a post-event projection and typed
+deltas for the transaction, Region voter indexes, leader-memory lock, and
+conceptual `default`, `lock`, and `write` column-family state. These projections
+are presentation contracts, not byte-accurate RocksDB snapshots. They contain no
+SQL text, literals, keys, values, result rows, or live-cluster observations.
+
+Other scenarios retain their compact teaching traces in this model revision.
+They use the same causal dependency field but do not yet claim the detailed
+Raft/MVCC projection depth of the cross-Region transaction.
 
 ## SQL boundary
 
