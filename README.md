@@ -16,10 +16,12 @@ Live site: <https://penguin425.github.io/TiCity/>
 ![TiCity Transaction Lab showing a two-Region pessimistic transaction at primary commit](docs/screenshot.png)
 
 > [!IMPORTANT]
-> TiCity v0.7.0 is a static, offline model targeting TiDB v8.5 LTS. It does not
-> execute SQL or return real data or invented result rows. A single SQL
-> statement entered by the user is classified entirely in the browser, and
-> only a modeled route and explanation are generated.
+> The latest published release is TiCity v0.7.0. This development tree also
+> contains the unreleased model-6 GC/Storage Lab planned for v0.8. Both target
+> the TiDB v8.5 LTS line as static, offline models. TiCity does not execute SQL
+> or return real data or invented result rows. A single SQL statement entered
+> by the user is classified entirely in the browser, and only a modeled route
+> and explanation are generated.
 
 ## What you can inspect
 
@@ -52,12 +54,25 @@ Live site: <https://penguin425.github.io/TiCity/>
 - Client-response boundaries that leave no 1PC cleanup, both Async Commit
   Regions for background commit-record resolution, and the regular 2PC
   secondary for background commit
+- An unreleased model-6 GC/Storage Lab that expands one 43-event immutable
+  receipt into two GC rounds: an active transaction first caps the candidate
+  at global `minStartTS - 1`, then an explicit fixture boundary completes that
+  transaction and lets the second candidate advance
+- Separate exact-event values for the `mysql.tidb` staged status, TiDB's saved
+  visibility safe point and 100-second implementation cache barrier, and the
+  global safe point published to PD
+- Region-by-Region ScanLock and ResolveLock outcomes, classic raftstore-v1
+  per-Store `UnsafeDestroyRange`, asynchronous TiKV safe-point detection, and
+  the default Compaction Filter path with retained Put anchors
+- Logical MVCC chains counted once rather than multiplied by three replicas,
+  including a Delete-chain example and long-value cleanup in DEFAULT CF
 - A causal event graph with immutable post-event snapshots, explicit
   fork/join dependencies, a client-response boundary, and background
   secondary cleanup
 - One immutable receipt projected across the 3D City, Machine, and Diagnose;
   Lock Lab adds a semantic wait-for graph and Raft Failure Lab adds a semantic
-  election graph without turning either into causal dependencies
+  election graph, while GC/Storage Lab adds a two-round semantic pipeline,
+  without turning any of them into causal dependencies
 - Stable cross-view links that carry the scenario and selected event among all
   three views
 - A default topology containing TiProxy, TiDB Server, PD, TiKV, and TiFlash
@@ -75,8 +90,8 @@ The application has three views:
 | URL | Purpose |
 |---|---|
 | [`…/TiCity/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/?scenario=commit-protocols&event=trace-1-event-32) | 3D City and the scenario-selected detailed Lab at the Async Commit client-response boundary |
-| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | Causal event DAG plus the selected Lab's separate protocol, lock, or election semantics |
-| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | Exact-event transaction, protocol, Raft, MVCC, lock-wait, deadlock, and retry diagnostics |
+| [`…/machine/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/machine/?scenario=commit-protocols&event=trace-1-event-32) | Causal event DAG plus the selected Lab's separate protocol, lock, election, or GC/storage semantics |
+| [`…/diagnose/?scenario=commit-protocols&event=trace-1-event-32`](https://penguin425.github.io/TiCity/diagnose/?scenario=commit-protocols&event=trace-1-event-32) | Exact-event transaction, protocol, Raft, MVCC, lock/deadlock/retry, and GC/storage diagnostics |
 
 Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
 through the same immutable receipt; looping reuses that receipt and never
@@ -146,6 +161,48 @@ retain only aggregate counts and synthetic identifiers.
 
 ![TiCity Protocol Lab comparing 1PC, Async Commit, and regular 2PC](docs/protocol-lab.png)
 
+Open the unreleased GC/Storage Lab directly with the `gc-safe-point` scenario:
+[City](https://penguin425.github.io/TiCity/?scenario=gc-safe-point&event=trace-1-event-22),
+[Machine](https://penguin425.github.io/TiCity/machine/?scenario=gc-safe-point&event=trace-1-event-22),
+or [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=gc-safe-point&event=trace-1-event-22).
+These links name the planned v0.8 route and exact event; the published site
+will expose the detailed projection only after a v0.8 prerelease is deployed.
+City uses a fixed-capacity 3D cutaway and bilingual semantic inspector. Machine
+adds a two-row semantic pipeline without replacing the exact causal DAG.
+Diagnose exposes the candidate and bounds, coordinator stages, locks, range,
+three Store detectors/filters, logical versions, and mechanism-boundary rows.
+All three read the same selected post-event snapshot.
+
+The 43-event receipt has two deterministic rounds. In round 1, the GC lifetime
+produces a candidate, reported active-transaction state caps it to global
+`minStartTS - 1`, and the fixture has no lower external service safe point.
+TiDB stages `tikv_gc_safe_point` in `mysql.tidb`, scans representative Regions
+and resolves two synthetic old locks, saves the visibility safe point, crosses
+the pinned 100-second implementation cache barrier, processes one synthetic
+dropped range, and publishes the monotonic global value to PD. Three TiKV
+stores then detect the greater value asynchronously and expose Compaction
+Filter progress.
+
+At an explicit teaching boundary, the blocker completes without replaying its
+transaction commit protocol. Round 2 can therefore accept its later candidate,
+finds no remaining fixture locks or Delete Range task, publishes the later
+value, and runs the Store filters again. The version board is a single logical
+projection: it retains the last eligible Put as an anchor, removes obsolete
+records including one old Delete chain, and counts long DEFAULT CF values
+deleted by the filter. It is not three copies of each chain, a disk-byte
+measurement, or a latency benchmark.
+
+This slice pins the TiDB, TiKV, PD, and client implementation profile used by
+TiDB/TiKV v8.5.0. ResolveLock is represented by its ScanLock and
+commit/rollback outcome, but its internal Raft entry is deliberately outside
+this slice. The classic raftstore-v1 `UnsafeDestroyRange` fixture bypasses
+Region Raft, and RocksDB Compaction Filter creates no modeled Raft entry.
+Later patch releases or raftstore-v2 can take different internal paths; see
+[Model Boundary](docs/MODEL_BOUNDARY.md) for the exact source commits and
+line-level references.
+
+![TiCity GC/Storage Lab at the first-round Compaction Filter event](docs/gc-storage-lab.png)
+
 ## Representative scenarios
 
 1. Point reads and routing
@@ -155,7 +212,7 @@ retain only aggregate counts and synthetic identifiers.
 5. A comparison of 1PC, Async Commit, and regular 2PC
 6. A sequential-key hotspot and Region split
 7. A TiKV failure and leader election
-8. A long-running transaction and the GC safe point
+8. A two-round, 43-event long-running transaction and GC/storage trace
 9. TiFlash catch-up and MPP aggregation
 
 ## Local development
@@ -217,12 +274,23 @@ src/tidb/
   per-Region Raft mutation chains. Each chain independently shows propose,
   two-voter persistence, 2-of-3 commit, and apply before its conceptual MVCC
   state changes.
+- In the unreleased model-6 GC/Storage Lab, all 43 events carry one deeply
+  frozen `gcLab` post-event snapshot. City, Machine, and Diagnose project that
+  same selected snapshot. The first safe point is capped to
+  `globalMinStartTS - 1`; service-point selection, `mysql.tidb` staging,
+  Region ScanLock, visibility save/cache barrier, Delete Range, PD global
+  publication, Store detection, and Compaction Filter remain separate stages.
+- GC/Storage Lab pins the TiDB/TiKV v8.5.0 default Compaction Filter and
+  classic raftstore-v1 fixture. ResolveLock's internal Raft detail, raftstore-v2
+  Delete Range behavior, compaction scheduling/timing, actual SST layout,
+  physical bytes, and Raft log GC are not modeled.
 - The initial 36 Regions are representative educational values. Additional
   Regions created by splits appear in the 2D diagnostics, while the 3D City
   retains 36 stable Region slots. This does not reproduce the scale or timing
   of a live cluster.
 
-Detailed mechanism-level projections currently apply to four scenarios. The
+Detailed mechanism-level projections in this development tree apply to five
+scenarios. The
 cross-Region transaction expands transaction 2PC, per-Region Raft, and
 conceptual MVCC. Lock Lab expands leader-memory lock contention and hands off
 its commit path instead of duplicating that pipeline. Raft Failure Lab expands
@@ -230,8 +298,10 @@ one Region's election, current-term leader no-op, PD observation and routing,
 and TiDB-internal request recovery. Protocol Lab expands eligibility,
 timestamp authority, one-Region 1PC, two-Region Async Commit, and regular 2PC,
 including their client/background boundaries and independent Region Raft
-chains. The other five scenarios remain compact teaching traces and do not yet
-claim the same mechanism depth.
+chains. The unreleased GC/Storage Lab expands its two safe-point and storage
+rounds without folding Resolve Locks, Delete Range, global publication, or
+physical compaction into one step. The other four scenarios remain compact
+teaching traces and do not yet claim the same mechanism depth.
 
 The `window.TICITY` object in the browser console exposes the model, playback,
 scenarios, and latest immutable trace for inspection and control.

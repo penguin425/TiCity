@@ -110,6 +110,38 @@
 - Four mechanism-level scenarios in total, with the remaining five scenarios
   explicitly retained as compact teaching traces
 
+## v0.8 (in development; not released)
+
+- A model-6 GC/Storage Lab that expands `gc-safe-point` into one deterministic
+  43-event immutable receipt with two coordinator and storage rounds
+- A first-round lifetime candidate capped exactly to global
+  `minStartTS - 1` by an active transaction within the 86,400-second maximum
+  wait, followed by a second round that advances after an explicit teaching
+  boundary completes that blocker
+- Separate service-safe-point selection, `mysql.tidb` status staging, Region
+  ScanLock and ResolveLock outcome, saved visibility safe point plus the pinned
+  100-second implementation cache barrier, Delete Ranges, and PD global
+  publication
+- A classic raftstore-v1 three-Store `UnsafeDestroyRange` fan-out that bypasses
+  Region Raft, while ResolveLock's normal TiKV write-command Raft detail
+  remains explicitly outside this slice
+- Three asynchronous TiKV safe-point detections per round and the pinned
+  v8.5.0 default Compaction Filter path instead of the legacy per-Region GC
+  loop
+- A counted-once logical MVCC board with retained Put anchors, one old
+  Delete-chain example, long DEFAULT CF value cleanup, and no claim about
+  physical bytes, SST layout, compaction timing, or Raft log GC
+- Exact-event City, Machine, and Diagnose projections over the same deeply
+  frozen snapshot, including a fixed-capacity 3D cutaway, a two-round semantic
+  pipeline separate from the causal DAG, and mechanism-specific diagnostics
+- Bilingual, accessible, responsive, reduced-motion, privacy-preserving,
+  synthetic-only, non-benchmark documentation and regression gates
+- Exact implementation provenance pinned to TiDB/TiKV v8.5.0, client-go, and
+  PD source commits; later patch releases and raftstore-v2 remain separate
+  profiles
+- Five mechanism-level scenarios in the development tree, with the remaining
+  four scenarios explicitly retained as compact teaching traces
+
 ## Deliberately outside the current offline model
 
 - Connecting to or changing a live TiDB cluster

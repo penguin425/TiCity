@@ -1,9 +1,15 @@
 # TiCity model boundary
 
-TiCity model-5 targets **TiDB v8.5 LTS**. This document records which visible
-claims are architectural, which values are deliberately representative, and
-which capabilities are not implemented. TiCity is a deterministic educational
-model, not a TiDB emulator or a live-cluster observation tool.
+The unreleased TiCity model-6 development tree targets the **TiDB v8.5 LTS**
+line and pins mechanism details to TiDB v8.5.0 source commit
+`d13e52ed6e22cc5789bed7c64c861578cd2ed55b`, TiKV v8.5.0 source commit
+`a2c58c94f89cbb410e66d8f85c236308d6fc64f0`, client-go commit
+`006dfb024c26859f2e3757172296d84ef36ff585`, and PD commit
+`d190c0e9082de46128b756f93b1291768dda645a`. This document records which
+visible claims are architectural, which values are deliberately
+representative, and which capabilities are not implemented. TiCity is a
+deterministic educational model, not a TiDB emulator or a live-cluster
+observation tool.
 
 ## Claims represented directly
 
@@ -32,7 +38,13 @@ model, not a TiDB emulator or a live-cluster observation tool.
 | TiDB can back off and retry transient TiKV, not-leader, and timeout failures before exposing an error to the client | The modeled transport failure remains client-pending, invalidates the Region route, and retries the same logical request internally without an application retry | [TiDB troubleshooting map](https://docs.pingcap.com/tidb/v8.5/tidb-troubleshooting-map), [TiDB error codes](https://docs.pingcap.com/tidb/v8.5/error-codes) |
 | TiKV peers perform Region leader election while PD maintains Region metadata used for routing | PD observes the completed election and answers a route lookup; it never selects the candidate, grants Pre-Votes or Votes, or elects the leader | [TiDB architecture](https://docs.pingcap.com/tidb/v8.5/tidb-architecture), [TiDB storage and Raft](https://docs.pingcap.com/tidb/v8.5/tidb-storage), [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
 | Real Region, Raft, and apply state must be inspected from a cluster | TiCity's peer log, commit, and apply indexes are labeled model snapshots rather than `tikv-ctl` observations | [TiKV Control User Guide](https://docs.pingcap.com/tidb/v8.5/tikv-control) |
-| Active transaction `start_ts` can hold the GC safe point, subject to `tidb_gc_max_wait_time` | The GC scenario shows a short-horizon blocker and names the 86,400-second default; it does not fast-forward the teaching clock by a day | [GC configuration](https://docs.pingcap.com/tidb/v8.5/garbage-collection-configuration) |
+| TiDB instances report active transaction state and the GC worker caps the candidate to global `minStartTS - 1`; `tidb_gc_max_wait_time` bounds how long an active transaction can keep doing so | Round 1 uses one synthetic active transaction within the 86,400-second default, caps the candidate exactly to `start_ts - 1`, does not kill the transaction, and does not fast-forward a day | [GC configuration](https://docs.pingcap.com/tidb/v8.5/garbage-collection-configuration), [pinned active-transaction reporter](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/domain/infosync/info.go#L745-L825), [pinned global-min calculation and cap](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L515-L559) |
+| The lifetime candidate is constrained by the minimum service safe point and must advance monotonically | Both rounds have an explicit candidate and service-safe-point decision. The fixture has no BR, CDC, or other external service requesting an older point; round 2 advances only after the teaching blocker completes | [pinned candidate and service-safe-point path](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L677-L740), [PD monotonic safe-point storage](https://github.com/tikv/pd/blob/d190c0e9082de46128b756f93b1291768dda645a/pkg/gc/safepoint.go#L43-L101) |
+| The `mysql.tidb` status value staged before a GC job, TiDB's saved visibility safe point, and the global safe point published to PD are distinct boundaries | Every exact snapshot carries `staged`, `visibilitySaved`, and `published` separately. Resolve Locks precedes the visibility save; the model names the pinned 100-second implementation cache barrier but does not claim a live timing guarantee | [pinned `mysql.tidb` staging](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L455-L513), [pinned worker ordering](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L742-L806), [pinned visibility-cache constants](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/tikv/safepoint.go#L53-L64), [pinned saved visibility path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/tikv/safepoint.go#L198-L223), [pinned PD publication](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L1236-L1267) |
+| TiDB v8.5.0's pinned Resolve Locks path traverses Regions, issues ScanLock, checks primary outcome, and resolves old locks | The cutaway expands Regions 8 and 20 with one commit resolution and one rollback resolution. It records the ResolveLock outcome but deliberately does not expand the normal TiKV write command's internal Raft entry | [pinned Region traversal](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L1195-L1231), [pinned Region ScanLock path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/tikv/gc.go#L167-L265), [pinned TiKV ResolveLock command](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/storage/txn/commands/resolve_lock.rs#L25-L82) |
+| Delete Ranges is distinct from per-key MVCC GC; the classic raftstore-v1 branch sends `UnsafeDestroyRange` to relevant Stores and bypasses Region Raft | Round 1 uses one synthetic dropped range and a three-Store fan-out. Per-Store acknowledgement state and actual key-range boundaries are not retained; round 2 has no pending range. This fixture does not claim raftstore-v2 behavior | [pinned Delete Range branches](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L809-L912), [pinned classic bypass contract](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/tikv/gc.go#L303-L367) |
+| With the pinned v8.5.0 default Compaction Filter path enabled, each TiKV detects a greater global safe point asynchronously and does not schedule the legacy per-Region GC round | Each round forks three background Store-detection events, joins them before one representative bottommost-compaction fixture, and records no Compaction Filter Raft entry | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file), [pinned TiKV polling and legacy-round decision](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/gc_manager.rs#L315-L394) |
+| The Compaction Filter removes obsolete MVCC records, can retain the last eligible Put as a snapshot anchor, can remove an old chain whose last eligible write is Delete, and deletes corresponding long values from DEFAULT CF | The version board contains 12 synthetic versions counted once across four logical chains. Round 1 filters four and retains two Put anchors; the final snapshot filters six, retains three anchors, and counts three deleted DEFAULT CF values | [pinned TiKV Compaction Filter retention and DEFAULT cleanup](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/compaction_filter.rs#L457-L530) |
 
 ## Representative values
 
@@ -76,6 +88,22 @@ timestamp and schema bounds, client/TiKV decisions, runtime errors, and the
 exact version and configuration. Protocol Lab deliberately takes no runtime
 fallback branch and must not be used to infer that Region count alone selects
 Async Commit.
+
+GC/Storage Lab fixes `tidb_gc_run_interval` and `tidb_gc_life_time` to 600
+seconds, `tidb_gc_max_wait_time` to 86,400 seconds, and the minimum-`start_ts`
+report interval to 30 seconds. The pinned 100-second visibility-cache barrier
+is an implementation constant, not a sleep performed in real time by the
+teaching clock, a recommendation, or a guarantee of observed latency. Numeric
+TSO spacing, event durations, two selected Regions, three Stores, one dropped
+range, two old locks, four logical chains, and 12 versions are deterministic
+fixtures selected for legibility.
+
+The storage board is deliberately one logical MVCC projection. It is not
+multiplied by the three TiKV replicas, and its bottommost-compaction level is a
+model fixture rather than an observation of a live RocksDB level. Filtered
+version counts, retained-anchor counts, and deleted DEFAULT CF values are
+logical records, not SST bytes, write amplification, reclaimed disk space,
+throughput, or a production capacity estimate.
 
 ## Detailed mechanism traces
 
@@ -238,10 +266,81 @@ identifiers, and modeled timestamps. It contains no SQL text, literal, real
 key, secondary-key list, value, result row, digest, packet, or live-cluster
 observation.
 
-The other five scenarios retain compact teaching traces in this model
+The unreleased model-6 `gc-safe-point` scenario is a fifth mechanism-level
+vertical slice. Its single immutable 43-event receipt contains two
+deterministic coordinator and storage rounds. It is not a trace captured from
+a cluster, a full GC-worker emulator, a timing benchmark, or an execution of
+the displayed SQL.
+
+Round 1 computes a lifetime candidate greater than the existing safe point.
+The oldest reported synthetic transaction is within
+`tidb_gc_max_wait_time`, so global `minStartTS` caps the candidate exactly to
+`start_ts - 1`; GC does not kill the transaction. The fixture has no older BR,
+CDC, or other external service safe point. The GC worker records the accepted
+service point and stages the human-readable `tikv_gc_safe_point` status in
+`mysql.tidb`; this staged status is not presented as PD's global value.
+
+The pinned coordinator order remains explicit. TiDB traverses representative
+Regions 8 and 20 through Region ScanLock, checks the two synthetic primaries,
+resolves one old secondary as committed and the other as rolled back, then
+saves the visibility safe point and crosses the pinned 100-second
+implementation cache barrier. ResolveLock is a normal TiKV write command, but
+the detailed Raft proposal, quorum, apply, and storage mutation behind that
+command are outside this bounded GC slice. No event in this receipt is used to
+claim that ResolveLock bypasses Raft.
+
+Delete Ranges follows the visibility boundary and remains distinct from
+per-version MVCC filtering. One synthetic DDL range older than the accepted
+safe point becomes eligible. In this deliberately classic raftstore-v1
+fixture, three independent `UnsafeDestroyRange` Store branches bypass Region
+Raft and join at an aggregate deletion event. The snapshot retains neither the
+real start/end key boundaries nor a per-Store acknowledgement history, and it
+makes no claim about raftstore-v2's different internal path.
+
+Only after Delete Ranges joins does TiDB publish the monotonic global safe
+point to PD. The coordinator can finish while three independent background
+TiKV branches detect the greater PD value. With the pinned v8.5.0 default
+Compaction Filter enabled, those Stores do not schedule the legacy per-Region
+GC round. Their branches join before a representative RocksDB bottommost
+compaction opens the filters. Compaction Filter is physical storage work and
+creates no modeled Raft entry; its scheduling, duration, SST layout, and disk
+reclamation are outside the model.
+
+At a visible teaching boundary, the synthetic blocker completes without
+replaying its commit protocol. Round 2 computes a later candidate, accepts it
+without an active-transaction or external-service cap, repeats Region ScanLock
+with no remaining old fixture locks, finds no pending Delete Range, publishes
+the later global value, and repeats asynchronous Store detection and
+Compaction Filter. This boundary must not be read as GC committing, killing,
+or otherwise controlling the application transaction.
+
+The MVCC fixture demonstrates the pinned filter semantics without storing key
+material. At the first filter event, four of 12 synthetic records are
+filtered and two last eligible Puts are retained as anchors. In the final
+snapshot, six records are filtered, three Put anchors remain, one filtered
+Delete demonstrates removal of its older logical history, and three filtered
+long Puts count corresponding DEFAULT CF cleanup. These are logical chains
+counted once, not replica-level copies.
+
+Every GC/Storage Lab event publishes a deeply frozen `gcLab` post-event
+snapshot and typed deltas. City projects it into a fixed-capacity 3D cutaway
+and bilingual semantic inspector. Machine keeps its two-round semantic
+pipeline separate from the causal DAG and never serializes the three
+Store-detection or Delete Range siblings into causal dependencies. Diagnose
+projects the same selected candidate/bounds, coordinator stages, locks,
+ranges, Store detectors, filter state, logical versions, and boundary
+statements. Exact-event navigation and looping move over the same receipt and
+do not rerun a round or recompute a safe point.
+
+The receipt retains modeled timestamps, aggregate counts, Region/Store IDs,
+and visibly synthetic transaction, lock, range, chain, and version IDs. It
+contains no SQL text, literal, real or encoded key, key range, row value,
+result row, packet, SST content, or live-cluster observation.
+
+The other four scenarios retain compact teaching traces in this development
 revision. They use the same causal dependency field but do not yet claim the
-detailed transaction, concurrency-control, Region-election, or commit-protocol
-projection depth of these four vertical slices.
+detailed transaction, concurrency-control, Region-election, commit-protocol,
+or GC/storage projection depth of these five vertical slices.
 
 ## SQL boundary
 
@@ -257,4 +356,5 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.7.x.
+- `OBSERVED`: reserved for a future read-only adapter and not used in this
+  unreleased v0.8 development tree.

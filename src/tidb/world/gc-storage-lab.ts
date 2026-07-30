@@ -952,14 +952,16 @@ export function createGcStorageLab(
       )
       const filterPulse =
         store.filterActive && !projection.reducedMotion
-          ? 1 + pulse * 0.2
+          ? 1 + pulse * 0.08
           : 1
-      const ringScale = storeVisible ? 6.3 * filterPulse : 0
+      const ringScale = storeVisible
+        ? (store.filterActive ? 7.6 : 7.4) * filterPulse
+        : 0
       setInstanceTransform(
         compactionFilters,
         index,
         STORE_X[index],
-        15,
+        height + 4,
         STORE_Z,
         ringScale,
         ringScale,

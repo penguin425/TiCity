@@ -4,6 +4,75 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+The following v0.8 entries are planned release-note boundaries. They do not
+assert that a tag, GitHub Release, or deployment exists yet.
+
+## [0.8.0] — Planned, not released
+
+- Complete the model-6 GC/Storage Lab vertical slice across exact-event City,
+  Machine, and Diagnose, with every surface reading the same selected snapshot
+  from one deterministic 43-event, two-round immutable receipt.
+- Keep candidate calculation, `minStartTS - 1`, service-safe-point selection,
+  `mysql.tidb` staging, Region ScanLock, saved visibility and its pinned
+  100-second cache barrier, Delete Ranges, PD global publication, asynchronous
+  Store detection, and Compaction Filter as separate mechanism boundaries.
+- Pin implementation claims to exact TiDB/TiKV v8.5.0, client-go, and PD source
+  commits while labeling synthetic timestamps, counts, bottommost-compaction
+  placement, and durations as non-benchmark teaching fixtures.
+- Include bilingual release documentation and the GC/Storage Lab screenshot in
+  the planned release archive, with deterministic, accessibility, responsive,
+  fixed-capacity, reduced-motion, privacy, source-provenance, and
+  production-build gates.
+
+## [0.8.0-beta.1] — Planned, not released
+
+- Extend Machine with a two-round semantic GC pipeline kept separate from its
+  causal DAG, plus exact safe-point, ResolveLock, Delete Range, Store filter,
+  retained-anchor, Delete-chain, and DEFAULT CF cleanup state.
+- Extend Diagnose with exact-event candidate, active-transaction and service
+  bounds, all three safe-point storage boundaries, ResolveLock outcomes,
+  Delete Range state, Store detection/filter state, and logical MVCC
+  retention/cleanup projections.
+- Preserve the selected `scenario` and exact `event` among City, Machine, and
+  Diagnose for all 43 snapshots, including each parallel Store branch and
+  both Compaction Filter rounds.
+- Add browser coverage for the shared snapshot, causal fork/join structure,
+  immutable looping, bilingual accessibility, privacy, responsive layouts,
+  fixed resource capacity, and cross-view mechanism boundaries.
+- Keep ResolveLock's internal Raft detail outside this bounded slice, classic
+  raftstore-v1 `UnsafeDestroyRange` explicitly no-Raft, and Compaction Filter
+  distinct from Raft log GC.
+
+## [0.8.0-alpha.2] — Planned, not released
+
+- Add a fixed-capacity 3D GC/Storage Lab cutaway and accessible bilingual DOM
+  inspector synchronized with the City Trace Dock and exact selected event.
+- Project the coordinator gate, two-round state, three distinct safe-point
+  values, Region ScanLock/lock outcomes, classic Delete Range fan-out, three
+  Store detectors/filters, and four logical MVCC chains without retaining key
+  material.
+- Reuse the same immutable 43-event receipt during playback and looping
+  without rerunning GC, recomputing a candidate, advancing PD, or changing
+  filter results.
+
+## [0.8.0-alpha.1] — Planned, not released
+
+- Introduce the model-6 `gc-safe-point` vertical slice with 43 deeply frozen
+  exact-event snapshots and typed deltas across two deterministic GC/storage
+  rounds.
+- Cap round 1 to global `minStartTS - 1` without killing the within-max-wait
+  teaching blocker, then advance round 2 only after an explicit fixture
+  boundary completes that blocker.
+- Model service-point selection, `mysql.tidb` staging, Region ScanLock and
+  commit/rollback ResolveLock outcomes, saved visibility plus the pinned
+  100-second cache barrier, one classic raftstore-v1
+  `UnsafeDestroyRange` fan-out, PD publication, and asynchronous TiKV
+  detection.
+- Pin the v8.5.0 default Compaction Filter path with logical chains counted
+  once, retained Put anchors, old Delete-chain removal, long DEFAULT CF value
+  cleanup, zero modeled compaction Raft entries, and no SQL text, real or
+  encoded keys, values, rows, or live observations.
+
 ## [0.7.0] — 2026-07-31
 
 - Complete the model-5 Protocol Lab vertical slice across exact-event City,

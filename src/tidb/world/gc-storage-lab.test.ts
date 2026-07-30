@@ -245,9 +245,19 @@ describe('GC/Storage Lab fixed-capacity world', () => {
     const versions = lab.object.getObjectByName(
       'gc-storage-lab:mvcc-version-slots',
     ) as THREE.InstancedMesh
+    const stores = lab.object.getObjectByName(
+      'gc-storage-lab:store-detectors',
+    ) as THREE.InstancedMesh
+    const filters = lab.object.getObjectByName(
+      'gc-storage-lab:compaction-filters',
+    ) as THREE.InstancedMesh
     const retained = instanceScale(versions, 1)
     const filtered = instanceScale(versions, 0)
     const present = instanceScale(versions, 2)
+    const activeStorePosition = instancePosition(stores, 1)
+    const activeStoreScale = instanceScale(stores, 1)
+    const activeFilterPosition = instancePosition(filters, 1)
+    const activeFilterScale = instanceScale(filters, 1)
 
     expect(lab.gateAnchor.userData).toMatchObject({
       gateState: 'published',
@@ -268,6 +278,10 @@ describe('GC/Storage Lab fixed-capacity world', () => {
       compaction: 'running',
       filterActive: true,
     })
+    expect(activeFilterPosition.y).toBeGreaterThan(
+      activeStorePosition.y + activeStoreScale.y / 2,
+    )
+    expect(activeFilterScale.x).toBeGreaterThan(activeStoreScale.x)
     expect(retained.y).toBeGreaterThan(present.y)
     expect(filtered.y).toBeLessThan(present.y)
     expect(versions.userData.states.slice(0, 4)).toEqual([
