@@ -15,11 +15,10 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 ![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
 
 > [!IMPORTANT]
-> 公開済みの最新releaseはTiCity v0.7.0です。この開発treeには、v0.8向けの
-> 未release model-6 GC/Storage Labも含まれます。どちらもTiDB v8.5 LTS系列を
-> 対象にした静的・オフラインのモデルです。SQLを実行せず、実データや架空の
-> 結果行も返しません。入力した単一SQL文をブラウザ内で分類し、モデル上の
-> 経路と説明だけを生成します。
+> TiCity v0.8.0が公開済みの最新releaseです。TiDB v8.5 LTS系列を対象にした
+> 静的・オフラインのモデルで、model-6 GC/Storage Labを含みます。SQLを実行せず、
+> 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
+> モデル上の経路と説明だけを生成します。
 
 ## 観察できるもの
 
@@ -49,8 +48,8 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
   Regionで独立した2-of-3 Raft chainを通ります
 - 1PCにはcleanupを残さず、Async Commitでは両Regionのcommit record解決、
   通常2PCではsecondary commitをbackgroundへ残すclient response境界
-- 1つの43 eventの不変なreceiptを2回のGC roundへ展開する、未releaseの
-  model-6 GC/Storage Lab。最初はactive transactionが候補をglobal
+- 1つの43 eventの不変なreceiptを2回のGC roundへ展開するmodel-6 GC/Storage
+  Lab。最初はactive transactionが候補をglobal
   `minStartTS - 1`へ制限し、明示的なfixture境界でtransactionが完了した後、
   2回目の候補が前進します
 - `mysql.tidb`へstageしたstatus、TiDBが保存したvisibility safe pointと
@@ -148,12 +147,11 @@ eligibility判定は、対象client実装のdefaultである256 key、合計4,09
 
 ![1PC、Async Commit、通常2PCを比較するTiCity Protocol Lab](docs/protocol-lab.png)
 
-未releaseのGC/Storage Labは、`gc-safe-point` scenarioから直接開けます:
+GC/Storage Labは、公開中の`gc-safe-point` scenarioから直接開けます:
 [City](https://penguin425.github.io/TiCity/?scenario=gc-safe-point&event=trace-1-event-22)、
 [Machine](https://penguin425.github.io/TiCity/machine/?scenario=gc-safe-point&event=trace-1-event-22)、
 [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=gc-safe-point&event=trace-1-event-22)。
-これらはv0.8向けrouteとexact eventを示します。公開siteで詳細projectionを
-利用できるのは、v0.8 prereleaseのdeploy後です。
+これらの公開linkはv0.8のscenarioと選択exact eventを引き継ぎます。
 Cityは固定capacityの3D cutawayと日本語／英語のsemantic inspectorを使います。
 Machineは正確な因果DAGを置き換えず、2行の意味pipelineを追加します。Diagnoseは
 候補とbound、coordinator stage、lock、range、3つのStore detector／filter、
@@ -254,7 +252,7 @@ src/tidb/
 - Protocol Labはtransaction commit coordinationと9本のRegion別Raft mutation
   chainを分離します。各chainはconceptual MVCC状態が変わる前に、propose、
   2 voterへのpersist、2-of-3 commit、applyを独立して示します。
-- 未releaseのmodel-6 GC/Storage Labでは、43 eventすべてがdeep-freezeされた
+- model-6 GC/Storage Labでは、43 eventすべてがdeep-freezeされた
   `gcLab`のevent後snapshotを持ち、City、Machine、Diagnoseが同じ選択snapshotを
   投影します。最初のsafe pointは`globalMinStartTS - 1`へ制限され、service
   point選択、`mysql.tidb`へのstage、Region ScanLock、visibility保存／cache
@@ -268,14 +266,14 @@ src/tidb/
   3D Cityは安定した36個のRegion slotを表示します。実クラスタの規模や時間を
   再現するものではありません。
 
-この開発treeでは、機構レベルの詳細projectionを5 scenarioへ適用しています。
+v0.8では、機構レベルの詳細projectionを5 scenarioへ適用しています。
 複数Regionトランザクションはtransaction 2PC、RegionごとのRaft、概念上のMVCCを
 展開します。Lock LabはLeaderメモリ上のlock競合を展開し、commit経路を前者の
 pipelineへhandoffします。Raft Failure Labは1 Regionの選出、current-term
 Leader no-op、PDの観測とrouting、TiDB内部request復旧を展開します。Protocol
 Labはeligibility、timestamp authority、1 Regionの1PC、2 RegionのAsync Commit、
 通常2PCを、client／background境界と独立したRegion Raft chainを含めて展開します。
-未releaseのGC/Storage LabはResolve Locks、Delete Range、global公開、物理
+GC/Storage LabはResolve Locks、Delete Range、global公開、物理
 compactionを1つのstepへまとめず、2回のsafe-point／storage roundを展開します。
 ほかの4 scenarioは簡潔な教育用traceのままで、同じ機構上の深度をまだ主張しません。
 

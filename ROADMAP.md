@@ -110,7 +110,7 @@
 - Four mechanism-level scenarios in total, with the remaining five scenarios
   explicitly retained as compact teaching traces
 
-## v0.8 (in development; not released)
+## v0.8 (released 2026-07-31)
 
 - A model-6 GC/Storage Lab that expands `gc-safe-point` into one deterministic
   43-event immutable receipt with two coordinator and storage rounds
@@ -139,8 +139,8 @@
 - Exact implementation provenance pinned to TiDB/TiKV v8.5.0, client-go, and
   PD source commits; later patch releases and raftstore-v2 remain separate
   profiles
-- Five mechanism-level scenarios in the development tree, with the remaining
-  four scenarios explicitly retained as compact teaching traces
+- Five mechanism-level scenarios in v0.8, with the remaining four scenarios
+  explicitly retained as compact teaching traces
 
 ## Deliberately outside the current offline model
 

@@ -1,7 +1,7 @@
 # TiCity model boundary
 
-The unreleased TiCity model-6 development tree targets the **TiDB v8.5 LTS**
-line and pins mechanism details to TiDB v8.5.0 source commit
+TiCity v0.8.0 model-6 targets the **TiDB v8.5 LTS** line and pins mechanism
+details to TiDB v8.5.0 source commit
 `d13e52ed6e22cc5789bed7c64c861578cd2ed55b`, TiKV v8.5.0 source commit
 `a2c58c94f89cbb410e66d8f85c236308d6fc64f0`, client-go commit
 `006dfb024c26859f2e3757172296d84ef36ff585`, and PD commit
@@ -266,8 +266,8 @@ identifiers, and modeled timestamps. It contains no SQL text, literal, real
 key, secondary-key list, value, result row, digest, packet, or live-cluster
 observation.
 
-The unreleased model-6 `gc-safe-point` scenario is a fifth mechanism-level
-vertical slice. Its single immutable 43-event receipt contains two
+The model-6 `gc-safe-point` scenario is a fifth mechanism-level vertical
+slice. Its single immutable 43-event receipt contains two
 deterministic coordinator and storage rounds. It is not a trace captured from
 a cluster, a full GC-worker emulator, a timing benchmark, or an execution of
 the displayed SQL.
@@ -337,7 +337,7 @@ and visibly synthetic transaction, lock, range, chain, and version IDs. It
 contains no SQL text, literal, real or encoded key, key range, row value,
 result row, packet, SST content, or live-cluster observation.
 
-The other four scenarios retain compact teaching traces in this development
+The other four scenarios retain compact teaching traces in this model
 revision. They use the same causal dependency field but do not yet claim the
 detailed transaction, concurrency-control, Region-election, commit-protocol,
 or GC/storage projection depth of these five vertical slices.
@@ -356,5 +356,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in this
-  unreleased v0.8 development tree.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.8.0.
