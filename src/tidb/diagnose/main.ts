@@ -2,60 +2,23 @@
 
 import '../app.css'
 
-import { createTiDBSimulation } from '../model'
+import { createTiDBSimulation, TIDB_SCENARIOS } from '../model'
 import type {
   ScenarioId,
   TiCityState,
-  TraceEvent,
   TraceStateSnapshot,
 } from '../model/types'
 import { createNavigation, createWordmark, prepareDocument } from '../page-shell'
 import { resolveLocale } from '../ui/catalog'
+import { resolveDiagnoseCursor } from './cursor'
 import { mountDiagnose } from './index'
+import {
+  DIAGNOSE_PAGE_COPY,
+  diagnoseCursorNote,
+  diagnoseEventOptionLabel,
+} from './page-copy'
 
-const SCENARIOS: readonly ScenarioId[] = [
-  'point-read',
-  'cross-region-transaction',
-  'optimistic-conflict',
-  'commit-protocols',
-  'hotspot-split',
-  'tikv-failover',
-  'gc-safe-point',
-  'tiflash-mpp',
-]
-
-const labels = {
-  ja: {
-    scenario: '投影するシナリオ後の状態',
-    event: '投影するイベント時点',
-    finalState: '最終状態',
-    names: [
-      'Point Readとルーティング',
-      '複数Regionの悲観トランザクション',
-      '楽観トランザクションの競合',
-      '1PC／Async Commit／2PC',
-      'hotspot、split、rebalance',
-      'TiKV障害とleader election',
-      '長時間transactionとGC safe point',
-      'TiFlash catch-upとMPP',
-    ],
-  },
-  en: {
-    scenario: 'State after scenario',
-    event: 'State at event',
-    finalState: 'Final state',
-    names: [
-      'Point read and routing',
-      'Cross-Region pessimistic transaction',
-      'Optimistic transaction conflict',
-      '1PC / Async Commit / 2PC',
-      'Hotspot, split, and rebalance',
-      'TiKV failure and leader election',
-      'Long transaction and GC safe point',
-      'TiFlash catch-up and MPP',
-    ],
-  },
-} as const
+const SCENARIOS: readonly ScenarioId[] = TIDB_SCENARIOS.map(({ id }) => id)
 
 function selectedScenario(): ScenarioId {
   const value = new URLSearchParams(location.search).get('scenario')
@@ -64,15 +27,9 @@ function selectedScenario(): ScenarioId {
     : 'hotspot-split'
 }
 
-function selectedTraceEvent(events: readonly TraceEvent[]): TraceEvent | null {
-  const requested = new URLSearchParams(location.search).get('event')
-  if (requested === null) return null
-  return events.find((event) => event.id === requested) ?? null
-}
-
 function projectionAtEvent(
   finalState: TiCityState,
-  snapshot: TraceStateSnapshot | undefined,
+  snapshot: TraceStateSnapshot | null,
 ): unknown {
   if (!snapshot) return finalState
   const detailedRegions = new Map(
@@ -91,6 +48,7 @@ function projectionAtEvent(
           phase: snapshot.transaction.stage,
           conflict: false,
         }],
+    ...(snapshot.lockLab === undefined ? {} : { lockLab: snapshot.lockLab }),
     regions: finalState.regions.map((region) => {
       const detail = detailedRegions.get(region.id)
       if (!detail) return region
@@ -108,11 +66,14 @@ function boot(): void {
   if (!root) throw new Error('Missing #diagnose-app')
 
   const locale = resolveLocale()
+  const copy = DIAGNOSE_PAGE_COPY[locale]
   prepareDocument(locale)
   const simulation = createTiDBSimulation({ seed: 425 })
+  const scenarioStartState = simulation.state
   const scenario = selectedScenario()
   const receipt = simulation.runScenario(scenario)
-  const selectedEvent = selectedTraceEvent(receipt.events)
+  const requestedEventId = new URLSearchParams(location.search).get('event')
+  const cursor = resolveDiagnoseCursor(receipt.events, requestedEventId)
 
   root.className = 'tidb-page'
   const top = document.createElement('div')
@@ -121,15 +82,15 @@ function boot(): void {
   top.append(createWordmark(locale), navigation.root)
 
   const controls = document.createElement('div')
-  controls.className = 'tidb-page-controls'
+  controls.className = 'tidb-page-controls tidb-diagnose-controls'
   const label = document.createElement('label')
-  label.textContent = labels[locale].scenario
+  label.textContent = copy.scenario
   const select = document.createElement('select')
-  select.setAttribute('aria-label', labels[locale].scenario)
-  for (const [index, id] of SCENARIOS.entries()) {
+  select.setAttribute('aria-label', copy.scenario)
+  for (const id of SCENARIOS) {
     const option = document.createElement('option')
     option.value = id
-    option.textContent = labels[locale].names[index]
+    option.textContent = copy.names[id]
     option.selected = id === scenario
     select.append(option)
   }
@@ -144,20 +105,20 @@ function boot(): void {
   controls.append(label)
 
   const eventLabel = document.createElement('label')
-  eventLabel.textContent = labels[locale].event
+  eventLabel.textContent = copy.event
   const eventSelect = document.createElement('select')
-  eventSelect.setAttribute('aria-label', labels[locale].event)
+  eventSelect.setAttribute('aria-label', copy.event)
   const finalOption = document.createElement('option')
   finalOption.value = ''
-  finalOption.textContent = labels[locale].finalState
-  finalOption.selected = selectedEvent === null
+  finalOption.textContent = copy.finalState
+  finalOption.selected = cursor.event === null
   eventSelect.append(finalOption)
   for (const [index, event] of receipt.events.entries()) {
-    if (!event.snapshot) continue
     const option = document.createElement('option')
+    const optionCursor = resolveDiagnoseCursor(receipt.events, event.id)
     option.value = event.id
-    option.textContent = `${index + 1}. ${event.label}`
-    option.selected = event.id === selectedEvent?.id
+    option.textContent = diagnoseEventOptionLabel(locale, event, index, optionCursor)
+    option.selected = event.id === cursor.event?.id
     eventSelect.append(option)
   }
   eventSelect.addEventListener('change', () => {
@@ -170,12 +131,22 @@ function boot(): void {
   })
   eventLabel.append(eventSelect)
   controls.append(eventLabel)
+  const cursorNote = document.createElement('p')
+  cursorNote.className = 'tidb-diagnose-cursor-note'
+  cursorNote.dataset.cursorResolution = cursor.resolution
+  cursorNote.textContent = diagnoseCursorNote(locale, cursor)
+  controls.append(cursorNote)
 
   const content = document.createElement('section')
   content.className = 'tidb-page-content'
   mountDiagnose(content, {
     locale,
-    snapshot: projectionAtEvent(simulation.state, selectedEvent?.snapshot),
+    snapshot: projectionAtEvent(
+      cursor.resolution === 'scenario-start'
+        ? scenarioStartState
+        : simulation.state,
+      cursor.snapshot,
+    ),
   })
 
   root.replaceChildren(top, controls, content)
