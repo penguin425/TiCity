@@ -3,6 +3,8 @@
 import type {
   TraceDomain,
   TraceEvent,
+  TraceGcLabPhase,
+  TraceGcLabSnapshot,
   TraceLockLabSnapshot,
   TraceProtocolLaneId,
   TraceProtocolLaneSnapshot,
@@ -499,6 +501,282 @@ const MACHINE_COPY = {
     backgroundCommit: 'Background Commit',
     finishLane: 'Complete without cleanup',
     empty: '—',
+  },
+} as const
+
+type GcPipelineStage =
+  | 'candidate'
+  | 'bound'
+  | 'mysql_staged'
+  | 'resolve_locks'
+  | 'visibility_saved'
+  | 'delete_range'
+  | 'pd_published'
+  | 'tikv_detected'
+  | 'compaction_filter'
+
+type GcPipelineState = 'complete' | 'current' | 'future'
+
+const GC_PIPELINE_STAGES: readonly GcPipelineStage[] = [
+  'candidate',
+  'bound',
+  'mysql_staged',
+  'resolve_locks',
+  'visibility_saved',
+  'delete_range',
+  'pd_published',
+  'tikv_detected',
+  'compaction_filter',
+]
+
+const GC_MACHINE_COPY = {
+  ja: {
+    eyebrow: 'GC / STORAGE LAB · EXACT SNAPSHOT',
+    title: '2ラウンドのGCと物理storage',
+    phase: 'フェーズ',
+    round: 'ラウンド',
+    snapshot: 'スナップショット',
+    graphTitle: 'GC coordinator → TiKV storage pipeline',
+    graphContract: '2 ROUNDS · EXACT EVENT',
+    graphDirection:
+      '各行は選択中のimmutable snapshotから導いた意味上のpipelineです。上の因果DAGを置換せず、並列Storeを直列化しません。',
+    stages: {
+      candidate: 'life time候補',
+      bound: 'minStartTS - 1 / service bound',
+      mysql_staged: 'mysql.tidbへstage',
+      resolve_locks: 'Resolve ScanLock',
+      visibility_saved: 'visibility保存 / cache barrier',
+      delete_range: 'UnsafeDestroyRange',
+      pd_published: 'PD global公開',
+      tikv_detected: '各TiKVが観測',
+      compaction_filter: 'Compaction Filter',
+    },
+    states: {
+      complete: '完了',
+      current: '現在',
+      future: '未到達',
+    },
+    priorRound: '以前のimmutable snapshotで完了',
+    futureRound: 'このラウンドは未開始',
+    pending: '未確定',
+    candidate: '候補safe point',
+    previous: '前回safe point',
+    globalMinStartTs: 'global min start_ts',
+    activeBound: 'active transaction上限',
+    serviceBound: 'service safe point',
+    blocked: '長時間transactionで制限',
+    blocker: 'blocker',
+    active: 'active',
+    completed: '完了',
+    yes: 'はい',
+    no: 'いいえ',
+    scanned: '走査済みRegion',
+    detected: '観測済みStore',
+    compacted: '完了Store filter',
+    safePointStores: '3つのsafe-point保存境界',
+    safePointStoresNote:
+      'mysql.tidbの表示値、TiDB内のvisibility/cache値、PDのglobal値は別の保存・公開境界です。',
+    mysqlStatus: 'mysql.tidb status',
+    visibilityCache: 'TiDB visibility / cache barrier',
+    pdGlobal: 'PD global GC safe point',
+    leaderLease: 'GC leader lease',
+    cacheBarrier: 'cache barrier',
+    stagedValue: 'staged',
+    savedValue: 'saved',
+    publishedValue: 'published',
+    resolveTitle: 'Resolve Locks / ScanLock',
+    resolveImplementation: '実装',
+    resolveRegions: '走査Region',
+    noRegions: 'まだ走査していません',
+    resolvedLocks: '合成lock',
+    noLocks: '対象lockなし',
+    committedPrimary: 'primary committed → commit解決',
+    rolledBackPrimary: 'primary rolled back → rollback解決',
+    pendingLock: '未解決',
+    resolveBoundary:
+      'ResolveLockは通常のTiKV write commandですが、そのRaft entry詳細はこのGC sliceの範囲外です。',
+    deleteTitle: 'classic raftstore-v1 Delete Range fan-out',
+    deleteNote:
+      'UnsafeDestroyRangeは各Storeへ直接fan-outし、Region Raftを経由しません。個別ackはsnapshotに保持せず、集約range状態だけを投影します。',
+    rangeState: '集約range状態',
+    unsafeDestroy: 'UnsafeDestroyRange',
+    ackNotProjected: '個別ack未投影',
+    aggregateComplete: '集約完了',
+    storeTitle: 'TiKV safe-point detector / filter',
+    detectedSafePoint: '観測safe point',
+    compaction: 'Compaction',
+    filterActive: 'filter稼働',
+    storageTitle: '論理MVCC chains（1回だけ集計）',
+    storageNote:
+      '論理chainを3 replica分へ乗算しません。合成IDと件数だけを表示し、実key・encoded key・value・SQL literalは保持しません。',
+    initialVersions: '初期version',
+    filteredVersions: 'filter済み',
+    putAnchors: '保持Put anchor',
+    deleteChains: 'Deleteで旧chainを除去',
+    defaultDeletes: '長いDEFAULT CF value削除',
+    none: 'なし',
+    region: 'Region',
+    writeType: 'Write',
+    valueStorage: 'CF',
+    versionState: '状態',
+    present: '残存',
+    retainedAnchor: 'Put anchor保持',
+    filtered: 'filter済み',
+    boundaries: '仕組みの境界',
+    compactionBoundary:
+      'Compaction FilterはRocksDB compaction中のno-Raft物理storage処理で、Raft entryを作りません。',
+    separateBoundary:
+      'MVCC GC、Delete Range、物理compaction、Raft log GCは別の仕組みです。表示件数はdisk byte量やlatency benchmarkではありません。',
+    privacy:
+      'PRIVACY: SQL文、literal、実key/value、結果行は保存・表示しません。',
+    phaseNames: {
+      idle: '待機',
+      preparing: '候補とbound',
+      safe_point_bounded: 'mysql stage',
+      resolving_locks: 'Resolve Locks',
+      caching_safe_point: 'visibility / cache barrier',
+      deleting_ranges: 'Delete Ranges',
+      publishing_safe_point: 'PD公開',
+      tikv_observing: 'TiKV観測',
+      compacting: 'Compaction Filter',
+      between_rounds: 'ラウンド間',
+      complete: '完了',
+    },
+    compactionStates: {
+      idle: '待機',
+      eligible: '対象',
+      running: '実行中',
+      complete: '完了',
+    },
+    deleteStates: {
+      pending: '待機',
+      eligible: '対象',
+      deleted: '削除済み',
+    },
+  },
+  en: {
+    eyebrow: 'GC / STORAGE LAB · EXACT SNAPSHOT',
+    title: 'Two GC rounds and physical storage',
+    phase: 'Phase',
+    round: 'Round',
+    snapshot: 'Snapshot',
+    graphTitle: 'GC coordinator → TiKV storage pipeline',
+    graphContract: '2 ROUNDS · EXACT EVENT',
+    graphDirection:
+      'Each row is a semantic pipeline derived from the selected immutable snapshot. It does not replace the causal DAG above or serialize parallel Stores.',
+    stages: {
+      candidate: 'life-time candidate',
+      bound: 'minStartTS - 1 / service bound',
+      mysql_staged: 'stage in mysql.tidb',
+      resolve_locks: 'Resolve ScanLock',
+      visibility_saved: 'visibility save / cache barrier',
+      delete_range: 'UnsafeDestroyRange',
+      pd_published: 'publish global to PD',
+      tikv_detected: 'each TiKV detects',
+      compaction_filter: 'Compaction Filter',
+    },
+    states: {
+      complete: 'Complete',
+      current: 'Current',
+      future: 'Not reached',
+    },
+    priorRound: 'Completed in prior immutable snapshots',
+    futureRound: 'This round has not started',
+    pending: 'Pending',
+    candidate: 'Candidate safe point',
+    previous: 'Previous safe point',
+    globalMinStartTs: 'Global min start_ts',
+    activeBound: 'Active transaction bound',
+    serviceBound: 'Service safe point',
+    blocked: 'Bounded by long transaction',
+    blocker: 'Blocker',
+    active: 'Active',
+    completed: 'Complete',
+    yes: 'Yes',
+    no: 'No',
+    scanned: 'Scanned Regions',
+    detected: 'Stores detected',
+    compacted: 'Store filters complete',
+    safePointStores: 'Three safe-point storage boundaries',
+    safePointStoresNote:
+      'The mysql.tidb display value, TiDB visibility/cache value, and PD global value are separate storage and publication boundaries.',
+    mysqlStatus: 'mysql.tidb status',
+    visibilityCache: 'TiDB visibility / cache barrier',
+    pdGlobal: 'PD global GC safe point',
+    leaderLease: 'GC leader lease',
+    cacheBarrier: 'cache barrier',
+    stagedValue: 'Staged',
+    savedValue: 'Saved',
+    publishedValue: 'Published',
+    resolveTitle: 'Resolve Locks / ScanLock',
+    resolveImplementation: 'Implementation',
+    resolveRegions: 'Scanned Regions',
+    noRegions: 'No Region scanned yet',
+    resolvedLocks: 'Synthetic locks',
+    noLocks: 'No target locks',
+    committedPrimary: 'Primary committed → resolve commit',
+    rolledBackPrimary: 'Primary rolled back → resolve rollback',
+    pendingLock: 'Pending',
+    resolveBoundary:
+      'ResolveLock is a normal TiKV write command, but its Raft-entry detail is outside this GC slice.',
+    deleteTitle: 'Classic raftstore-v1 Delete Range fan-out',
+    deleteNote:
+      'UnsafeDestroyRange fans out directly to each Store and bypasses Region Raft. Per-Store acknowledgements are not retained in the snapshot; only the aggregate range state is projected.',
+    rangeState: 'Aggregate range state',
+    unsafeDestroy: 'UnsafeDestroyRange',
+    ackNotProjected: 'Per-Store ack not projected',
+    aggregateComplete: 'Aggregate complete',
+    storeTitle: 'TiKV safe-point detector / filter',
+    detectedSafePoint: 'Detected safe point',
+    compaction: 'Compaction',
+    filterActive: 'Filter active',
+    storageTitle: 'Logical MVCC chains (counted once)',
+    storageNote:
+      'Logical chains are not multiplied by three replicas. Only synthetic IDs and counts are shown; no real or encoded keys, values, or SQL literals are retained.',
+    initialVersions: 'Initial versions',
+    filteredVersions: 'Filtered',
+    putAnchors: 'Retained Put anchors',
+    deleteChains: 'Old chain removed by Delete',
+    defaultDeletes: 'Long DEFAULT CF values deleted',
+    none: 'None',
+    region: 'Region',
+    writeType: 'Write',
+    valueStorage: 'CF',
+    versionState: 'State',
+    present: 'Present',
+    retainedAnchor: 'Retained Put anchor',
+    filtered: 'Filtered',
+    boundaries: 'Mechanism boundaries',
+    compactionBoundary:
+      'Compaction Filter is no-Raft physical storage work during RocksDB compaction and creates no Raft entry.',
+    separateBoundary:
+      'MVCC GC, Delete Range, physical compaction, and Raft log GC are separate mechanisms. Displayed counts are not disk bytes or a latency benchmark.',
+    privacy:
+      'PRIVACY: no SQL text, literals, real keys/values, or result rows are stored or displayed.',
+    phaseNames: {
+      idle: 'Idle',
+      preparing: 'Candidate and bound',
+      safe_point_bounded: 'mysql stage',
+      resolving_locks: 'Resolve Locks',
+      caching_safe_point: 'Visibility / cache barrier',
+      deleting_ranges: 'Delete Ranges',
+      publishing_safe_point: 'PD publication',
+      tikv_observing: 'TiKV observation',
+      compacting: 'Compaction Filter',
+      between_rounds: 'Between rounds',
+      complete: 'Complete',
+    },
+    compactionStates: {
+      idle: 'Idle',
+      eligible: 'Eligible',
+      running: 'Running',
+      complete: 'Complete',
+    },
+    deleteStates: {
+      pending: 'Pending',
+      eligible: 'Eligible',
+      deleted: 'Deleted',
+    },
   },
 } as const
 
@@ -2709,6 +2987,647 @@ function renderRaftState(
   )
 }
 
+function gcFact(label: string, value: string): HTMLElement {
+  return element('div', {},
+    element('dt', { text: label }),
+    element('dd', { text: value }),
+  )
+}
+
+function gcTimestamp(
+  value: number | null,
+  locale: Locale,
+): string {
+  return value === null ? GC_MACHINE_COPY[locale].pending : String(value)
+}
+
+function gcBoolean(value: boolean, locale: Locale): string {
+  const copy = GC_MACHINE_COPY[locale]
+  return value ? copy.yes : copy.no
+}
+
+function gcCurrentPipelineStage(
+  snapshot: TraceGcLabSnapshot,
+): GcPipelineStage | null {
+  if (snapshot.phase === 'preparing') {
+    return snapshot.safePoint.candidate === null ? 'candidate' : 'bound'
+  }
+  const phaseStage: Partial<Record<TraceGcLabPhase, GcPipelineStage>> = {
+    safe_point_bounded: 'mysql_staged',
+    resolving_locks: 'resolve_locks',
+    caching_safe_point: 'visibility_saved',
+    deleting_ranges: 'delete_range',
+    publishing_safe_point: 'pd_published',
+    tikv_observing: 'tikv_detected',
+    compacting: 'compaction_filter',
+  }
+  return phaseStage[snapshot.phase] ?? null
+}
+
+function gcPipelineState(
+  snapshot: TraceGcLabSnapshot,
+  round: 1 | 2,
+  stage: GcPipelineStage,
+): GcPipelineState {
+  if (round < snapshot.round) return 'complete'
+  if (round > snapshot.round) return 'future'
+  if (snapshot.phase === 'between_rounds' || snapshot.phase === 'complete') {
+    return 'complete'
+  }
+  const currentStage = gcCurrentPipelineStage(snapshot)
+  if (currentStage === null) return 'future'
+  const currentIndex = GC_PIPELINE_STAGES.indexOf(currentStage)
+  const stageIndex = GC_PIPELINE_STAGES.indexOf(stage)
+  if (stageIndex < currentIndex) return 'complete'
+  return stageIndex === currentIndex ? 'current' : 'future'
+}
+
+function gcDeleteRangeState(
+  snapshot: TraceGcLabSnapshot,
+): TraceGcLabSnapshot['deleteRanges'][number]['status'] {
+  if (snapshot.deleteRanges.every((range) => range.status === 'deleted')) {
+    return 'deleted'
+  }
+  if (snapshot.deleteRanges.some((range) => range.status === 'eligible')) {
+    return 'eligible'
+  }
+  return 'pending'
+}
+
+function gcPipelineStageValue(
+  snapshot: TraceGcLabSnapshot,
+  round: 1 | 2,
+  stage: GcPipelineStage,
+  locale: Locale,
+): string {
+  const copy = GC_MACHINE_COPY[locale]
+  if (round < snapshot.round) return copy.priorRound
+  if (round > snapshot.round) return copy.futureRound
+  switch (stage) {
+    case 'candidate':
+      return gcTimestamp(snapshot.safePoint.candidate, locale)
+    case 'bound':
+      if (snapshot.safePoint.serviceSafePoint === null) return copy.pending
+      return snapshot.safePoint.blocked
+        ? `${snapshot.safePoint.globalMinStartTs} - 1 = ${snapshot.safePoint.activeTransactionBound}`
+        : String(snapshot.safePoint.serviceSafePoint)
+    case 'mysql_staged':
+      return String(snapshot.safePoint.staged)
+    case 'resolve_locks':
+      return `${snapshot.resolveLocks.scannedRegionIds.length} / 2`
+    case 'visibility_saved':
+      return String(snapshot.safePoint.visibilitySaved)
+    case 'delete_range':
+      return copy.deleteStates[gcDeleteRangeState(snapshot)]
+    case 'pd_published':
+      return String(snapshot.safePoint.published)
+    case 'tikv_detected': {
+      const detected = snapshot.stores.filter((store) =>
+        store.detectedSafePoint === snapshot.safePoint.published &&
+        snapshot.safePoint.published > snapshot.safePoint.previous).length
+      return `${detected} / ${snapshot.stores.length}`
+    }
+    case 'compaction_filter':
+      return `${snapshot.stores.filter((store) =>
+        store.compaction === 'complete').length} / ${snapshot.stores.length}`
+  }
+}
+
+function renderGcPipelineRound(
+  snapshot: TraceGcLabSnapshot,
+  round: 1 | 2,
+  locale: Locale,
+): HTMLElement {
+  const copy = GC_MACHINE_COPY[locale]
+  const rowState = round < snapshot.round ||
+    (
+      round === snapshot.round &&
+      (snapshot.phase === 'between_rounds' || snapshot.phase === 'complete')
+    )
+    ? 'complete'
+    : round === snapshot.round
+      ? 'current'
+      : 'future'
+  return element('article', {
+    className: `tidb-machine__gc-round is-${rowState}`,
+    attrs: {
+      'data-gc-pipeline-round': String(round),
+      'data-gc-round-state': rowState,
+    },
+  },
+  element('header', { className: 'tidb-machine__gc-round-head' },
+    element('h4', { text: `${copy.round} ${round}` }),
+    element('span', {
+      className: `tidb-machine__gc-round-state is-${rowState}`,
+      text: copy.states[rowState],
+    }),
+  ),
+  element('ol', {
+    className: 'tidb-machine__gc-flow',
+    attrs: {
+      'aria-label': `${copy.round} ${round}: ${copy.graphTitle}`,
+    },
+  },
+  ...GC_PIPELINE_STAGES.map((stage) => {
+    const state = gcPipelineState(snapshot, round, stage)
+    return element('li', {
+      className: `tidb-machine__gc-flow-node is-${state}`,
+      attrs: {
+        'data-gc-pipeline-stage': stage,
+        'data-gc-pipeline-state': state,
+        'aria-current': state === 'current' ? 'step' : 'false',
+      },
+    },
+    element('span', { text: copy.stages[stage] }),
+    element('strong', {
+      text: gcPipelineStageValue(snapshot, round, stage, locale),
+    }),
+    element('small', { text: copy.states[state] }),
+    )
+  }),
+  ),
+  )
+}
+
+function renderGcSafePointStores(
+  snapshot: TraceGcLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = GC_MACHINE_COPY[locale]
+  const stores = [
+    {
+      id: 'mysql_staged',
+      title: copy.mysqlStatus,
+      label: `${copy.stagedValue} · ${copy.leaderLease}: ${
+        snapshot.configuration.gcLeaderLeaseStore
+      }`,
+      value: snapshot.safePoint.staged,
+    },
+    {
+      id: 'visibility_saved',
+      title: copy.visibilityCache,
+      label: `${copy.savedValue} · ${copy.cacheBarrier}: ${
+        snapshot.configuration.visibilityCacheBarrierSeconds
+      } s`,
+      value: snapshot.safePoint.visibilitySaved,
+    },
+    {
+      id: 'pd_global',
+      title: copy.pdGlobal,
+      label: copy.publishedValue,
+      value: snapshot.safePoint.published,
+    },
+  ] as const
+  return element('section', {
+    className: 'tidb-machine__gc-safe-point-stores',
+    attrs: { 'aria-labelledby': 'tidb-machine-gc-safe-point-stores-title' },
+  },
+  element('h3', {
+    text: copy.safePointStores,
+    attrs: { id: 'tidb-machine-gc-safe-point-stores-title' },
+  }),
+  element('p', {
+    className: 'tidb-machine__gc-direction',
+    text: copy.safePointStoresNote,
+  }),
+  element('div', {
+    className: 'tidb-machine__gc-safe-point-store-list',
+    attrs: { role: 'list' },
+  },
+  ...stores.map((store) => {
+    const card = element('article', {
+      className: 'tidb-machine__gc-safe-point-store',
+      attrs: {
+        'data-safe-point-store': store.id,
+        'data-safe-point-value': String(store.value),
+        ...(store.id === 'mysql_staged'
+          ? {
+            'data-gc-leader-lease-store':
+              snapshot.configuration.gcLeaderLeaseStore,
+          }
+          : {}),
+        ...(store.id === 'visibility_saved'
+          ? {
+            'data-visibility-cache-barrier-seconds': String(
+              snapshot.configuration.visibilityCacheBarrierSeconds,
+            ),
+          }
+          : {}),
+      },
+    },
+    element('h4', { text: store.title }),
+    element('span', { text: store.label }),
+    element('strong', { text: String(store.value) }),
+    )
+    card.setAttribute('role', 'listitem')
+    return card
+  }),
+  ),
+  )
+}
+
+function renderGcResolveLocks(
+  snapshot: TraceGcLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = GC_MACHINE_COPY[locale]
+  return element('section', {
+    className: 'tidb-machine__gc-card tidb-machine__gc-resolve',
+    attrs: {
+      'data-gc-resolve-implementation': snapshot.resolveLocks.implementation,
+      'data-resolve-lock-raft-detail': snapshot.configuration
+        .resolveLockRaftDetailModeled ? 'modeled' : 'outside-slice',
+      'data-resolve-lock-raft-detail-modeled': String(
+        snapshot.configuration.resolveLockRaftDetailModeled,
+      ),
+    },
+  },
+  element('h3', { text: copy.resolveTitle }),
+  element('dl', { className: 'tidb-machine__gc-facts' },
+    gcFact(copy.resolveImplementation, snapshot.resolveLocks.implementation),
+    gcFact(
+      copy.resolveRegions,
+      snapshot.resolveLocks.scannedRegionIds.length > 0
+        ? snapshot.resolveLocks.scannedRegionIds
+          .map((regionId) => `Region ${regionId}`).join(' · ')
+        : copy.noRegions,
+    ),
+  ),
+  snapshot.resolveLocks.locks.length > 0
+    ? element('ul', {
+      className: 'tidb-machine__gc-lock-list',
+      attrs: { 'aria-label': copy.resolvedLocks },
+    },
+    ...snapshot.resolveLocks.locks.map((lock) => {
+      const state = lock.status === 'resolved_commit'
+        ? copy.committedPrimary
+        : lock.status === 'resolved_rollback'
+          ? copy.rolledBackPrimary
+          : copy.pendingLock
+      return element('li', {
+        attrs: {
+          'data-gc-lock': lock.id,
+          'data-gc-lock-state': lock.status,
+          'data-primary-state': lock.primaryStatus,
+        },
+      },
+      element('code', { text: lock.id }),
+      element('span', { text: `Region ${lock.regionId}` }),
+      element('strong', { text: state }),
+      )
+    }),
+    )
+    : element('p', {
+      className: 'tidb-machine__gc-empty',
+      text: copy.noLocks,
+    }),
+  element('p', {
+    className: 'tidb-machine__gc-boundary-note',
+    text: copy.resolveBoundary,
+  }),
+  )
+}
+
+function renderGcDeleteRange(
+  snapshot: TraceGcLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = GC_MACHINE_COPY[locale]
+  const rangeState = gcDeleteRangeState(snapshot)
+  return element('section', {
+    className: 'tidb-machine__gc-card tidb-machine__gc-delete-range',
+    attrs: {
+      'data-raftstore-mode': snapshot.configuration.raftstoreMode,
+      'data-unsafe-destroy-range-raft': String(
+        !snapshot.configuration.deleteRangeBypassesRaft,
+      ),
+      'data-delete-range-state': rangeState,
+    },
+  },
+  element('h3', { text: copy.deleteTitle }),
+  element('dl', { className: 'tidb-machine__gc-facts' },
+    gcFact(copy.rangeState, copy.deleteStates[rangeState]),
+    gcFact(
+      copy.unsafeDestroy,
+      snapshot.deleteRanges.map((range) => range.id).join(' · '),
+    ),
+  ),
+  element('div', {
+    className: 'tidb-machine__gc-unsafe-store-list',
+    attrs: { role: 'list' },
+  },
+  ...snapshot.stores.map((store) => {
+    const aggregateComplete = rangeState === 'deleted'
+    const card = element('article', {
+      className: `tidb-machine__gc-unsafe-store is-${rangeState}`,
+      attrs: {
+        'data-unsafe-destroy-store': store.storeId,
+        'data-unsafe-destroy-request':
+          snapshot.configuration.deleteRangeRequest,
+        'data-unsafe-destroy-raft-bypass': String(
+          snapshot.configuration.deleteRangeBypassesRaft,
+        ),
+        'data-store-ack': aggregateComplete
+          ? 'aggregate_complete'
+          : 'not_projected',
+      },
+    },
+    element('strong', { text: store.storeId }),
+    element('code', { text: snapshot.configuration.deleteRangeRequest }),
+    element('small', {
+      text: aggregateComplete ? copy.aggregateComplete : copy.ackNotProjected,
+    }),
+    )
+    card.setAttribute('role', 'listitem')
+    return card
+  }),
+  ),
+  element('p', {
+    className: 'tidb-machine__gc-boundary-note',
+    text: copy.deleteNote,
+  }),
+  )
+}
+
+function renderGcTiKvStores(
+  snapshot: TraceGcLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = GC_MACHINE_COPY[locale]
+  return element('section', {
+    className: 'tidb-machine__gc-card tidb-machine__gc-tikv-stores',
+  },
+  element('h3', { text: copy.storeTitle }),
+  element('div', {
+    className: 'tidb-machine__gc-tikv-store-list',
+    attrs: { role: 'list' },
+  },
+  ...snapshot.stores.map((store) => {
+    const card = element('article', {
+      className: `tidb-machine__gc-tikv-store is-${store.compaction}`,
+      attrs: {
+        'data-gc-tikv-store': store.storeId,
+        'data-detected-safe-point': String(store.detectedSafePoint),
+        'data-compaction-state': store.compaction,
+        'data-filter-active': String(store.filterActive),
+      },
+    },
+    element('h4', { text: store.storeId }),
+    element('dl', { className: 'tidb-machine__gc-facts' },
+      gcFact(copy.detectedSafePoint, String(store.detectedSafePoint)),
+      gcFact(copy.compaction, copy.compactionStates[store.compaction]),
+      gcFact(copy.filterActive, gcBoolean(store.filterActive, locale)),
+    ),
+    )
+    card.setAttribute('role', 'listitem')
+    return card
+  }),
+  ),
+  )
+}
+
+function renderGcStorage(
+  snapshot: TraceGcLabSnapshot,
+  locale: Locale,
+): HTMLElement {
+  const copy = GC_MACHINE_COPY[locale]
+  const versions = snapshot.keyChains.flatMap((chain) => chain.versions)
+  const anchors = versions.filter((version) =>
+    version.state === 'retained_anchor' && version.writeType === 'put')
+  const deleteChains = snapshot.keyChains.filter((chain) =>
+    chain.versions.some((version) =>
+      version.writeType === 'delete' && version.state === 'filtered'))
+  const defaultDeletes = versions.filter((version) =>
+    version.state === 'filtered' &&
+    version.writeType === 'put' &&
+    version.valueStorage === 'write_and_default_cf')
+  return element('section', {
+    className: 'tidb-machine__gc-storage',
+    attrs: {
+      'data-storage-representation': snapshot.storage.representation,
+      'data-logical-chains-counted-once': 'true',
+      'data-replica-multiplier': '1',
+    },
+  },
+  element('h3', { text: copy.storageTitle }),
+  element('p', {
+    className: 'tidb-machine__gc-direction',
+    text: copy.storageNote,
+  }),
+  element('dl', { className: 'tidb-machine__gc-storage-summary' },
+    gcFact(copy.initialVersions, String(snapshot.storage.initialVersionCount)),
+    gcFact(copy.filteredVersions, String(snapshot.storage.filteredVersionCount)),
+    gcFact(
+      copy.putAnchors,
+      anchors.length > 0
+        ? `${anchors.length} · ${anchors.map((version) => version.id).join(', ')}`
+        : copy.none,
+    ),
+    gcFact(
+      copy.deleteChains,
+      deleteChains.length > 0
+        ? deleteChains.map((chain) => chain.id).join(', ')
+        : copy.none,
+    ),
+    gcFact(
+      copy.defaultDeletes,
+      defaultDeletes.length > 0
+        ? `${snapshot.storage.deletedDefaultCfValues} · ${defaultDeletes
+          .map((version) => version.id).join(', ')}`
+        : `0 · ${copy.none}`,
+    ),
+  ),
+  element('div', {
+    className: 'tidb-machine__gc-chain-list',
+    attrs: { role: 'list' },
+  },
+  ...snapshot.keyChains.map((chain) => {
+    const card = element(
+      'article',
+      {
+        className: 'tidb-machine__gc-chain',
+        attrs: {
+          'data-gc-chain': chain.id,
+          'data-region-id': String(chain.regionId),
+        },
+      },
+      element('header', {},
+        element('h4', { text: chain.id }),
+        element('span', { text: `${copy.region} ${chain.regionId}` }),
+      ),
+      element(
+        'ol',
+        {
+          className: 'tidb-machine__gc-version-list',
+          attrs: { 'aria-label': chain.id },
+        },
+        ...chain.versions.map((version) => element(
+          'li',
+          {
+        className: `is-${version.state}`,
+        attrs: {
+          'data-gc-version': version.id,
+          'data-gc-version-state': version.state,
+          'data-gc-write-type': version.writeType,
+          'data-gc-value-storage': version.valueStorage,
+        },
+          },
+          element('code', { text: version.id }),
+          element('span', {
+            text: `${copy.writeType}: ${version.writeType}`,
+          }),
+          element('span', {
+            text: `${copy.valueStorage}: ${version.valueStorage}`,
+          }),
+          element('strong', {
+            text: version.state === 'retained_anchor'
+              ? copy.retainedAnchor
+              : copy[version.state],
+          }),
+        )),
+      ),
+    )
+    card.setAttribute('role', 'listitem')
+    return card
+  }),
+  ),
+  )
+}
+
+function renderGcState(
+  event: MachineEvent,
+  locale: Locale,
+): HTMLElement | null {
+  const gcLab = event.snapshot?.gcLab
+  if (!gcLab) return null
+  const copy = GC_MACHINE_COPY[locale]
+  const detectedStores = gcLab.stores.filter((store) =>
+    store.detectedSafePoint === gcLab.safePoint.published &&
+    gcLab.safePoint.published > gcLab.safePoint.previous).length
+  const compactedStores = gcLab.stores.filter((store) =>
+    store.compaction === 'complete').length
+
+  return element('section', {
+    className: 'tidb-machine__gc-state',
+    attrs: {
+      'aria-labelledby': 'tidb-machine-gc-title',
+      'data-gc-machine-state': 'true',
+      'data-gc-event-id': event.id,
+      'data-gc-event-kind': event.kind ?? '',
+      'data-gc-phase': gcLab.phase,
+      'data-gc-round': String(gcLab.round),
+      'data-gc-model': 'model-6',
+    },
+  },
+  element('header', { className: 'tidb-machine__gc-head' },
+    element('div', {},
+      element('p', {
+        className: 'tidb-machine__gc-eyebrow',
+        text: copy.eyebrow,
+      }),
+      element('h2', {
+        text: copy.title,
+        attrs: { id: 'tidb-machine-gc-title' },
+      }),
+    ),
+    element('div', { className: 'tidb-machine__gc-head-meta' },
+      element('span', {
+        className: `tidb-machine__gc-phase is-${gcLab.phase}`,
+        text: `${copy.phase}: ${copy.phaseNames[gcLab.phase]}`,
+      }),
+      element('span', {
+        className: 'tidb-machine__gc-snapshot',
+        text: `${copy.snapshot} · ${event.id}`,
+      }),
+    ),
+  ),
+  element('dl', { className: 'tidb-machine__gc-summary' },
+    gcFact(copy.round, `${gcLab.round} / 2`),
+    gcFact(copy.previous, String(gcLab.safePoint.previous)),
+    gcFact(copy.candidate, gcTimestamp(gcLab.safePoint.candidate, locale)),
+    gcFact(
+      copy.globalMinStartTs,
+      gcTimestamp(gcLab.safePoint.globalMinStartTs, locale),
+    ),
+    gcFact(
+      copy.activeBound,
+      gcTimestamp(gcLab.safePoint.activeTransactionBound, locale),
+    ),
+    gcFact(
+      copy.serviceBound,
+      gcTimestamp(gcLab.safePoint.serviceSafePoint, locale),
+    ),
+    gcFact(copy.blocked, gcBoolean(gcLab.safePoint.blocked, locale)),
+    gcFact(
+      copy.blocker,
+      `${gcLab.blocker.transactionId} · ${
+        gcLab.blocker.status === 'active' ? copy.active : copy.completed
+      }`,
+    ),
+    gcFact(
+      copy.scanned,
+      String(gcLab.resolveLocks.scannedRegionIds.length),
+    ),
+    gcFact(copy.detected, `${detectedStores} / ${gcLab.stores.length}`),
+    gcFact(copy.compacted, `${compactedStores} / ${gcLab.stores.length}`),
+  ),
+  element('section', {
+    className: 'tidb-machine__gc-graph',
+    attrs: {
+      tabindex: '0',
+      'aria-label': copy.graphTitle,
+      'data-gc-semantic-graph': 'pipeline',
+      'data-causal-dag-replaced': 'false',
+    },
+  },
+  element('div', { className: 'tidb-machine__gc-graph-head' },
+    element('h3', { text: copy.graphTitle }),
+    element('span', {
+      className: 'tidb-machine__gc-graph-contract',
+      text: copy.graphContract,
+    }),
+  ),
+  element('p', {
+    className: 'tidb-machine__gc-direction',
+    text: copy.graphDirection,
+  }),
+  element('div', { className: 'tidb-machine__gc-graph-scroll' },
+    renderGcPipelineRound(gcLab, 1, locale),
+    renderGcPipelineRound(gcLab, 2, locale),
+  ),
+  ),
+  renderGcSafePointStores(gcLab, locale),
+  element('div', { className: 'tidb-machine__gc-detail-grid' },
+    renderGcResolveLocks(gcLab, locale),
+    renderGcDeleteRange(gcLab, locale),
+    renderGcTiKvStores(gcLab, locale),
+  ),
+  renderGcStorage(gcLab, locale),
+  element('section', {
+    className: 'tidb-machine__gc-boundaries',
+    attrs: {
+      'data-compaction-filter-raft-entry': 'false',
+      'data-raft-log-gc-modeled': 'false',
+      'data-real-key-material': 'false',
+    },
+  },
+  element('h3', { text: copy.boundaries }),
+  element('p', {
+    className: 'tidb-machine__gc-boundary-note is-compaction',
+    text: copy.compactionBoundary,
+  }),
+  element('p', {
+    className: 'tidb-machine__gc-boundary-note',
+    text: copy.separateBoundary,
+  }),
+  element('p', {
+    className: 'tidb-machine__gc-privacy',
+    text: copy.privacy,
+  }),
+  ),
+  )
+}
+
 export function adaptTraceReceipt(source: unknown): MachineReceipt {
   const receipt = record(source)
   const rawEvents = Array.isArray(receipt.events) ? receipt.events : []
@@ -3026,6 +3945,7 @@ function renderTimeline(
       'data-event-has-lock-snapshot': event.snapshot?.lockLab ? 'true' : 'false',
       'data-event-has-raft-snapshot': event.snapshot?.raftLab ? 'true' : 'false',
       'data-event-has-protocol-snapshot': event.snapshot?.protocolLab ? 'true' : 'false',
+      'data-event-has-gc-snapshot': event.snapshot?.gcLab ? 'true' : 'false',
       'data-event-status': status,
       'data-event-state': state,
     })
@@ -3126,6 +4046,11 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     Boolean(event.snapshot?.protocolLab))
   const protocolSlot = element('div', {
     className: 'tidb-machine__protocol-slot',
+  })
+  const hasGcSnapshots = receipt.events.some((event) =>
+    Boolean(event.snapshot?.gcLab))
+  const gcSlot = element('div', {
+    className: 'tidb-machine__gc-slot',
   })
   const detail = element('section', {
     className: 'tidb-machine__detail',
@@ -3316,6 +4241,16 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
       if (protocolState) protocolSlot.replaceChildren(protocolState)
       else protocolSlot.replaceChildren()
     }
+    if (hasGcSnapshots) {
+      const gcState = event ? renderGcState(event, locale) : null
+      gcSlot.hidden = gcState === null
+      gcSlot.setAttribute(
+        'aria-hidden',
+        gcState === null ? 'true' : 'false',
+      )
+      if (gcState) gcSlot.replaceChildren(gcState)
+      else gcSlot.replaceChildren()
+    }
     options.onSeek?.(event, current)
 
     for (const marker of frame.querySelectorAll<SVGElement>('[data-event-index]')) {
@@ -3382,6 +4317,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     ...(hasLockSnapshots ? [lockSlot] : []),
     ...(hasRaftSnapshots ? [raftSlot] : []),
     ...(hasProtocolSnapshots ? [protocolSlot] : []),
+    ...(hasGcSnapshots ? [gcSlot] : []),
     detail,
     element('p', { className: 'tidb-machine__note', text: CATALOG[locale].simulatedTiming }),
   )
