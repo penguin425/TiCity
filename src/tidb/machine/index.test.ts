@@ -932,4 +932,236 @@ describe('TiCity Machine replay', () => {
     expect(root.querySelector('[data-lock-lab-state="true"]')).not.toBeNull()
     expect(root.querySelector('[data-raft-lab-state="true"]')).not.toBeNull()
   })
+
+  it('projects the exact GC snapshot as two semantic rounds without rewriting the causal DAG', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+    const boundEvent = receipt.events.find((event) =>
+      event.kind === 'gc_min_start_ts_bound')
+    const deleteStart = receipt.events.find((event) =>
+      event.kind === 'gc_delete_ranges_start')
+    const firstPublish = receipt.events.find((event) =>
+      event.kind === 'gc_global_safe_point_publish')
+    if (!boundEvent?.snapshot?.gcLab || !deleteStart || !firstPublish) {
+      throw new Error('Expected exact GC/Storage Lab events.')
+    }
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      receipt,
+      initialEventId: boundEvent.id,
+    })
+
+    const lab = root.querySelector('[data-gc-machine-state="true"]')
+    expect(lab?.getAttribute('data-gc-event-id')).toBe(boundEvent.id)
+    expect(lab?.getAttribute('data-gc-phase')).toBe('preparing')
+    expect(lab?.getAttribute('data-gc-round')).toBe('1')
+    expect(root.querySelectorAll('[data-gc-pipeline-round]')).toHaveLength(2)
+    expect(root.querySelectorAll('[data-gc-pipeline-stage]')).toHaveLength(18)
+    expect(root.querySelector(
+      '[data-gc-pipeline-round="1"] [data-gc-pipeline-stage="candidate"]',
+    )?.getAttribute('data-gc-pipeline-state')).toBe('complete')
+    expect(root.querySelector(
+      '[data-gc-pipeline-round="1"] [data-gc-pipeline-stage="bound"]',
+    )?.getAttribute('data-gc-pipeline-state')).toBe('current')
+    expect(root.querySelector(
+      '[data-gc-pipeline-round="2"] [data-gc-pipeline-stage="candidate"]',
+    )?.getAttribute('data-gc-pipeline-state')).toBe('future')
+
+    const roundOneStages = root.querySelectorAll(
+      '[data-gc-pipeline-round="1"] [data-gc-pipeline-stage]',
+    ).map((node) => node.getAttribute('data-gc-pipeline-stage'))
+    expect(roundOneStages).toEqual([
+      'candidate',
+      'bound',
+      'mysql_staged',
+      'resolve_locks',
+      'visibility_saved',
+      'delete_range',
+      'pd_published',
+      'tikv_detected',
+      'compaction_filter',
+    ])
+    expect(root.querySelector('[data-gc-semantic-graph="pipeline"]')
+      ?.getAttribute('data-causal-dag-replaced')).toBe('false')
+    expect(root.querySelector(`[data-event-id="${boundEvent.id}"]`)
+      ?.getAttribute('data-event-has-gc-snapshot')).toBe('true')
+
+    expect(root.querySelectorAll(
+      `[data-causal-from="${deleteStart.id}"]`,
+    )).toHaveLength(3)
+    expect(root.querySelectorAll(
+      `[data-causal-from="${firstPublish.id}"]`,
+    )).toHaveLength(3)
+    const firstDeleteStore = receipt.events.find((event) =>
+      event.kind === 'gc_delete_range_store')
+    const secondDeleteStore = receipt.events.find((event) =>
+      event.kind === 'gc_delete_range_store' &&
+      event.id !== firstDeleteStore?.id)
+    expect(root.querySelector(
+      `[data-causal-from="${firstDeleteStore?.id}"][data-causal-to="${secondDeleteStore?.id}"]`,
+    )).toBeNull()
+
+    const safePoint = boundEvent.snapshot.gcLab.safePoint
+    expect(safePoint.activeTransactionBound)
+      .toBe(boundEvent.snapshot.gcLab.blocker.startTs - 1)
+    expect(lab?.textContent).toContain(
+      `${safePoint.globalMinStartTs} - 1 = ${safePoint.activeTransactionBound}`,
+    )
+  })
+
+  it('distinguishes safe-point stores, Store filters, and counted-once MVCC chains at the final exact event', () => {
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+    const completeEvent = receipt.events.find((event) =>
+      event.kind === 'gc_storage_lab_complete')
+    if (!completeEvent?.snapshot?.gcLab) {
+      throw new Error('Expected the final exact GC/Storage Lab snapshot.')
+    }
+    const final = completeEvent.snapshot.gcLab
+
+    for (const locale of ['en', 'ja'] as const) {
+      const dom = installTestDom()
+      const root = dom.mount(`machine-${locale}`)
+      mountMachine(root as unknown as HTMLElement, {
+        locale,
+        receipt: {
+          id: `gc-final-${locale}`,
+          events: [{
+            ...completeEvent,
+            id: `renamed-event-${locale}`,
+            kind: 'presentation_label_does_not_drive_gc_state',
+          }],
+        },
+      })
+
+      const lab = root.querySelector('[data-gc-machine-state="true"]')
+      expect(lab?.getAttribute('data-gc-phase')).toBe('complete')
+      expect(lab?.getAttribute('data-gc-round')).toBe('2')
+      expect(root.querySelectorAll('[data-safe-point-store]')).toHaveLength(3)
+      expect(root.querySelector('[data-safe-point-store="mysql_staged"]')
+        ?.getAttribute('data-safe-point-value')).toBe(String(final.safePoint.staged))
+      expect(root.querySelector('[data-safe-point-store="mysql_staged"]')
+        ?.getAttribute('data-gc-leader-lease-store'))
+        .toBe(final.configuration.gcLeaderLeaseStore)
+      expect(root.querySelector('[data-safe-point-store="visibility_saved"]')
+        ?.getAttribute('data-safe-point-value'))
+        .toBe(String(final.safePoint.visibilitySaved))
+      expect(root.querySelector('[data-safe-point-store="visibility_saved"]')
+        ?.getAttribute('data-visibility-cache-barrier-seconds'))
+        .toBe(String(final.configuration.visibilityCacheBarrierSeconds))
+      expect(root.querySelector('[data-safe-point-store="pd_global"]')
+        ?.getAttribute('data-safe-point-value')).toBe(String(final.safePoint.published))
+
+      const tikvStores = root.querySelectorAll('[data-gc-tikv-store]')
+      expect(tikvStores).toHaveLength(3)
+      expect(tikvStores.map((store) => [
+        store.getAttribute('data-detected-safe-point'),
+        store.getAttribute('data-compaction-state'),
+        store.getAttribute('data-filter-active'),
+      ])).toEqual(Array.from({ length: 3 }, () => [
+        String(final.safePoint.published),
+        'complete',
+        'false',
+      ]))
+      expect(root.querySelectorAll('[data-unsafe-destroy-store]')).toHaveLength(3)
+      expect(root.querySelectorAll(
+        '[data-unsafe-destroy-store][data-unsafe-destroy-raft-bypass="true"][data-store-ack="aggregate_complete"]',
+      )).toHaveLength(3)
+
+      const storage = root.querySelector(
+        '[data-storage-representation="logical_chains_counted_once"]',
+      )
+      expect(storage?.getAttribute('data-logical-chains-counted-once')).toBe('true')
+      expect(storage?.getAttribute('data-replica-multiplier')).toBe('1')
+      expect(root.querySelectorAll(
+        '[data-gc-version-state="retained_anchor"][data-gc-write-type="put"]',
+      )).toHaveLength(final.storage.retainedAnchorCount)
+      expect(root.querySelectorAll(
+        '[data-gc-version-state="filtered"]',
+      )).toHaveLength(final.storage.filteredVersionCount)
+      expect(root.querySelector(
+        '[data-gc-version="b-v2"][data-gc-write-type="delete"][data-gc-version-state="filtered"]',
+      )).not.toBeNull()
+      expect(root.querySelectorAll(
+        '[data-gc-version-state="filtered"][data-gc-write-type="put"][data-gc-value-storage="write_and_default_cf"]',
+      )).toHaveLength(final.storage.deletedDefaultCfValues)
+
+      expect(root.querySelector('[data-compaction-filter-raft-entry="false"]'))
+        .not.toBeNull()
+      expect(root.querySelector('[data-resolve-lock-raft-detail="outside-slice"]'))
+        .not.toBeNull()
+      expect(root.querySelector('[data-resolve-lock-raft-detail-modeled="false"]'))
+        .not.toBeNull()
+      expect(lab?.textContent).toContain(
+        locale === 'en'
+          ? 'no SQL text, literals, real keys/values'
+          : 'SQL文、literal、実key/value',
+      )
+      expect(lab?.textContent).toContain(
+        locale === 'en'
+          ? 'Raft-entry detail is outside this GC slice'
+          : 'Raft entry詳細はこのGC sliceの範囲外',
+      )
+    }
+  })
+
+  it('mounts and clears the GC slot strictly from the selected event snapshot', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 })
+      .runScenario('gc-safe-point')
+    const gcEvent = receipt.events.find((event) =>
+      event.kind === 'gc_compaction_filter_apply')
+    if (!gcEvent?.snapshot?.gcLab) {
+      throw new Error('Expected an exact GC snapshot.')
+    }
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'en',
+      initialIndex: 0,
+      receipt: {
+        id: 'gc-slot-lifecycle',
+        events: [
+          {
+            id: 'plain-event',
+            atMs: 0,
+            durationMs: 1,
+            domain: 'kv',
+            kind: 'plain',
+            label: 'Plain event',
+            detail: '',
+          },
+          {
+            ...gcEvent,
+            id: 'gc-event',
+            atMs: 2,
+          },
+        ],
+      },
+    })
+
+    const slot = root.querySelector(
+      '.tidb-machine__gc-slot',
+    ) as unknown as HTMLElement
+    expect(slot.hidden).toBe(true)
+    expect(slot.getAttribute('aria-hidden')).toBe('true')
+    expect(root.querySelector('[data-event-id="plain-event"]')
+      ?.getAttribute('data-event-has-gc-snapshot')).toBe('false')
+    expect(root.querySelector('[data-event-id="gc-event"]')
+      ?.getAttribute('data-event-has-gc-snapshot')).toBe('true')
+
+    root.querySelector('[data-event-id="gc-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(slot.hidden).toBe(false)
+    expect(slot.getAttribute('aria-hidden')).toBe('false')
+    expect(slot.querySelector('[data-gc-machine-state="true"]')).not.toBeNull()
+
+    root.querySelector('[data-event-id="plain-event"]')
+      ?.dispatchEvent(new Event('click'))
+    expect(slot.hidden).toBe(true)
+    expect(slot.getAttribute('aria-hidden')).toBe('true')
+    expect(slot.children).toHaveLength(0)
+  })
 })
