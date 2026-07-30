@@ -26,8 +26,8 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
   Raft quorum、apply、概念上のMVCC `LOCK`／`DEFAULT`／`WRITE` column family
 - 不変なイベント後snapshot、明示的なfork/join依存、クライアント応答境界、
   応答後のsecondary cleanupを持つ因果イベントグラフ
-- 共有可能なURLにより、3D City、Machine、Diagnoseで一致するscenarioと
-  event cursor
+- 3D City、Machine、Diagnoseへ投影される1つの不変なreceiptと、Machineと
+  Diagnoseの間で選択scenario／eventを共有する安定したURL
 - TiProxy、TiDB Server、PD、TiKV、TiFlashからなる既定トポロジ
 - PDのTSO、Regionの範囲・Leader・3 voter、Raft複製とquorum
 - 悲観／楽観トランザクション、prewriteとcommit、1PC／Async Commit／2PC
@@ -42,9 +42,9 @@ TiKV、TiFlashの実装そのものや接続済みクラスタではなく、主
 
 | URL | 内容 |
 |---|---|
-| `/?scenario=cross-region-transaction` | 3D Cityと詳細なTransaction Lab |
-| `/machine/?scenario=cross-region-transaction&event=…` | 選択イベント時点の因果2Dステートマシン |
-| `/diagnose/?scenario=cross-region-transaction&event=…` | イベント時点のtransaction、Raft、lock、MVCC診断 |
+| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D Cityと詳細なTransaction Lab |
+| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | 選択eventを共有できる因果2Dステートマシン |
+| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | event時点のtransaction、Raft、lock、MVCC診断 |
 
 3D Cityで**内部**を選ぶとカットアウェイへフォーカスします。再生操作は同じ
 不変なreceipt上を移動し、ループ時もトランザクションを再実行しません。

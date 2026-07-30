@@ -31,8 +31,9 @@ Live site: <https://penguin425.github.io/TiCity/>
 - A causal event graph with immutable post-event snapshots, explicit
   fork/join dependencies, a client-response boundary, and background
   secondary cleanup
-- The same scenario and event cursor across the 3D City, Machine, and
-  Diagnose views through shareable URLs
+- One immutable receipt projected across the 3D City, Machine, and Diagnose,
+  with Machine and Diagnose sharing a selected scenario and event through
+  stable URLs
 - A default topology containing TiProxy, TiDB Server, PD, TiKV, and TiFlash
 - PD TSO, Region ranges and Leaders, three voters, Raft replication, and quorum
 - Pessimistic and optimistic transactions, prewrite and commit, 1PC, Async Commit, and 2PC
@@ -47,9 +48,9 @@ The application has three views:
 
 | URL | Purpose |
 |---|---|
-| `/?scenario=cross-region-transaction` | 3D City and the detailed Transaction Lab |
-| `/machine/?scenario=cross-region-transaction&event=…` | A causal 2D state machine at the selected event |
-| `/diagnose/?scenario=cross-region-transaction&event=…` | Event-time transaction, Raft, lock, and MVCC diagnostics |
+| [`…/TiCity/?scenario=cross-region-transaction`](https://penguin425.github.io/TiCity/?scenario=cross-region-transaction) | 3D City and the detailed Transaction Lab |
+| [`…/machine/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/machine/?scenario=cross-region-transaction&event=trace-1-event-7) | A causal 2D state machine with a shareable selected-event URL |
+| [`…/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7`](https://penguin425.github.io/TiCity/diagnose/?scenario=cross-region-transaction&event=trace-1-event-7) | Event-time transaction, Raft, lock, and MVCC diagnostics |
 
 Choose **Inspect** in the 3D City to focus the cutaway. Replay controls move
 through the same immutable receipt; looping reuses that receipt and never
