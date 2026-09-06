@@ -45,7 +45,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Browser and accessibility smoke tests
-        run: npm run test:e2e
+        run: npm run test:e2e -- --max-failures=1
 
       - name: Build
         run: npm run build
