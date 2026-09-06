@@ -51,10 +51,14 @@ jobs:
           path: dist
           if-no-files-found: error
 
-  browser:
-    name: Chromium accessibility and smoke tests
+  browser_shard:
+    name: Chromium shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -72,14 +76,28 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run browser tests
-        run: npm run test:e2e -- --max-failures=1
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4 --max-failures=1
 
       - name: Upload browser report on failure
         if: failure() || cancelled()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
           if-no-files-found: ignore
+
+  browser:
+    # Keep the protected branch's required context stable and fail closed when
+    # any shard fails, is cancelled, or is skipped.
+    name: Chromium accessibility and smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: browser_shard
+    if: always()
+    steps:
+      - name: Require every browser shard to pass
+        env:
+          SHARD_RESULT: ${{ needs.browser_shard.result }}
+        run: test "${SHARD_RESULT}" = success

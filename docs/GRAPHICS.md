@@ -105,6 +105,13 @@ Regression checks cover missing vertex colours, fixed rack footing, moving
 selection anchors, borrowed depth-buffer swaps, exactly-once disposal, reduced motion, portrait controls,
 offline operation and the existing model/cross-view invariants.
 
+Browser tests use one worker per machine because software WebGL rendering is
+CPU-heavy. CI and Pages validation split the complete suite across four
+independent runners and allow 120 seconds per test (60 seconds locally). This
+keeps the production graphics and test assertions unchanged; every shard must
+pass before the required CI check or Pages packaging can succeed. Failure
+reports retain screenshots, videos and traces for each shard.
+
 ## Reproduce the views
 
 With the built preview running:

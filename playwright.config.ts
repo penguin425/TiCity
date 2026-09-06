@@ -12,11 +12,12 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   /*
    * Chromium software WebGL is CPU-heavy, especially with contact shading and
-   * high-resolution shadows. Serialize both local and CI runs and allow the
-   * same 60s window so image readbacks do not starve the control channel.
+   * high-resolution shadows. Use one browser per runner; CI shards the suite
+   * across separate runners. Two-CPU software rendering can also delay browser
+   * commands, so CI gets 120s per test without lowering graphics or assertions.
    */
   workers: 1,
-  timeout: 60_000,
+  timeout: process.env.CI ? 120_000 : 60_000,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',
   use: {
     baseURL: previewUrl,
