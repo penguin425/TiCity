@@ -11,18 +11,25 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   /*
-   * Chromium software WebGL is CPU-heavy. Keep local concurrency bounded and
-   * serialize CI so parallel cities cannot starve Playwright's control channel
-   * even though the assertions themselves are fast and deterministic.
+   * Chromium software WebGL is CPU-heavy, especially with contact shading and
+   * high-resolution shadows. Use one browser per runner; CI shards the suite
+   * across separate runners. Two-CPU software rendering can also delay browser
+   * commands. Long lab/transport cases and recorded retries can take minutes,
+   * so CI gets 300s per test without lowering graphics or expected results.
    */
-  workers: process.env.CI ? 1 : 2,
-  timeout: process.env.CI ? 60_000 : 30_000,
+  workers: 1,
+  timeout: process.env.CI ? 300_000 : 60_000,
+  // A correct polling result can arrive after 5s while software WebGL finishes
+  // a frame. Keep the assertion values intact and budget for that round trip.
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',
   use: {
     baseURL: previewUrl,
-    trace: 'retain-on-failure',
+    // Continuous trace/video capture adds GPU readbacks to every WebGL frame.
+    // Preserve diagnostics on the first retry without recording passing runs.
+    trace: 'on-first-retry',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    video: 'on-first-retry',
   },
   projects: [
     {

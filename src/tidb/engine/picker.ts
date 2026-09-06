@@ -44,12 +44,13 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
     opacity: 0.8,
     side: THREE.DoubleSide,
     depthWrite: false,
+    depthTest: false,
     toneMapped: false,
   })
   const ring = new THREE.Mesh(new THREE.RingGeometry(6, 7, 32), ringMaterial)
   ring.name = 'selection:ring'
   ring.rotation.x = -Math.PI / 2
-  ring.position.y = 0.9
+  ring.renderOrder = 20
   ring.visible = false
   root.add(ring)
 
@@ -65,6 +66,8 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
   container.appendChild(label)
 
   let selected: CityComponent | null = null
+  let selectedRole = ''
+  let selectedDomain = ''
   let downX = 0
   let downY = 0
   let downPointer = -1
@@ -87,9 +90,12 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
     ring.visible = selected !== null
     label.style.display = selected ? 'block' : 'none'
     if (selected) {
-      ring.position.x = selected.anchor.x
-      ring.position.z = selected.anchor.z
-      label.textContent = `${selected.name} — ${selected.role}`
+      ring.position.copy(selected.anchor)
+      ring.position.y += 0.75
+      label.textContent = selected.name
+      label.setAttribute('aria-label', `${selected.name} — ${selected.role}`)
+      selectedRole = selected.role
+      selectedDomain = selected.domain
     } else {
       label.textContent = ''
     }
@@ -98,6 +104,7 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
   }
 
   function pick(clientX: number, clientY: number): CityComponent | null {
+    if (!city.root.visible) return null
     resize()
     _ndc.set(
       ((clientX - rectLeft) / rectWidth) * 2 - 1,
@@ -115,7 +122,7 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
   }
 
   function onPointerDown(event: PointerEvent): void {
-    if (event.button !== 0) return
+    if (event.button !== 0 || !city.root.visible) return
     downPointer = event.pointerId
     downX = event.clientX
     downY = event.clientY
@@ -132,9 +139,17 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
 
   function update(): void {
     if (!selected) return
+    ring.position.copy(selected.anchor)
+    ring.position.y += 0.75
+    if (selected.role !== selectedRole || selected.domain !== selectedDomain) {
+      selectedRole = selected.role
+      selectedDomain = selected.domain
+      label.setAttribute('aria-label', `${selected.name} — ${selected.role}`)
+      options.onSelect?.(selected)
+    }
     _projected.copy(selected.anchor).project(camera)
-    const x = (_projected.x * 0.5 + 0.5) * rectWidth + rectLeft
-    const y = (-_projected.y * 0.5 + 0.5) * rectHeight + rectTop
+    const x = (_projected.x * 0.5 + 0.5) * rectWidth
+    const y = (-_projected.y * 0.5 + 0.5) * rectHeight
     label.style.left = `${x}px`
     label.style.top = `${y}px`
     label.style.visibility = _projected.z < -1 || _projected.z > 1 ? 'hidden' : 'visible'

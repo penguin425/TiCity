@@ -34,7 +34,7 @@ import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTransactionLabPanel } from './ui/transaction-lab'
 import { createTiDBWorld, type WorldHandle } from './world'
 import type { CityComponent } from './world/city'
-import type { CityMovementInput, CityViewMode } from './engine/camera'
+import { CITY_ORBIT, type CityMovementInput, type CityViewMode } from './engine/camera'
 
 const SCENARIOS: readonly ScenarioId[] = [
   'point-read',
@@ -460,6 +460,7 @@ function createMovementPad(
     root.hidden = next === 'orbit'
     const fly = next === 'fly'
     for (const binding of bindings) {
+      binding.button.disabled = root.hidden
       if (binding.input === 'ascend' || binding.input === 'descend') {
         binding.button.hidden = !fly
       }
@@ -508,10 +509,9 @@ function boot(): void {
   layout.className = 'tidb-layout'
   let currentView: CityViewMode = 'orbit'
   let panelExpanded =
-    window.innerWidth <= 900 ||
     new URLSearchParams(location.search).get('panel') === 'open'
   layout.dataset.panel = panelExpanded ? 'open' : 'closed'
-  layout.dataset.cameraView = 'orbit'
+  layout.dataset.cameraView = currentView
   layout.dataset.inspect = 'closed'
   layout.dataset.activeLab = activeLab ?? 'none'
 
@@ -547,7 +547,7 @@ function boot(): void {
   try {
     world = createTiDBWorld(worldHost, {
       theme: document.documentElement.dataset.theme === 'day' ? 'day' : 'night',
-      mode: 'orbit',
+      mode: currentView,
       hudExpanded: panelExpanded,
       onSelect,
     })
@@ -609,6 +609,7 @@ function boot(): void {
   const movementPad = createMovementPad(locale, (input, active) => {
     world?.shell.controls.setMovement(input, active)
   })
+  movementPad.setMode(currentView)
   if (world) worldHost.append(movementPad.root)
 
   const setPlayback = (mode: TiCityState['playback']): void => {
@@ -636,6 +637,18 @@ function boot(): void {
   const viewButtons = new Map<CityViewMode, HTMLButtonElement>()
   let inspectOpen = false
   let inspectButton: HTMLButtonElement | null = null
+
+  const setView = (mode: CityViewMode): void => {
+    movementPad.setMode(mode)
+    world?.setMode(mode)
+    currentView = mode
+    layout.dataset.cameraView = mode
+    hint.textContent = copy[locale].hint[mode]
+    for (const [candidate, control] of viewButtons) {
+      control.setAttribute('aria-pressed', String(candidate === mode))
+    }
+    world?.shell.renderer.domElement.focus({ preventScroll: true })
+  }
 
   const setInspect = (enabled: boolean, focus = false): void => {
     inspectOpen = enabled
@@ -670,21 +683,10 @@ function boot(): void {
     panelExpanded ? copy[locale].hidePanel : copy[locale].showPanel,
   )
 
-  const setView = (mode: CityViewMode) => {
-    movementPad.setMode(mode)
-    world?.setMode(mode)
-    currentView = mode
-    layout.dataset.cameraView = mode
-    hint.textContent = copy[locale].hint[mode]
-    for (const [candidate, control] of viewButtons) {
-      control.setAttribute('aria-pressed', String(candidate === mode))
-    }
-    world?.shell.renderer.domElement.focus({ preventScroll: true })
-  }
-
   for (const mode of ['orbit', 'fly', 'walk'] as const) {
-    const control = button(copy[locale][mode], () => setView(mode), mode === 'orbit')
+    const control = button(copy[locale][mode], () => setView(mode), mode === currentView)
     control.dataset.view = mode
+    control.title = copy[locale].hint[mode]
     viewButtons.set(mode, control)
     viewActions.append(control)
   }
@@ -790,7 +792,9 @@ function boot(): void {
       lastTourFocus = target
       world.focus(target)
       if (target === 'city.overview') {
-        world.shell.camera.position.set(0, 305, 555)
+        const overviewTarget = world.shell.camera.position.clone().set(...CITY_ORBIT.target)
+        world.shell.controls.focus(overviewTarget)
+        world.shell.camera.position.set(...CITY_ORBIT.homePosition)
       }
     },
     onLocaleChange: (next) => {
@@ -800,6 +804,7 @@ function boot(): void {
       wordmarkHost.replaceChildren(createWordmark(next))
       for (const [mode, control] of viewButtons) {
         control.textContent = copy[next][mode]
+        control.title = copy[next].hint[mode]
       }
       audioButton.textContent = copy[next].sound
       inspectButton.textContent = copy[next].inspect

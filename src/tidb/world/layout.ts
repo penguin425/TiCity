@@ -30,8 +30,8 @@ export const TICITY_LAYOUT = {
   tikvCount: 3,
   regionGrid: { columns: 6, rows: 6, pitchX: 13, pitchZ: 12 },
   fog: {
-    day: { near: 760, far: 3200 },
-    night: { near: 620, far: 2800 },
+    day: { near: 1060, far: 3500 },
+    night: { near: 920, far: 3100 },
   },
 } as const
 
@@ -54,6 +54,19 @@ export const TIKV_BOUNDS: readonly PlanBounds[] = [
   DISTRICT_BOUNDS.tikv1,
   DISTRICT_BOUNDS.tikv2,
 ] as const
+
+/** Shared construction datums for the storage decks and their mounted racks. */
+export const TIKV_ARCHITECTURE = {
+  deckWidth: 100,
+  deckHeight: 5,
+  deckCenterY: 2.9,
+  deckTop: 5.4,
+  peerWidth: 8.4,
+  peerHeight: 7.2,
+  peerDepth: 7.2,
+  peerFootY: 5.55,
+  raftPortY: 6.3,
+} as const
 
 /** Elevated overlay origin for the selected two-Region internal cutaway. */
 export const TRANSACTION_LAB_ORIGIN: Point3 = [0, 48, 18]
@@ -98,9 +111,9 @@ export const COMPONENT_ANCHORS = {
   'tidb.0': [-74, 18, -132],
   'tidb.1': [0, 18, -132],
   'tidb.2': [74, 18, -132],
-  'pd.0': [222, 8, -118],
-  'pd.1': [254, 8, -102],
-  'pd.2': [222, 8, -82],
+  'pd.0': [206, 8, -128],
+  'pd.1': [267, 8, -107],
+  'pd.2': [228, 8, -64],
   'pd.control': [232, 4, -102],
   'tikv.0': [-150, 5, 84],
   'tikv.1': [0, 5, 84],
@@ -197,7 +210,7 @@ export function regionPeerPosition(storeIndex: number, regionIndex: number): Poi
   const row = Math.floor(regionIndex / TICITY_LAYOUT.regionGrid.columns)
   const x = center[0] + (column - (TICITY_LAYOUT.regionGrid.columns - 1) / 2) * TICITY_LAYOUT.regionGrid.pitchX
   const z = center[2] + (row - (TICITY_LAYOUT.regionGrid.rows - 1) / 2) * TICITY_LAYOUT.regionGrid.pitchZ
-  return [x, 4.1, z]
+  return [x, TIKV_ARCHITECTURE.peerFootY + TIKV_ARCHITECTURE.peerHeight / 2, z]
 }
 
 export function boundsContain(bounds: PlanBounds, point: Point3, margin = 0): boolean {

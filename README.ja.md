@@ -12,10 +12,13 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 
 公開先: <https://penguin425.github.io/TiCity/>
 
-![2つのRegionにまたがる悲観トランザクションのprimary commitを表示するTiCity Transaction Lab](docs/screenshot.png)
+![昼のTiCityキャンパス全景](docs/graphics/city-day.png)
+
+[昼夜の描画と設計](docs/GRAPHICS.md)に、拡大・モバイル表示とスクリーンショットの
+再現コマンドをまとめています。
 
 > [!IMPORTANT]
-> TiCity v0.9.0が公開済みの最新releaseです。TiDB v8.5 LTS系列を対象にした
+> TiCity v0.10.0はTiDB v8.5 LTS系列を対象にした
 > 静的・オフラインのモデルで、model-7 TiFlash/MPP Labを含みます。SQLを実行せず、
 > 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
 > モデル上の経路と説明だけを生成します。

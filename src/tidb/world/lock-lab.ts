@@ -427,7 +427,6 @@ export function createLockLab(options: LockLabOptions = {}): LockLab {
   slotMaterial.name = 'lock-lab:slots'
   const tokenMaterial = ownMaterial(new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    vertexColors: true,
     emissive: 0x162331,
     emissiveIntensity: 0.34,
     roughness: 0.44,
@@ -436,7 +435,6 @@ export function createLockLab(options: LockLabOptions = {}): LockLab {
   tokenMaterial.name = 'lock-lab:transaction-tokens'
   const edgeMaterial = ownMaterial(new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    vertexColors: true,
     emissive: 0x162331,
     emissiveIntensity: 0.48,
     roughness: 0.38,
@@ -1108,6 +1106,9 @@ export function createLockLab(options: LockLabOptions = {}): LockLab {
     dispose(): void {
       if (disposed) return
       disposed = true
+      root.traverse((child) => {
+        if (child instanceof THREE.InstancedMesh) child.dispose()
+      })
       for (let index = 0; index < ownedGeometries.length; index++) {
         ownedGeometries[index].dispose()
       }

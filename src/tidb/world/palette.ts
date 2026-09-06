@@ -101,22 +101,22 @@ function semanticMaterial(domain: SemanticDomain): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color: SEMANTIC_COLORS.night[domain],
     emissive: SEMANTIC_COLORS.night[domain],
-    emissiveIntensity: 0.44,
-    roughness: 0.48,
-    metalness: 0.34,
+    emissiveIntensity: 0.28,
+    roughness: 0.55,
+    metalness: 0.24,
   })
 }
 
 export function createCityMaterials(): CityMaterials {
   const structure = new THREE.MeshStandardMaterial({
-    color: 0x334f68,
-    roughness: 0.78,
-    metalness: 0.14,
+    color: 0x405966,
+    roughness: 0.75,
+    metalness: 0.08,
   })
   const darkStructure = new THREE.MeshStandardMaterial({
-    color: 0x1d3145,
-    roughness: 0.76,
-    metalness: 0.24,
+    color: 0x263e4c,
+    roughness: 0.38,
+    metalness: 0.58,
   })
   const pavement = new THREE.MeshStandardMaterial({
     color: 0x293e50,
@@ -127,28 +127,26 @@ export function createCityMaterials(): CityMaterials {
     color: 0x8fd8ff,
     emissive: 0x1e6d96,
     emissiveIntensity: 0.25,
-    transparent: true,
-    opacity: 0.7,
-    roughness: 0.16,
-    metalness: 0.12,
+    roughness: 0.12,
+    metalness: 0.65,
   })
   const window = new THREE.MeshStandardMaterial({
-    color: 0x8be7ff,
-    emissive: 0x33c8f2,
-    emissiveIntensity: 1.8,
-    roughness: 0.18,
-    metalness: 0.15,
-    toneMapped: false,
+    color: 0xa7d3db,
+    emissive: 0x79c2d4,
+    emissiveIntensity: 0.9,
+    roughness: 0.2,
+    metalness: 0.4,
   })
   const trim = new THREE.MeshStandardMaterial({
     color: 0x6f879c,
-    roughness: 0.42,
-    metalness: 0.62,
+    roughness: 0.3,
+    metalness: 0.75,
   })
   const edge = new THREE.LineBasicMaterial({
+    depthWrite: false,
     color: 0x5ccff0,
     transparent: true,
-    opacity: 0.62,
+    opacity: 0.28,
     toneMapped: false,
   })
   const client = semanticMaterial('client')
@@ -159,12 +157,14 @@ export function createCityMaterials(): CityMaterials {
   const gc = semanticMaterial('gc')
   const tiflash = semanticMaterial('tiflash')
   const raft = new THREE.LineBasicMaterial({
+    depthWrite: false,
     color: SEMANTIC_COLORS.night.raft,
     transparent: true,
     opacity: 0.34,
     toneMapped: false,
   })
   const dataLine = new THREE.LineBasicMaterial({
+    depthWrite: false,
     color: SEMANTIC_COLORS.night.sql,
     transparent: true,
     opacity: 0.74,
@@ -172,6 +172,7 @@ export function createCityMaterials(): CityMaterials {
     toneMapped: false,
   })
   const controlLine = new THREE.LineDashedMaterial({
+    depthWrite: false,
     color: SEMANTIC_COLORS.night.tso,
     transparent: true,
     opacity: 0.68,
@@ -181,6 +182,7 @@ export function createCityMaterials(): CityMaterials {
     toneMapped: false,
   })
   const htapLine = new THREE.LineDashedMaterial({
+    depthWrite: false,
     color: SEMANTIC_COLORS.night.tiflash,
     transparent: true,
     opacity: 0.7,
@@ -233,19 +235,19 @@ export function createCityMaterials(): CityMaterials {
     currentTheme = theme
     const palette = SEMANTIC_COLORS[theme]
     const night = theme === 'night'
-    structure.color.setHex(night ? 0x334f68 : 0xcbd7dd)
-    darkStructure.color.setHex(night ? 0x1d3145 : 0x81929f)
-    pavement.color.setHex(night ? 0x293e50 : 0xadbcc4)
-    glass.color.setHex(night ? 0x8fd8ff : 0x348db4)
+    structure.color.setHex(night ? 0x69818c : 0xd2d1c7)
+    darkStructure.color.setHex(night ? 0x203647 : 0x253e4b)
+    pavement.color.setHex(night ? 0x293e50 : 0x8b9595)
+    glass.color.setHex(night ? 0x42647a : 0x16485e)
     glass.emissive.setHex(night ? 0x1e6d96 : 0x000000)
     glass.emissiveIntensity = night ? 0.25 : 0
-    window.color.setHex(night ? 0x8be7ff : 0x176a8f)
-    window.emissive.setHex(night ? 0x33c8f2 : 0x000000)
-    window.emissiveIntensity = night ? 1.8 : 0
-    trim.color.setHex(night ? 0x6f879c : 0x647480)
+    window.color.setHex(night ? 0xb4cfd5 : 0x28586a)
+    window.emissive.setHex(night ? 0xb0d6de : 0x000000)
+    window.emissiveIntensity = night ? 0.7 : 0
+    trim.color.setHex(night ? 0x91a7b6 : 0xb4bec0)
     edge.color.setHex(night ? 0x5ccff0 : 0x324b5a)
-    edge.opacity = night ? 0.62 : 0.72
-    ground.color.setHex(night ? 0x07101a : 0xaebbc6)
+    edge.opacity = night ? 0.18 : 0.15
+    ground.color.setHex(night ? 0x07101a : 0x919fa7)
 
     const semantic: readonly [THREE.MeshStandardMaterial, SemanticDomain][] = [
       [client, 'client'],
@@ -259,14 +261,21 @@ export function createCityMaterials(): CityMaterials {
     for (const [material, domain] of semantic) {
       material.color.setHex(palette[domain])
       material.emissive.setHex(night ? palette[domain] : 0x000000)
-      material.emissiveIntensity = night ? 0.44 : 0
+      material.emissiveIntensity = night ? 0.28 : 0
     }
+    // Columnar halls read as architecture; blue accents identify their role
+    // without turning every wall into a light source.
+    tiflash.color.setHex(night ? 0x385a74 : 0x325b73)
+    tiflash.emissive.setHex(night ? 0x143046 : 0x000000)
+    tiflash.emissiveIntensity = night ? 0.14 : 0
     raft.color.setHex(palette.raft)
     dataLine.color.setHex(palette.sql)
     controlLine.color.setHex(palette.tso)
     htapLine.color.setHex(palette.tiflash)
     applyNetworkOpacity()
   }
+
+  apply('night')
 
   return {
     structure,

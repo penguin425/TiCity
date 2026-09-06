@@ -388,7 +388,6 @@ export function createTransactionLab(
   transactionMaterial.name = 'transaction-lab:2pc'
   const semanticInstanceMaterial = ownMaterial(new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    vertexColors: true,
     emissive: 0x162331,
     emissiveIntensity: 0.35,
     roughness: 0.58,
@@ -412,6 +411,7 @@ export function createTransactionLab(
   }))
   secondaryMaterial.name = 'transaction-lab:secondary'
   const twoPcMaterial = ownMaterial(new THREE.LineBasicMaterial({
+    depthWrite: false,
     color: SEMANTIC_COLORS.night.txn2pc,
     transparent: true,
     opacity: 0.14,
@@ -419,6 +419,7 @@ export function createTransactionLab(
   }))
   twoPcMaterial.name = 'transaction-lab:2pc-route'
   const raftMaterial = ownMaterial(new THREE.LineBasicMaterial({
+    depthWrite: false,
     color: SEMANTIC_COLORS.night.raft,
     transparent: true,
     opacity: 0.18,
@@ -1031,6 +1032,9 @@ export function createTransactionLab(
     dispose(): void {
       if (disposed) return
       disposed = true
+      root.traverse((child) => {
+        if (child instanceof THREE.InstancedMesh) child.dispose()
+      })
       for (let index = 0; index < ownedGeometries.length; index++) {
         ownedGeometries[index].dispose()
       }

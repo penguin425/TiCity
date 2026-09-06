@@ -6,9 +6,11 @@ import type { TraceReceipt } from '../model/types'
 import { createTiDBSimulation } from '../model/simulation'
 import { CITY_ORBIT } from './camera'
 import {
+  cityFrameDelay,
   cityPixelRatio,
   cityProjectionAspect,
   cityViewOcclusion,
+  cityViewZoom,
   hasTraceChanged,
   projectCityLabs,
 } from './shell'
@@ -39,15 +41,39 @@ describe('city shell trace replay gate', () => {
     const dz = CITY_ORBIT.homePosition[2] - CITY_ORBIT.target[2]
     const homeDistance = Math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    expect(homeDistance).toBeCloseTo(600.25, 1)
-    expect(homeDistance / CITY_ORBIT.maxDistance).toBeLessThanOrEqual(0.37)
+    // A longer architectural lens compresses perspective without cropping the
+    // rear SQL towers; backing away preserves the complete campus framing.
+    expect(homeDistance).toBeGreaterThan(930)
+    expect(homeDistance).toBeLessThan(1_020)
+    expect(homeDistance / CITY_ORBIT.maxDistance).toBeLessThanOrEqual(0.45)
     expect(CITY_ORBIT.maxDistance).toBeGreaterThanOrEqual(1_650)
   })
 
   it('caps fill rate more aggressively on compact displays', () => {
-    expect(cityPixelRatio(1440, 2)).toBe(1.5)
+    expect(cityPixelRatio(1440, 2)).toBe(2)
+    expect(cityPixelRatio(1440, 3)).toBe(2)
     expect(cityPixelRatio(390, 3)).toBe(1.25)
     expect(cityPixelRatio(1440, 1)).toBe(1)
+  })
+
+  it('fits the portrait campus while retaining the desktop lens', () => {
+    expect(cityViewZoom(1440, 1000)).toBe(1)
+    expect(cityViewZoom(390, 844)).toBeCloseTo(0.416, 3)
+    expect(cityViewZoom(390, 620)).toBeGreaterThan(cityViewZoom(390, 844))
+    expect(cityViewZoom(844, 390)).toBe(1)
+  })
+
+  it('keeps the normal GPU frame cadence without a cooldown', () => {
+    for (const duration of [0, 8, 16, 33, 50, 100]) {
+      expect(cityFrameDelay(duration)).toBe(0)
+    }
+  })
+
+  it('bounds the input window after a slow software-rendered frame', () => {
+    expect(cityFrameDelay(125)).toBe(25)
+    expect(cityFrameDelay(250)).toBe(50)
+    expect(cityFrameDelay(500)).toBe(100)
+    expect(cityFrameDelay(5_000)).toBe(100)
   })
 
   it('uses model discriminators to keep all detailed labs exclusive', () => {

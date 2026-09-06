@@ -19,12 +19,13 @@ import {
   TIFLASH_MPP_LAB_ORIGIN,
   TRANSACTION_LAB_ORIGIN,
   TICITY_LAYOUT,
+  TIKV_ARCHITECTURE,
   TIKV_BOUNDS,
   regionPeerPosition,
 } from './layout'
 import type { ComponentAnchorId, PlanBounds, Point3, RouteLeg } from './layout'
 import { createCityEnvironment } from './environment'
-import { SEMANTIC_COLORS, createCityMaterials } from './palette'
+import { createCityMaterials } from './palette'
 import type { CityMaterials, CityTheme, SemanticDomain } from './palette'
 import { createTransactionLab } from './transaction-lab'
 import type { TransactionLab } from './transaction-lab'
@@ -38,6 +39,10 @@ import { createGcStorageLab } from './gc-storage-lab'
 import type { GcStorageLab } from './gc-storage-lab'
 import { createTiFlashMppLab } from './tiflash-mpp-lab'
 import type { TiFlashMppLab } from './tiflash-mpp-lab'
+import { createCityGeometry } from './geometry'
+import type { BoxInstance } from './geometry'
+import { addBuildingDetails, SQL_TOWER_HEIGHTS } from './building-detail'
+import { createRegionPeers } from './region-peers'
 
 export type CityComponentKind =
   | 'client'
@@ -170,180 +175,8 @@ class Registry implements CityRegistry {
   }
 }
 
-const _matrix = new THREE.Matrix4()
-const _position = new THREE.Vector3()
-const _scale = new THREE.Vector3(1, 1, 1)
-const _rotation = new THREE.Quaternion()
-const _color = new THREE.Color()
-
 function pointVector(point: Point3): THREE.Vector3 {
   return new THREE.Vector3(point[0], point[1], point[2])
-}
-
-function addBox(
-  parent: THREE.Object3D,
-  size: Point3,
-  position: Point3,
-  material: THREE.Material,
-  name: string,
-  castShadow = false,
-): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), material)
-  mesh.position.set(position[0], position[1], position[2])
-  mesh.name = name
-  mesh.castShadow = castShadow
-  mesh.receiveShadow = true
-  parent.add(mesh)
-  return mesh
-}
-
-function addCylinder(
-  parent: THREE.Object3D,
-  radius: number,
-  height: number,
-  position: Point3,
-  material: THREE.Material,
-  name: string,
-  sides = 12,
-  castShadow = false,
-): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, sides), material)
-  mesh.position.set(position[0], position[1], position[2])
-  mesh.name = name
-  mesh.castShadow = castShadow
-  mesh.receiveShadow = true
-  parent.add(mesh)
-  return mesh
-}
-
-interface BoxInstance {
-  readonly position: Point3
-  readonly size: Point3
-  readonly rotationY?: number
-}
-
-function addInstancedBoxes(
-  parent: THREE.Object3D,
-  instances: readonly BoxInstance[],
-  material: THREE.Material,
-  name: string,
-  castShadow = false,
-): THREE.InstancedMesh {
-  const geometry = new THREE.BoxGeometry(1, 1, 1)
-  const mesh = new THREE.InstancedMesh(geometry, material, instances.length)
-  mesh.name = name
-  mesh.castShadow = castShadow
-  mesh.receiveShadow = castShadow
-  const matrix = new THREE.Matrix4()
-  const position = new THREE.Vector3()
-  const scale = new THREE.Vector3()
-  const rotation = new THREE.Quaternion()
-  const axis = new THREE.Vector3(0, 1, 0)
-  for (let index = 0; index < instances.length; index++) {
-    const instance = instances[index]
-    position.set(instance.position[0], instance.position[1], instance.position[2])
-    scale.set(instance.size[0], instance.size[1], instance.size[2])
-    rotation.setFromAxisAngle(axis, instance.rotationY ?? 0)
-    matrix.compose(position, rotation, scale)
-    mesh.setMatrixAt(index, matrix)
-  }
-  mesh.instanceMatrix.needsUpdate = true
-  parent.add(mesh)
-  return mesh
-}
-
-function addFacadeWindows(
-  parent: THREE.Object3D,
-  center: Point3,
-  width: number,
-  height: number,
-  depth: number,
-  columns: number,
-  rows: number,
-  material: THREE.Material,
-  name: string,
-): THREE.InstancedMesh {
-  const instances: BoxInstance[] = []
-  const panelWidth = Math.max(1.2, (width - 5) / columns * 0.6)
-  const panelHeight = Math.max(0.7, (height - 5) / rows * 0.38)
-  const yBottom = center[1] - height / 2 + 3.2
-  const yStep = (height - 5.2) / Math.max(1, rows - 1)
-  const xStep = (width - 7) / Math.max(1, columns - 1)
-  const sideColumns = Math.max(2, Math.round(columns * depth / width))
-  const zStep = (depth - 7) / Math.max(1, sideColumns - 1)
-  for (let row = 0; row < rows; row++) {
-    const y = yBottom + row * yStep
-    for (let column = 0; column < columns; column++) {
-      const x = center[0] - (width - 7) / 2 + column * xStep
-      instances.push(
-        { position: [x, y, center[2] + depth / 2 + 0.12], size: [panelWidth, panelHeight, 0.32] },
-        { position: [x, y, center[2] - depth / 2 - 0.12], size: [panelWidth, panelHeight, 0.32] },
-      )
-    }
-    for (let column = 0; column < sideColumns; column++) {
-      const z = center[2] - (depth - 7) / 2 + column * zStep
-      instances.push(
-        { position: [center[0] + width / 2 + 0.12, y, z], size: [0.32, panelHeight, panelWidth] },
-        { position: [center[0] - width / 2 - 0.12, y, z], size: [0.32, panelHeight, panelWidth] },
-      )
-    }
-  }
-  return addInstancedBoxes(parent, instances, material, name)
-}
-
-function addHorizontalBands(
-  parent: THREE.Object3D,
-  center: Point3,
-  width: number,
-  height: number,
-  depth: number,
-  count: number,
-  material: THREE.Material,
-  name: string,
-): THREE.InstancedMesh {
-  const instances: BoxInstance[] = []
-  for (let index = 0; index < count; index++) {
-    const y = center[1] - height / 2 + ((index + 1) / (count + 1)) * height
-    instances.push({
-      position: [center[0], y, center[2]],
-      size: [width + 0.7, 0.45, depth + 0.7],
-    })
-  }
-  return addInstancedBoxes(parent, instances, material, name)
-}
-
-function addBoxOutline(
-  parent: THREE.Object3D,
-  size: Point3,
-  position: Point3,
-  material: THREE.LineBasicMaterial,
-  name: string,
-): THREE.LineSegments {
-  const lines = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(size[0], size[1], size[2]), 24),
-    material,
-  )
-  lines.position.set(position[0], position[1], position[2])
-  lines.name = name
-  lines.renderOrder = 5
-  parent.add(lines)
-  return lines
-}
-
-function addHorizontalRing(
-  parent: THREE.Object3D,
-  radius: number,
-  tube: number,
-  position: Point3,
-  material: THREE.Material,
-  name: string,
-): THREE.Mesh {
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 36), material)
-  ring.position.set(position[0], position[1], position[2])
-  ring.rotation.x = Math.PI / 2
-  ring.name = name
-  parent.add(ring)
-  return ring
 }
 
 function addCollider(
@@ -426,10 +259,10 @@ function raftNetwork(material: THREE.LineBasicMaterial): CityNetwork {
       const from = regionPeerPosition(store, region)
       const to = regionPeerPosition(next, region)
       positions[cursor++] = from[0]
-      positions[cursor++] = 2.2
+      positions[cursor++] = TIKV_ARCHITECTURE.raftPortY
       positions[cursor++] = from[2]
       positions[cursor++] = to[0]
-      positions[cursor++] = 2.2
+      positions[cursor++] = TIKV_ARCHITECTURE.raftPortY
       positions[cursor++] = to[2]
       ids.push(`region.${region}.peer.${store}`, `region.${region}.peer.${next}`)
     }
@@ -442,24 +275,6 @@ function raftNetwork(material: THREE.LineBasicMaterial): CityNetwork {
   return { domain: 'raft', object, componentIds: ids }
 }
 
-function addDistrictPad(
-  root: THREE.Object3D,
-  bounds: PlanBounds,
-  material: THREE.Material,
-  name: string,
-  height = 0.7,
-): void {
-  const width = bounds.maxX - bounds.minX
-  const depth = bounds.maxZ - bounds.minZ
-  addBox(
-    root,
-    [width, height, depth],
-    [(bounds.minX + bounds.maxX) / 2, height / 2, (bounds.minZ + bounds.maxZ) / 2],
-    material,
-    name,
-  )
-}
-
 export function createTiDBSceneGraph(): TiDBSceneGraph {
   const root = new THREE.Group()
   root.name = 'ticity:world'
@@ -467,6 +282,17 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const materials = createCityMaterials()
   const colliders: CityCollider[] = []
   const networks: CityNetwork[] = []
+  const { addBox, addCylinder, addInstancedBoxes, addFacadeWindows, addBoxOutline, addHorizontalRing, batchStaticMeshes } = createCityGeometry()
+
+  function addDistrictPad(
+    parent: THREE.Object3D, bounds: PlanBounds, material: THREE.Material,
+    name: string, height = 0.7,
+  ): void {
+    addBox(parent,
+      [bounds.maxX - bounds.minX, height, bounds.maxZ - bounds.minZ],
+      [(bounds.minX + bounds.maxX) / 2, height / 2, (bounds.minZ + bounds.maxZ) / 2],
+      material, name)
+  }
 
   const environment = createCityEnvironment()
   const ground = environment.ground
@@ -606,62 +432,21 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   addDistrictPad(tidbDistrict, DISTRICT_BOUNDS.tidb, materials.pavement, 'tidb:apron')
   for (let server = 0; server < TICITY_LAYOUT.tidbCount; server++) {
     const anchor = COMPONENT_ANCHORS[`tidb.${server}` as 'tidb.0' | 'tidb.1' | 'tidb.2']
+    const height = SQL_TOWER_HEIGHTS[server]
+    const centerY = height / 2 + 0.7
     const group = new THREE.Group()
     group.name = `tidb:${server}`
-    addBox(group, [30, 30, 30], [anchor[0], 15.7, anchor[2]], materials.structure, 'sql:tower', true)
-    addBox(group, [24, 9, 24], [anchor[0], 34.7, anchor[2]], materials.darkStructure, 'sql:upper-tier', true)
-    addBox(group, [18, 7, 18], [anchor[0], 42.7, anchor[2]], materials.structure, 'sql:planner-tier')
-    addBox(group, [32, 2.4, 32], [anchor[0], 29.8, anchor[2]], materials.sql, 'sql:optimizer')
-    addCylinder(group, 3.2, 13, [anchor[0], 52.4, anchor[2]], materials.sql, 'sql:stateless-core', 10)
-    addCylinder(group, 0.65, 13, [anchor[0], 63.5, anchor[2]], materials.trim, 'sql:antenna', 8)
-    addHorizontalRing(group, 7.2, 0.7, [anchor[0], 49, anchor[2]], materials.sql, 'sql:execution-ring')
-    addHorizontalRing(group, 5, 0.45, [anchor[0], 57.5, anchor[2]], materials.window, 'sql:signal-ring')
-    addFacadeWindows(
-      group,
-      [anchor[0], 15.7, anchor[2]],
-      30,
-      30,
-      30,
-      4,
-      5,
-      materials.window,
-      'sql:tower-windows',
-    )
-    addFacadeWindows(
-      group,
-      [anchor[0], 34.7, anchor[2]],
-      24,
-      9,
-      24,
-      4,
-      2,
-      materials.window,
-      'sql:upper-windows',
-    )
-    addHorizontalBands(
-      group,
-      [anchor[0], 15.7, anchor[2]],
-      30,
-      30,
-      30,
-      4,
-      materials.trim,
-      'sql:tower-bands',
-    )
-    addBoxOutline(
-      group,
-      [30, 30, 30],
-      [anchor[0], 15.7, anchor[2]],
-      materials.edge,
-      'sql:tower-outline',
-    )
-    addBoxOutline(
-      group,
-      [24, 9, 24],
-      [anchor[0], 34.7, anchor[2]],
-      materials.edge,
-      'sql:upper-outline',
-    )
+    // The structural core sits behind the continuous curtain wall authored in
+    // building-detail. Narrow metal joints leave the glazed floors legible.
+    addBox(group, [30, height, 30], [anchor[0], centerY, anchor[2]], materials.darkStructure, 'sql:tower', true)
+    addBox(group, [24, 9, 24], [anchor[0], height + 5.2, anchor[2]], materials.darkStructure, 'sql:upper-tier', true)
+    addBox(group, [18, 7, 18], [anchor[0], height + 13.2, anchor[2]], materials.darkStructure, 'sql:planner-tier')
+    addBox(group, [32.4, 0.9, 32.4], [anchor[0], height + 0.8, anchor[2]], materials.structure, 'sql:optimizer')
+    addBox(group, [25.5, 0.7, 25.5], [anchor[0], height + 9.7, anchor[2]], materials.structure, 'sql:upper-cornice')
+    addBox(group, [19.7, 0.7, 19.7], [anchor[0], height + 16.9, anchor[2]], materials.structure, 'sql:roof-cornice')
+    addCylinder(group, 4.4, 1.1, [anchor[0], height + 17.8, anchor[2]], materials.trim, 'sql:roof-plant-deck', 24)
+    addCylinder(group, 2.2, 3.4, [anchor[0], height + 19.9, anchor[2]], materials.darkStructure, 'sql:stateless-core', 16)
+    addCylinder(group, 0.35, 7.5, [anchor[0], height + 23.6, anchor[2]], materials.trim, 'sql:antenna', 8)
     tidbDistrict.add(group)
     registerGroup(
       registry,
@@ -673,7 +458,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       group,
       anchor,
     )
-    addCollider(colliders, `tidb.${server}`, [anchor[0], 15.7, anchor[2]], [30, 31, 30])
+    addCollider(colliders, `tidb.${server}`, [anchor[0], centerY, anchor[2]], [30, height + 0.7, 30])
   }
   root.add(tidbDistrict)
 
@@ -683,24 +468,15 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   addDistrictPad(pdDistrict, DISTRICT_BOUNDS.pd, materials.pavement, 'pd:apron')
   const pdHub = new THREE.Group()
   pdHub.name = 'pd:control'
-  addCylinder(pdHub, 30, 4, [232, 2.4, -102], materials.darkStructure, 'pd:control-deck', 24)
-  addCylinder(pdHub, 19, 20, [232, 12.5, -102], materials.structure, 'pd:control-tower', 18, true)
-  addCylinder(pdHub, 12, 28, [232, 26.5, -102], materials.darkStructure, 'pd:tso-core', 16, true)
-  addCylinder(pdHub, 2.2, 24, [232, 48, -102], materials.tso, 'pd:clock-spire', 10)
-  addHorizontalRing(pdHub, 22, 1.1, [232, 8, -102], materials.tso, 'pd:scheduler-ring')
-  addHorizontalRing(pdHub, 15, 0.8, [232, 22, -102], materials.window, 'pd:tso-ring')
-  addHorizontalRing(pdHub, 8.5, 0.55, [232, 40, -102], materials.tso, 'pd:clock-ring')
-  addFacadeWindows(
-    pdHub,
-    [232, 12.5, -102],
-    31,
-    18,
-    31,
-    6,
-    4,
-    materials.window,
-    'pd:control-windows',
-  )
+  addCylinder(pdHub, 30, 4, [232, 2.4, -102], materials.darkStructure, 'pd:control-deck', 32)
+  addCylinder(pdHub, 19, 20, [232, 12.5, -102], materials.darkStructure, 'pd:control-tower', 32, true)
+  addCylinder(pdHub, 12, 28, [232, 26.5, -102], materials.darkStructure, 'pd:tso-core', 32, true)
+  addCylinder(pdHub, 1.15, 17, [232, 47.5, -102], materials.tso, 'pd:clock-spire', 16)
+  // These flush service decks shape the tower without floating neon hoops.
+  addCylinder(pdHub, 22, 0.8, [232, 8, -102], materials.tso, 'pd:scheduler-ring', 32)
+  addCylinder(pdHub, 20.3, 1, [232, 22.4, -102], materials.structure, 'pd:terrace-cornice', 32)
+  addCylinder(pdHub, 13.3, 0.8, [232, 40.5, -102], materials.structure, 'pd:clock-ring', 32)
+  addCylinder(pdHub, 5.2, 1.2, [232, 41.4, -102], materials.trim, 'pd:clock-plinth', 24)
   pdDistrict.add(pdHub)
   registerGroup(
     registry,
@@ -736,7 +512,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   }
   root.add(pdDistrict)
 
-  /* Multi-Raft TiKV stores. One InstancedMesh contains all 108 peers. */
+  /* Multi-Raft TiKV stores. All rack bodies share one selectable instance batch. */
   const campusRoot = new THREE.Group()
   campusRoot.name = 'district:tikv'
   for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
@@ -745,7 +521,9 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     const anchor = COMPONENT_ANCHORS[`tikv.${store}` as 'tikv.0' | 'tikv.1' | 'tikv.2']
     const group = new THREE.Group()
     group.name = `tikv:${store}`
-    addBox(group, [100, 5, 100], [anchor[0], 2.9, anchor[2]], materials.darkStructure, 'tikv:store', true)
+    addBox(group,
+      [TIKV_ARCHITECTURE.deckWidth, TIKV_ARCHITECTURE.deckHeight, TIKV_ARCHITECTURE.deckWidth],
+      [anchor[0], TIKV_ARCHITECTURE.deckCenterY, anchor[2]], materials.darkStructure, 'tikv:store', true)
     addBoxOutline(
       group,
       [100, 5, 100],
@@ -823,82 +601,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     )
   }
 
-  const peerCount = TICITY_LAYOUT.regionCount * TICITY_LAYOUT.peersPerRegion
-  const peerBase = new Float32Array(peerCount * 3)
-  const peerComponents = new Array<CityComponent>(peerCount)
-  const peerGeometry = new THREE.BoxGeometry(8.4, 7.2, 7.2)
-  const peerMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0x1a3144,
-    emissiveIntensity: 0.94,
-    roughness: 0.62,
-    metalness: 0.22,
-    vertexColors: true,
-  })
-  peerMaterial.name = 'region-peer:semantic'
-  const peers = new THREE.InstancedMesh(peerGeometry, peerMaterial, peerCount)
-  peers.name = 'tikv:region-peers'
-  peers.castShadow = true
-  peers.receiveShadow = true
-  let peerInstance = 0
-  for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
-    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
-      const point = regionPeerPosition(store, region)
-      const leaderStore = region % TICITY_LAYOUT.tikvCount
-      const leader = store === leaderStore
-      _position.set(point[0], point[1], point[2])
-      _matrix.compose(_position, _rotation, _scale)
-      peers.setMatrixAt(peerInstance, _matrix)
-      peerBase[peerInstance * 3] = point[0]
-      peerBase[peerInstance * 3 + 1] = point[1]
-      peerBase[peerInstance * 3 + 2] = point[2]
-      _color.setHex(leader ? SEMANTIC_COLORS.night.raft : SEMANTIC_COLORS.night.kv)
-      if (!leader) _color.multiplyScalar(0.76)
-      peers.setColorAt(peerInstance, _color)
-      const component: CityComponent = {
-        id: `region.${region}.peer.${store}`,
-        name: `Region ${region + 1} peer on TiKV ${store + 1}`,
-        role: leader ? 'Raft leader voter' : 'Raft follower voter',
-        kind: 'region-peer',
-        domain: leader ? 'raft' : 'kv',
-        object: peers,
-        anchor: pointVector(point),
-        instanceId: peerInstance,
-        regionId: region,
-        storeId: store,
-        peerRole: leader ? 'leader' : 'follower',
-      }
-      peerComponents[peerInstance] = component
-      registry.registerInstance(component)
-      peerInstance++
-    }
-  }
-  peers.instanceMatrix.needsUpdate = true
-  if (peers.instanceColor) peers.instanceColor.needsUpdate = true
-  campusRoot.add(peers)
-
-  const peerLights: BoxInstance[] = []
-  for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
-    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
-      const point = regionPeerPosition(store, region)
-      peerLights.push(
-        {
-          position: [point[0] - 1.8, point[1] + 0.2, point[2] + 3.68],
-          size: [1.4, 0.55, 0.24],
-        },
-        {
-          position: [point[0] + 1.8, point[1] + 0.2, point[2] + 3.68],
-          size: [1.4, 0.55, 0.24],
-        },
-      )
-    }
-  }
-  addInstancedBoxes(
-    campusRoot,
-    peerLights,
-    materials.window,
-    'tikv:peer-status-lights',
-  )
+  const regionPeers = createRegionPeers(registry, materials)
+  campusRoot.add(regionPeers.object)
   root.add(campusRoot)
 
   /* GC yard makes safe-point progress spatially distinct from compaction. */
@@ -908,8 +612,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   addBox(gc, [76, 7, 58], [-231, 3.8, 215], materials.darkStructure, 'gc:yard', true)
   for (let bin = 0; bin < 5; bin++) {
     const x = -259 + bin * 14
-    addCylinder(gc, 6, 9, [x, 8, 215], materials.gc, `gc:versions:${bin}`, 10)
-    addHorizontalRing(gc, 6.2, 0.42, [x, 12.5, 215], materials.window, `gc:bin-ring:${bin}`)
+    addCylinder(gc, 6, 9, [x, 12, 215], materials.gc, `gc:versions:${bin}`, 10)
+    addHorizontalRing(gc, 6.2, 0.42, [x, 16.5, 215], materials.window, `gc:bin-ring:${bin}`)
   }
   addInstancedBoxes(
     gc,
@@ -964,36 +668,28 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   tiflash.name = 'district:tiflash'
   addDistrictPad(tiflash, DISTRICT_BOUNDS.tiflash, materials.pavement, 'tiflash:apron')
   addBox(tiflash, [82, 8, 66], [230, 4.4, 216], materials.darkStructure, 'tiflash:store', true)
-  const tiflashWindows: BoxInstance[] = []
   const tiflashCrowns: BoxInstance[] = []
   for (let column = 0; column < 6; column++) {
     const x = 196 + column * 14
     const height = 28 + (column % 2) * 8
-    const y = 18 + (column % 2) * 4
+    const y = 8.6 + height / 2
     addBox(
       tiflash,
       [8, height, 38],
       [x, y, 216],
-      materials.tiflash,
+      materials.darkStructure,
       `tiflash:column:${column}`,
       true,
     )
-    for (let row = 0; row < 5; row++) {
-      tiflashWindows.push({
-        position: [x, y - height / 2 + 5 + row * ((height - 9) / 4), 235.2],
-        size: [4.8, 1.1, 0.38],
-      })
-    }
     tiflashCrowns.push({
-      position: [x, y + height / 2 + 2.5, 216],
-      size: [10, 4.2 + (column % 2) * 1.5, 42],
+      position: [x, y + height / 2 + 0.7, 216],
+      size: [9.8, 1.2, 41],
     })
   }
-  addInstancedBoxes(tiflash, tiflashWindows, materials.window, 'tiflash:column-windows')
-  addInstancedBoxes(tiflash, tiflashCrowns, materials.trim, 'tiflash:column-crowns')
-  addCylinder(tiflash, 4, 30, [230, 25, 248], materials.trim, 'tiflash:mpp-spine', 12)
-  addHorizontalRing(tiflash, 10, 0.75, [230, 40, 248], materials.tiflash, 'tiflash:mpp-ring')
-  addHorizontalRing(tiflash, 6.5, 0.5, [230, 47, 248], materials.window, 'tiflash:learner-ring')
+  addInstancedBoxes(tiflash, tiflashCrowns, materials.structure, 'tiflash:column-crowns')
+  addCylinder(tiflash, 3.3, 26, [230, 23, 248], materials.trim, 'tiflash:mpp-spine', 20)
+  addCylinder(tiflash, 6.8, 1.1, [230, 36.5, 248], materials.structure, 'tiflash:mpp-ring', 24)
+  addCylinder(tiflash, 2.1, 6, [230, 40, 248], materials.tiflash, 'tiflash:learner-ring', 16)
   addBoxOutline(
     tiflash,
     [82, 8, 66],
@@ -1012,7 +708,9 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     tiflash,
     COMPONENT_ANCHORS['tiflash.0'],
   )
-  addCollider(colliders, 'tiflash.0', [230, 17, 216], [86, 34, 68])
+  addCollider(colliders, 'tiflash.0', [230, 25, 216], [86, 50, 68])
+  addBuildingDetails(root, materials)
+  batchStaticMeshes(root)
 
   const dataLegs = DATA_PATHS.flat()
   const data = lineNetwork('network:data', 'sql', dataLegs, materials.dataLine, 2)
@@ -1024,81 +722,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
 
   let theme: CityTheme = 'night'
   let focused: CityComponent | undefined
-  let latestState: TiCityState | null = null
-
-  function paintPeers(next: CityTheme): void {
-    peerMaterial.emissive.setHex(next === 'night' ? 0x1a3144 : 0x000000)
-    peerMaterial.emissiveIntensity = next === 'night' ? 0.72 : 0
-    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
-      for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
-        const instance = store * TICITY_LAYOUT.regionCount + region
-        const leader = store === region % TICITY_LAYOUT.tikvCount
-        _color.setHex(
-          leader ? SEMANTIC_COLORS[next].raft : SEMANTIC_COLORS[next].kv,
-        )
-        if (!leader) _color.multiplyScalar(next === 'night' ? 0.76 : 0.9)
-        peers.setColorAt(instance, _color)
-      }
-    }
-    if (peers.instanceColor) peers.instanceColor.needsUpdate = true
-  }
-
-  function updateState(state: TiCityState): void {
-    latestState = state
-    for (let region = 0; region < TICITY_LAYOUT.regionCount; region++) {
-      const regionState = state.regions.find((candidate) => candidate.id === region)
-      if (!regionState) continue
-      const leaderStore = Math.max(
-        0,
-        Math.min(
-          TICITY_LAYOUT.tikvCount - 1,
-          regionState.leaderStoreId.charCodeAt(regionState.leaderStoreId.length - 1) - 49,
-        ),
-      )
-      const heat = Math.min(1, Math.max(0, regionState.hotScore / 100))
-      for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
-        const instance = store * TICITY_LAYOUT.regionCount + region
-        const component = peerComponents[instance]
-        let peerHealthy = true
-        for (let peerIndex = 0; peerIndex < regionState.peers.length; peerIndex++) {
-          const peer = regionState.peers[peerIndex]
-          const peerStore = peer.storeId.charCodeAt(peer.storeId.length - 1) - 49
-          if (peerStore === store) {
-            peerHealthy = peer.healthy
-            break
-          }
-        }
-        const leader = store === leaderStore
-        const unhealthy = regionState.health === 'unavailable' || !peerHealthy
-
-        const base = instance * 3
-        _position.set(peerBase[base], peerBase[base + 1] + heat * 2.6, peerBase[base + 2])
-        _scale.set(1, 1 + heat, 1)
-        _matrix.compose(_position, _rotation, _scale)
-        peers.setMatrixAt(instance, _matrix)
-
-        _color.setHex(
-          unhealthy
-            ? SEMANTIC_COLORS[theme].fault
-            : leader
-              ? SEMANTIC_COLORS[theme].raft
-              : SEMANTIC_COLORS[theme].kv,
-        )
-        if (!leader && !unhealthy) _color.multiplyScalar(theme === 'night' ? 0.76 : 0.9)
-        peers.setColorAt(instance, _color)
-
-        component.peerRole = leader ? 'leader' : 'follower'
-        component.domain = unhealthy ? 'fault' : leader ? 'raft' : 'kv'
-        component.role = unhealthy
-          ? 'Unavailable Raft voter'
-          : leader
-            ? 'Raft leader voter'
-            : 'Raft follower voter'
-      }
-    }
-    peers.instanceMatrix.needsUpdate = true
-    if (peers.instanceColor) peers.instanceColor.needsUpdate = true
-  }
+  let disposed = false
 
   return {
     root,
@@ -1154,7 +778,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       out.set(anchor[0], anchor[1], anchor[2])
       return true
     },
-    updateState,
+    updateState: regionPeers.updateState,
     updateVisuals(deltaSeconds: number): void {
       environment.update(deltaSeconds)
     },
@@ -1169,8 +793,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       protocolLab.setTheme(next)
       gcStorageLab.setTheme(next)
       tiflashMppLab.setTheme(next)
-      if (latestState) updateState(latestState)
-      else paintPeers(next)
+      regionPeers.setTheme(next)
     },
     setNetworkEmphasis(active: boolean): void {
       materials.setNetworkEmphasis(active)
@@ -1181,6 +804,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       if (focused) focused.object.userData.focused = true
     },
     dispose(): void {
+      if (disposed) return
+      disposed = true
       environment.dispose()
       transactionLab.dispose()
       lockLab.dispose()
@@ -1188,11 +813,14 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       protocolLab.dispose()
       gcStorageLab.dispose()
       tiflashMppLab.dispose()
+      regionPeers.dispose()
+      const geometries = new Set<THREE.BufferGeometry>()
       root.traverse((object) => {
         const mesh = object as THREE.Mesh
-        if (mesh.geometry) mesh.geometry.dispose()
+        if (mesh.geometry) geometries.add(mesh.geometry)
+        if (object instanceof THREE.InstancedMesh) object.dispose()
       })
-      peerMaterial.dispose()
+      for (const geometry of geometries) geometry.dispose()
       materials.dispose()
       root.clear()
     },
