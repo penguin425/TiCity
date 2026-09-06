@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity v0.9.0 model-7 targets the **TiDB v8.5 LTS** line and pins mechanism
+TiCity v0.10.0 model-7 targets the **TiDB v8.5 LTS** line and pins mechanism
 details to TiDB v8.5.0 source commit
 `d13e52ed6e22cc5789bed7c64c861578cd2ed55b`, TiKV v8.5.0 source commit
 `a2c58c94f89cbb410e66d8f85c236308d6fc64f0`, client-go commit
@@ -449,4 +449,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.9.0.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.10.0.

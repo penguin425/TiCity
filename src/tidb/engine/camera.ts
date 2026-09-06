@@ -35,14 +35,15 @@ export interface CityCameraOptions {
 }
 
 export const CITY_ORBIT = {
-  homePosition: [0, 305, 555],
+  homePosition: [235, 525, 835],
   target: [0, 14, 30],
+  fov: 38,
   minDistance: 24,
-  maxDistance: 1_650,
+  maxDistance: 2_400,
 } as const
 
 const _look = new THREE.Vector3()
-const _focusOffset = new THREE.Vector3(88, 72, 104)
+const _focusOffset = new THREE.Vector3(124, 102, 148)
 const WALK_EYE_HEIGHT = 1.7
 const WALK_START_PITCH = 0.025
 const WALK_SAFE_YAW = 0.26

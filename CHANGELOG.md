@@ -4,6 +4,29 @@ All notable TiCity changes are documented here. The inherited PGSimCity
 history remains available in Git before the TiCity derivation baseline
 recorded in `NOTICE`.
 
+## [Unreleased]
+
+## [0.10.0] — 2026-09-06
+
+- Rebuild the campus graphics with layered architecture, visible Region racks,
+  landscaped streets, restrained night lighting and a portrait overview.
+- Fix missing vertex colours and submerged status lights; give leaders and
+  unavailable voters distinct roof markers and keep hotspot selection aligned.
+- Extract shared geometry, instanced rack projection, environment dressing,
+  label layout, lab projection and rendering lifecycles from the large factories.
+- Share and batch static geometry, cache shadows, add local reflection lighting
+  and multisampled night output, and release rendering resources explicitly.
+- Add dimension-aware bevels, dense glass facades, roof plant, cabinet doors,
+  layered gardens and locally textured stone/asphalt/timber surfaces.
+- Add desktop depth-based contact shading, 4096px shadows and 2× high-DPI output;
+  retain the compact direct-render path and frame the campus with a longer lens.
+- Keep motion preferences, bilingual district labels and touch controls usable;
+  add graphical regression checks and reproducible day/night/detail captures.
+- Keep the educational overview and its data-flow presentation as the default;
+  exclude the experimental decorative City view from this release.
+- Include the graphics documentation and reference captures in the downloadable
+  static archive. The deterministic model remains `tidb-v8.5-model-7`.
+
 ## [0.9.0] — 2026-07-31
 
 - Complete the model-7 TiFlash/MPP Lab vertical slice across exact-event City,

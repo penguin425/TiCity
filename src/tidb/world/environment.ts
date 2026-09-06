@@ -8,8 +8,10 @@
 
 import * as THREE from 'three'
 import { DISTRICT_BOUNDS, TICITY_LAYOUT } from './layout'
-import type { Point3 } from './layout'
 import type { CityTheme } from './palette'
+import { createSkyline } from './environment-skyline'
+import { createCampusStreets, createLightPoolTexture, ROAD_SEGMENTS } from './environment-streets'
+import { applyCampusSurface, createCampusSurface } from './environment-surfaces'
 
 export interface CityEnvironment {
   readonly object: THREE.Group
@@ -19,26 +21,7 @@ export interface CityEnvironment {
   dispose(): void
 }
 
-interface RoadSegment {
-  readonly name: string
-  readonly x: number
-  readonly z: number
-  readonly width: number
-  readonly depth: number
-}
-
 const _cameraWorld = new THREE.Vector3()
-
-const ROAD_SEGMENTS: readonly RoadSegment[] = [
-  { name: 'client-approach', x: 0, z: -339, width: 28, depth: 40 },
-  { name: 'gateway-avenue', x: 0, z: -253, width: 28, depth: 54 },
-  { name: 'sql-avenue', x: 0, z: -188, width: 28, depth: 28 },
-  { name: 'fabric-boulevard', x: 0, z: -25, width: 654, depth: 22 },
-  { name: 'storage-boulevard', x: 0, z: 155, width: 654, depth: 20 },
-  { name: 'service-boulevard', x: 0, z: 286, width: 654, depth: 18 },
-  { name: 'west-service-road', x: -318, z: -12, width: 18, depth: 614 },
-  { name: 'east-service-road', x: 318, z: -12, width: 18, depth: 614 },
-] as const
 
 const DISTRICT_LABEL_HEIGHT: Readonly<Record<string, number>> = {
   clients: 0.9,
@@ -82,6 +65,8 @@ void main() {
   float halo = pow(max(dot(direction, normalize(uSunDirection)), 0.0), 18.0);
   color += uSunColor * (sun * 1.7 + halo * 0.08) * uSunStrength;
   gl_FragColor = vec4(color, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
 }
 `
 
@@ -91,55 +76,6 @@ function seededRandom(seed: number): () => number {
     value = (Math.imul(value, 1_664_525) + 1_013_904_223) >>> 0
     return value / 0x1_0000_0000
   }
-}
-
-function setMatrix(
-  mesh: THREE.InstancedMesh,
-  index: number,
-  position: Point3,
-  scale: Point3 = [1, 1, 1],
-): void {
-  const matrix = new THREE.Matrix4()
-  matrix.compose(
-    new THREE.Vector3(position[0], position[1], position[2]),
-    new THREE.Quaternion(),
-    new THREE.Vector3(scale[0], scale[1], scale[2]),
-  )
-  mesh.setMatrixAt(index, matrix)
-}
-
-function createGrid(
-  size: number,
-  spacing: number,
-  y: number,
-  material: THREE.LineBasicMaterial,
-  name: string,
-): THREE.LineSegments {
-  const half = size / 2
-  const lineCount = Math.floor(size / spacing) + 1
-  const positions = new Float32Array(lineCount * 4 * 3)
-  let cursor = 0
-  for (let index = 0; index < lineCount; index++) {
-    const coordinate = -half + index * spacing
-    positions[cursor++] = coordinate
-    positions[cursor++] = y
-    positions[cursor++] = -half
-    positions[cursor++] = coordinate
-    positions[cursor++] = y
-    positions[cursor++] = half
-    positions[cursor++] = -half
-    positions[cursor++] = y
-    positions[cursor++] = coordinate
-    positions[cursor++] = half
-    positions[cursor++] = y
-    positions[cursor++] = coordinate
-  }
-  const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  const grid = new THREE.LineSegments(geometry, material)
-  grid.name = name
-  grid.renderOrder = 1
-  return grid
 }
 
 function createDistrictFrames(material: THREE.LineBasicMaterial): THREE.LineSegments {
@@ -183,122 +119,6 @@ function createLaneMarks(material: THREE.LineDashedMaterial): THREE.LineSegments
   marks.computeLineDistances()
   marks.renderOrder = 4
   return marks
-}
-
-function createStreetFurniture(
-  poleMaterial: THREE.MeshStandardMaterial,
-  lampMaterial: THREE.MeshStandardMaterial,
-  foliageMaterial: THREE.MeshStandardMaterial,
-): THREE.Group {
-  const root = new THREE.Group()
-  root.name = 'city:street-furniture'
-
-  const lampPositions: Point3[] = []
-  for (let x = -280; x <= 280; x += 40) {
-    lampPositions.push([x, 0, -40], [x, 0, 166])
-  }
-  for (let z = -300; z <= 260; z += 40) {
-    lampPositions.push([-304, 0, z], [304, 0, z])
-  }
-
-  const poleGeometry = new THREE.CylinderGeometry(0.28, 0.42, 7.5, 8)
-  const lampGeometry = new THREE.OctahedronGeometry(0.9, 0)
-  const poles = new THREE.InstancedMesh(poleGeometry, poleMaterial, lampPositions.length)
-  const lamps = new THREE.InstancedMesh(lampGeometry, lampMaterial, lampPositions.length)
-  poles.name = 'city:lamp-posts'
-  lamps.name = 'city:lamp-heads'
-  for (let index = 0; index < lampPositions.length; index++) {
-    const point = lampPositions[index]
-    setMatrix(poles, index, [point[0], 3.75, point[2]])
-    setMatrix(lamps, index, [point[0], 8.05, point[2]], [1, 1.25, 1])
-  }
-  poles.instanceMatrix.needsUpdate = true
-  lamps.instanceMatrix.needsUpdate = true
-  poles.castShadow = true
-  poles.receiveShadow = true
-  root.add(poles, lamps)
-
-  const treePositions: Point3[] = []
-  for (let x = -278; x <= 278; x += 48) {
-    if (Math.abs(x) < 42) continue
-    treePositions.push([x, 0, -52], [x + 12, 0, 178])
-  }
-  const trunkGeometry = new THREE.CylinderGeometry(0.55, 0.8, 4.5, 7)
-  const crownGeometry = new THREE.ConeGeometry(3.8, 8.5, 9)
-  const trunks = new THREE.InstancedMesh(trunkGeometry, poleMaterial, treePositions.length)
-  const crowns = new THREE.InstancedMesh(crownGeometry, foliageMaterial, treePositions.length)
-  trunks.name = 'city:data-grove-trunks'
-  crowns.name = 'city:data-grove-crowns'
-  for (let index = 0; index < treePositions.length; index++) {
-    const point = treePositions[index]
-    const scale = 0.8 + (index % 4) * 0.08
-    setMatrix(trunks, index, [point[0], 2.25, point[2]], [scale, scale, scale])
-    setMatrix(crowns, index, [point[0], 8, point[2]], [scale, scale, scale])
-  }
-  trunks.instanceMatrix.needsUpdate = true
-  crowns.instanceMatrix.needsUpdate = true
-  trunks.castShadow = true
-  crowns.castShadow = true
-  root.add(trunks, crowns)
-
-  return root
-}
-
-function createSkyline(
-  material: THREE.MeshStandardMaterial,
-  beaconMaterial: THREE.MeshStandardMaterial,
-): THREE.Group {
-  const root = new THREE.Group()
-  root.name = 'city:distant-skyline'
-  const random = seededRandom(4_250)
-  const buildings: { readonly x: number; readonly z: number; readonly width: number; readonly depth: number; readonly height: number }[] = []
-
-  for (let index = 0; index < 52; index++) {
-    const side = index % 3
-    const along = -338 + random() * 676
-    const width = 8 + random() * 13
-    const depth = 8 + random() * 13
-    const height = 10 + random() * 46
-    if (side === 0) {
-      buildings.push({ x: along, z: -344 + random() * 9, width, depth, height })
-    } else {
-      buildings.push({
-        x: (index % 2 === 0 ? -1 : 1) * (340 + random() * 6),
-        z: along,
-        width,
-        depth,
-        height,
-      })
-    }
-  }
-
-  const geometry = new THREE.BoxGeometry(1, 1, 1)
-  const mesh = new THREE.InstancedMesh(geometry, material, buildings.length)
-  const beaconGeometry = new THREE.OctahedronGeometry(0.8, 0)
-  const beacons = new THREE.InstancedMesh(beaconGeometry, beaconMaterial, buildings.length)
-  mesh.name = 'city:skyline-towers'
-  beacons.name = 'city:skyline-beacons'
-  for (let index = 0; index < buildings.length; index++) {
-    const building = buildings[index]
-    setMatrix(
-      mesh,
-      index,
-      [building.x, building.height / 2 - 0.1, building.z],
-      [building.width, building.height, building.depth],
-    )
-    setMatrix(
-      beacons,
-      index,
-      [building.x, building.height + 0.8, building.z],
-      [0.8, 1.15, 0.8],
-    )
-  }
-  mesh.instanceMatrix.needsUpdate = true
-  beacons.instanceMatrix.needsUpdate = true
-  mesh.castShadow = true
-  mesh.receiveShadow = true
-  root.add(mesh, beacons)
-  return root
 }
 
 function createStars(material: THREE.PointsMaterial): THREE.Points {
@@ -396,25 +216,19 @@ export function createCityEnvironment(): CityEnvironment {
   })
   const groundMaterial = new THREE.MeshStandardMaterial({
     color: 0x0a1826,
-    roughness: 0.95,
+    roughness: 0.82,
     metalness: 0.03,
   })
   const roadMaterial = new THREE.MeshStandardMaterial({
     color: 0x09131f,
-    roughness: 0.88,
+    roughness: 0.76,
     metalness: 0.08,
   })
-  const gridMinorMaterial = new THREE.LineBasicMaterial({
-    color: 0x1b5271,
-    transparent: true,
-    opacity: 0.24,
-  })
-  const gridMajorMaterial = new THREE.LineBasicMaterial({
-    color: 0x2c84a8,
-    transparent: true,
-    opacity: 0.46,
+  const pavingMaterial = new THREE.MeshStandardMaterial({
+    color: 0x364955, roughness: 0.8, metalness: 0.02,
   })
   const laneMaterial = new THREE.LineDashedMaterial({
+    depthWrite: false,
     color: 0x5eddf5,
     transparent: true,
     opacity: 0.8,
@@ -423,6 +237,7 @@ export function createCityEnvironment(): CityEnvironment {
     toneMapped: false,
   })
   const districtMaterial = new THREE.LineBasicMaterial({
+    depthWrite: false,
     color: 0x34d5ff,
     transparent: true,
     opacity: 0.65,
@@ -446,12 +261,21 @@ export function createCityEnvironment(): CityEnvironment {
     roughness: 0.9,
     metalness: 0,
   })
+  const lawnMaterial = new THREE.MeshStandardMaterial({
+    color: 0x45684b, roughness: 1, metalness: 0,
+  })
+  const timberMaterial = new THREE.MeshStandardMaterial({
+    color: 0x977249, roughness: 0.78, metalness: 0,
+  })
+  const waterMaterial = new THREE.MeshStandardMaterial({
+    color: 0x244952, roughness: 0.16, metalness: 0.6,
+  })
   const skylineMaterial = new THREE.MeshStandardMaterial({
     color: 0x10243a,
     emissive: 0x071829,
     emissiveIntensity: 0.35,
-    roughness: 0.82,
-    metalness: 0.14,
+    roughness: 0.38,
+    metalness: 0.38,
   })
   const beaconMaterial = new THREE.MeshStandardMaterial({
     color: 0x58ddff,
@@ -460,14 +284,15 @@ export function createCityEnvironment(): CityEnvironment {
     roughness: 0.2,
     toneMapped: false,
   })
-  const pulseMaterial = new THREE.MeshBasicMaterial({
-    color: 0x34d5ff,
+  const lightPoolTexture = createLightPoolTexture()
+  const lightPoolMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffc47a,
+    map: lightPoolTexture,
     transparent: true,
-    opacity: 0.46,
+    opacity: 0.32,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
-    side: THREE.DoubleSide,
   })
   const starMaterial = new THREE.PointsMaterial({
     color: 0xd8ecff,
@@ -506,20 +331,33 @@ export function createCityEnvironment(): CityEnvironment {
     },
   })
 
+  const stoneTexture = createCampusSurface('stone')
+  const asphaltTexture = createCampusSurface('asphalt')
+  const turfTexture = createCampusSurface('turf')
+  const timberTexture = createCampusSurface('timber')
+  applyCampusSurface(groundMaterial, stoneTexture, 12, 0.2)
+  applyCampusSurface(pavingMaterial, stoneTexture, 8, 0.16)
+  applyCampusSurface(roadMaterial, asphaltTexture, 7, 0.1)
+  applyCampusSurface(lawnMaterial, turfTexture, 12, 0.19)
+  applyCampusSurface(timberMaterial, timberTexture, 4, 0.055)
+  const textures = [cloudTexture, lightPoolTexture, stoneTexture, asphaltTexture, turfTexture, timberTexture]
+
   const materials: readonly THREE.Material[] = [
     foundationMaterial,
     groundMaterial,
     roadMaterial,
-    gridMinorMaterial,
-    gridMajorMaterial,
+    pavingMaterial,
     laneMaterial,
     districtMaterial,
     poleMaterial,
     lampMaterial,
     foliageMaterial,
+    lawnMaterial,
+    timberMaterial,
+    waterMaterial,
     skylineMaterial,
     beaconMaterial,
-    pulseMaterial,
+    lightPoolMaterial,
     starMaterial,
     cloudMaterial,
     skyMaterial,
@@ -558,124 +396,71 @@ export function createCityEnvironment(): CityEnvironment {
   object.add(ground)
 
   object.add(
-    createGrid(TICITY_LAYOUT.groundSize - 16, 20, -0.04, gridMinorMaterial, 'city:grid-minor'),
-    createGrid(TICITY_LAYOUT.groundSize - 16, 100, -0.02, gridMajorMaterial, 'city:grid-major'),
-  )
-
-  const roads = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    roadMaterial,
-    ROAD_SEGMENTS.length,
-  )
-  roads.name = 'city:roads'
-  roads.receiveShadow = true
-  for (let index = 0; index < ROAD_SEGMENTS.length; index++) {
-    const road = ROAD_SEGMENTS[index]
-    setMatrix(roads, index, [road.x, 0.02, road.z], [road.width, 0.34, road.depth])
-  }
-  roads.instanceMatrix.needsUpdate = true
-  object.add(roads, createLaneMarks(laneMaterial))
-
-  object.add(createDistrictFrames(districtMaterial))
-
-  object.add(
-    createStreetFurniture(poleMaterial, lampMaterial, foliageMaterial),
+    createLaneMarks(laneMaterial),
+    createDistrictFrames(districtMaterial),
+    createCampusStreets({
+      road: roadMaterial,
+      paving: pavingMaterial,
+      pole: poleMaterial,
+      lamp: lampMaterial,
+      foliage: foliageMaterial,
+      lawn: lawnMaterial,
+      timber: timberMaterial,
+      water: waterMaterial,
+      lightPool: lightPoolMaterial,
+    }),
     createSkyline(skylineMaterial, beaconMaterial),
   )
 
-  const pulseAnchors: readonly Point3[] = [
-    [0, 0.5, -220],
-    [0, 0.5, -132],
-    [232, 0.5, -102],
-    [-150, 0.7, 84],
-    [0, 0.7, 84],
-    [150, 0.7, 84],
-    [-231, 0.5, 215],
-    [230, 0.5, 216],
-  ]
-  const ringGeometry = new THREE.RingGeometry(7.5, 8.2, 48)
-  const pulseMesh = new THREE.InstancedMesh(ringGeometry, pulseMaterial, pulseAnchors.length)
-  pulseMesh.name = 'city:district-pulses'
-  pulseMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
-  pulseMesh.frustumCulled = false
-  pulseMesh.renderOrder = 6
-  const pulseMatrix = new THREE.Matrix4()
-  const pulsePosition = new THREE.Vector3()
-  const pulseScale = new THREE.Vector3()
-  const pulseRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0))
-  for (let index = 0; index < pulseAnchors.length; index++) {
-    const point = pulseAnchors[index]
-    pulsePosition.set(point[0], point[1], point[2])
-    pulseScale.setScalar(0.72 + index * 0.025)
-    pulseMatrix.compose(pulsePosition, pulseRotation, pulseScale)
-    pulseMesh.setMatrixAt(index, pulseMatrix)
-  }
-  pulseMesh.instanceMatrix.needsUpdate = true
-  object.add(pulseMesh)
-
-  let theme: CityTheme = 'night'
-  let clock = 0
-
   function setTheme(next: CityTheme): void {
-    theme = next
     const night = next === 'night'
-    foundationMaterial.color.setHex(night ? 0x07111e : 0x9aa8b2)
-    groundMaterial.color.setHex(night ? 0x0a1826 : 0xcbd5d9)
-    roadMaterial.color.setHex(night ? 0x09131f : 0x667681)
-    gridMinorMaterial.color.setHex(night ? 0x1b5271 : 0x879aa4)
-    gridMinorMaterial.opacity = night ? 0.24 : 0.34
-    gridMajorMaterial.color.setHex(night ? 0x2c84a8 : 0x617985)
-    gridMajorMaterial.opacity = night ? 0.46 : 0.52
-    laneMaterial.color.setHex(night ? 0x5eddf5 : 0xf4d56c)
-    laneMaterial.opacity = night ? 0.8 : 0.72
-    districtMaterial.color.setHex(night ? 0x34d5ff : 0x177e9e)
-    districtMaterial.opacity = night ? 0.65 : 0.8
-    poleMaterial.color.setHex(night ? 0x24384b : 0x566771)
-    lampMaterial.color.setHex(night ? 0xffd166 : 0xd28a00)
-    lampMaterial.emissive.setHex(night ? 0xffb632 : 0x5a2b00)
-    lampMaterial.emissiveIntensity = night ? 2.4 : 0.25
-    foliageMaterial.color.setHex(night ? 0x177a68 : 0x4e8e66)
-    skylineMaterial.color.setHex(night ? 0x10243a : 0x8495a2)
-    skylineMaterial.emissive.setHex(night ? 0x071829 : 0x000000)
-    skylineMaterial.emissiveIntensity = night ? 0.35 : 0
-    beaconMaterial.color.setHex(night ? 0x58ddff : 0xb66a00)
-    beaconMaterial.emissive.setHex(night ? 0x3edaff : 0x4a2100)
-    beaconMaterial.emissiveIntensity = night ? 2.6 : 0.25
-    pulseMaterial.color.setHex(night ? 0x34d5ff : 0x087b96)
-    pulseMaterial.opacity = night ? 0.46 : 0.34
+    foundationMaterial.color.setHex(night ? 0x142430 : 0x344c52)
+    groundMaterial.color.setHex(night ? 0x21333f : 0x778785)
+    roadMaterial.color.setHex(night ? 0x13232d : 0x30434d)
+    pavingMaterial.color.setHex(night ? 0x566772 : 0xaab0a5)
+    laneMaterial.color.setHex(night ? 0xb5ae8a : 0xe3c875)
+    laneMaterial.opacity = night ? 0.5 : 0.66
+    districtMaterial.color.setHex(night ? 0x497486 : 0x466f7a)
+    districtMaterial.opacity = night ? 0.3 : 0.38
+    poleMaterial.color.setHex(night ? 0x293b44 : 0x344749)
+    lampMaterial.color.setHex(night ? 0xffdfa7 : 0xe5d9b4)
+    lampMaterial.emissive.setHex(night ? 0xffc680 : 0x000000)
+    lampMaterial.emissiveIntensity = night ? 1.55 : 0
+    foliageMaterial.color.setHex(night ? 0x345f4b : 0x52714a)
+    lawnMaterial.color.setHex(night ? 0x345746 : 0x66815c)
+    timberMaterial.color.setHex(night ? 0x7b634b : 0xac8056)
+    waterMaterial.color.setHex(night ? 0x173443 : 0x294c56)
+    skylineMaterial.color.setHex(night ? 0x274453 : 0x59747c)
+    skylineMaterial.emissive.setHex(night ? 0x0e2432 : 0x000000)
+    skylineMaterial.emissiveIntensity = night ? 0.22 : 0
+    beaconMaterial.color.setHex(night ? 0xeed2a3 : 0x8faeb4)
+    beaconMaterial.emissive.setHex(night ? 0xcfac72 : 0x000000)
+    beaconMaterial.emissiveIntensity = night ? 0.4 : 0
+    lightPoolMaterial.opacity = night ? 0.4 : 0
     starMaterial.opacity = night ? 0.8 : 0
+    stars.visible = night
     clouds.visible = !night
     cloudMaterial.opacity = night ? 0 : 0.25
 
     const uniforms = skyMaterial.uniforms
-    ;(uniforms.uZenith.value as THREE.Color).setHex(night ? 0x020712 : 0x79b8df)
-    ;(uniforms.uHorizon.value as THREE.Color).setHex(night ? 0x172c46 : 0xcce5f2)
-    ;(uniforms.uHaze.value as THREE.Color).setHex(night ? 0x091a2a : 0xe6d9bd)
+    ;(uniforms.uZenith.value as THREE.Color).setHex(night ? 0x071120 : 0x75add7)
+    ;(uniforms.uHorizon.value as THREE.Color).setHex(night ? 0x23354e : 0xb4dcec)
+    ;(uniforms.uHaze.value as THREE.Color).setHex(night ? 0x182c42 : 0x94bccd)
     ;(uniforms.uSunDirection.value as THREE.Vector3)
-      .set(night ? -0.42 : 0.48, night ? 0.42 : 0.2, night ? -0.8 : -0.85)
+      .set(-240, 280, 160)
       .normalize()
     ;(uniforms.uSunColor.value as THREE.Color).setHex(night ? 0xbfd8ff : 0xfff2c8)
     uniforms.uSunStrength.value = night ? 0.25 : 1.18
   }
 
   function update(deltaSeconds: number): void {
-    clock += Math.max(0, Math.min(0.05, deltaSeconds))
-    stars.rotation.y += deltaSeconds * 0.002
-    clouds.rotation.y += deltaSeconds * 0.0012
-    for (let index = 0; index < pulseAnchors.length; index++) {
-      const phase = (clock * 0.32 + index * 0.17) % 1
-      const scale = 0.7 + phase * 1.65
-      const point = pulseAnchors[index]
-      pulsePosition.set(point[0], point[1], point[2])
-      pulseScale.setScalar(scale)
-      pulseMatrix.compose(pulsePosition, pulseRotation, pulseScale)
-      pulseMesh.setMatrixAt(index, pulseMatrix)
-    }
-    pulseMesh.instanceMatrix.needsUpdate = true
-    pulseMaterial.opacity = (theme === 'night' ? 0.42 : 0.3) * (0.65 + Math.sin(clock * 1.7) * 0.18)
+    const delta = Math.max(0, Math.min(0.05, deltaSeconds))
+    stars.rotation.y += delta * 0.002
+    clouds.rotation.y += delta * 0.0012
   }
 
   setTheme('night')
+  let disposed = false
 
   return {
     object,
@@ -683,12 +468,17 @@ export function createCityEnvironment(): CityEnvironment {
     update,
     setTheme,
     dispose(): void {
+      if (disposed) return
+      disposed = true
+      const geometries = new Set<THREE.BufferGeometry>()
       object.traverse((child) => {
         const drawable = child as THREE.Mesh | THREE.LineSegments | THREE.Points
-        drawable.geometry?.dispose()
+        if (drawable.geometry) geometries.add(drawable.geometry)
+        if (child instanceof THREE.InstancedMesh) child.dispose()
       })
+      for (const geometry of geometries) geometry.dispose()
       for (const material of materials) material.dispose()
-      cloudTexture.dispose()
+      for (const texture of textures) texture.dispose()
       object.clear()
     },
   }

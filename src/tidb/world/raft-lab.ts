@@ -1436,6 +1436,9 @@ export function createRaftLab(options: RaftLabOptions = {}): RaftLab {
     dispose(): void {
       if (disposed) return
       disposed = true
+      root.traverse((child) => {
+        if (child instanceof THREE.InstancedMesh) child.dispose()
+      })
       for (let index = 0; index < ownedGeometries.length; index++) {
         ownedGeometries[index].dispose()
       }

@@ -1128,6 +1128,9 @@ export function createGcStorageLab(
     dispose(): void {
       if (disposed) return
       disposed = true
+      root.traverse((child) => {
+        if (child instanceof THREE.InstancedMesh) child.dispose()
+      })
       root.removeFromParent()
       for (const geometry of ownedGeometries) geometry.dispose()
       for (const material of ownedMaterials) material.dispose()

@@ -1,7 +1,7 @@
 {
   "name": "ticity",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "An independent, deterministic 3D educational model of TiDB architecture and distributed SQL flows.",
@@ -34,6 +34,7 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "capture:graphics": "node tools/capture-graphics.mjs",
     "test:license": "./tools/verify-license-files.sh",
     "test:watch": "vitest",
     "preview": "vite preview --port 4173"

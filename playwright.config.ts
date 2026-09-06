@@ -11,12 +11,12 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   /*
-   * Chromium software WebGL is CPU-heavy. Keep local concurrency bounded and
-   * serialize CI so parallel cities cannot starve Playwright's control channel
-   * even though the assertions themselves are fast and deterministic.
+   * Chromium software WebGL is CPU-heavy, especially with contact shading and
+   * high-resolution shadows. Serialize both local and CI runs and allow the
+   * same 60s window so image readbacks do not starve the control channel.
    */
-  workers: process.env.CI ? 1 : 2,
-  timeout: process.env.CI ? 60_000 : 30_000,
+  workers: 1,
+  timeout: 60_000,
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',
   use: {
     baseURL: previewUrl,

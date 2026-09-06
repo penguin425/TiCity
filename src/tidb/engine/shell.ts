@@ -4,11 +4,7 @@
  */
 
 import * as THREE from 'three'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
-import type { TiCityState, TraceEvent, TraceReceipt } from '../model/types'
+import type { TiCityState, TraceReceipt } from '../model/types'
 import { FOCUS_COMPONENT_TARGETS, TICITY_LAYOUT } from '../world/layout'
 import { createTiDBSceneGraph } from '../world/city'
 import type { CityComponent, TiDBSceneGraph } from '../world/city'
@@ -19,28 +15,14 @@ import { CITY_ORBIT, createCityCameraController } from './camera'
 import type { CityCameraController, CityViewMode } from './camera'
 import { createCollisionMap } from './collision'
 import { createCityLabels } from './labels'
+import { createCityRendering } from './rendering'
 import { createCityPicker } from './picker'
 import type { CityPicker } from './picker'
 import { createTraceFlows } from './trace-flows'
 import type { TraceFlowController } from './trace-flows'
-import { projectTransactionLab } from '../world/transaction-lab-projection'
-import { EMPTY_TRANSACTION_LAB_PROJECTION } from '../world/transaction-lab'
-import type { TransactionLabProjection } from '../world/transaction-lab'
-import { projectLockLab } from '../world/lock-lab-projection'
-import { EMPTY_LOCK_LAB_PROJECTION } from '../world/lock-lab'
-import type { LockLabProjection } from '../world/lock-lab'
-import { projectRaftLab } from '../world/raft-lab-projection'
-import { EMPTY_RAFT_LAB_PROJECTION } from '../world/raft-lab'
-import type { RaftLabProjection } from '../world/raft-lab'
-import { projectProtocolLab } from '../world/protocol-lab-projection'
-import { EMPTY_PROTOCOL_LAB_PROJECTION } from '../world/protocol-lab'
-import type { ProtocolLabProjection } from '../world/protocol-lab'
-import { projectGcStorageLab } from '../world/gc-storage-lab-projection'
-import { EMPTY_GC_STORAGE_LAB_PROJECTION } from '../world/gc-storage-lab'
-import type { GcStorageLabProjection } from '../world/gc-storage-lab'
-import { projectTiFlashMppLab } from '../world/tiflash-mpp-lab-projection'
-import { EMPTY_TIFLASH_MPP_LAB_PROJECTION } from '../world/tiflash-mpp-lab'
-import type { TiFlashMppLabProjection } from '../world/tiflash-mpp-lab'
+import { projectCityLabs } from './lab-projections'
+export { projectCityLabs } from './lab-projections'
+export type { CityLabProjections } from './lab-projections'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
@@ -98,178 +80,17 @@ export function cityProjectionAspect(
 }
 
 export function cityPixelRatio(width: number, devicePixelRatio: number): number {
-  const cap = width <= 900 ? 1.25 : 1.5
+  const cap = width <= 900 ? 1.25 : 2
   return Math.max(1, Math.min(cap, devicePixelRatio || 1))
 }
 
-export interface CityLabProjections {
-  readonly transaction: TransactionLabProjection
-  readonly lock: LockLabProjection
-  readonly raft: RaftLabProjection
-  readonly protocol: ProtocolLabProjection
-  readonly gcStorage: GcStorageLabProjection
-  readonly tiflashMpp: TiFlashMppLabProjection
+/** Keep the campus in view in portrait without changing the navigated pose. */
+export function cityViewZoom(width: number, height: number): number {
+  return width <= 900 ? Math.min(1, Math.max(0.35, width / Math.max(1, height) * 0.9)) : 1
 }
 
-function hiddenTransactionLab(reducedMotion: boolean): TransactionLabProjection {
-  return reducedMotion === EMPTY_TRANSACTION_LAB_PROJECTION.reducedMotion
-    ? EMPTY_TRANSACTION_LAB_PROJECTION
-    : { ...EMPTY_TRANSACTION_LAB_PROJECTION, reducedMotion }
-}
-
-function hiddenLockLab(reducedMotion: boolean): LockLabProjection {
-  return reducedMotion === EMPTY_LOCK_LAB_PROJECTION.reducedMotion
-    ? EMPTY_LOCK_LAB_PROJECTION
-    : { ...EMPTY_LOCK_LAB_PROJECTION, reducedMotion }
-}
-
-function hiddenRaftLab(reducedMotion: boolean): RaftLabProjection {
-  return reducedMotion === EMPTY_RAFT_LAB_PROJECTION.reducedMotion
-    ? EMPTY_RAFT_LAB_PROJECTION
-    : { ...EMPTY_RAFT_LAB_PROJECTION, reducedMotion }
-}
-
-function hiddenProtocolLab(reducedMotion: boolean): ProtocolLabProjection {
-  return reducedMotion === EMPTY_PROTOCOL_LAB_PROJECTION.reducedMotion
-    ? EMPTY_PROTOCOL_LAB_PROJECTION
-    : { ...EMPTY_PROTOCOL_LAB_PROJECTION, reducedMotion }
-}
-
-function hiddenGcStorageLab(
-  reducedMotion: boolean,
-): GcStorageLabProjection {
-  return reducedMotion === EMPTY_GC_STORAGE_LAB_PROJECTION.reducedMotion
-    ? EMPTY_GC_STORAGE_LAB_PROJECTION
-    : { ...EMPTY_GC_STORAGE_LAB_PROJECTION, reducedMotion }
-}
-
-function hiddenTiFlashMppLab(
-  reducedMotion: boolean,
-): TiFlashMppLabProjection {
-  return reducedMotion === EMPTY_TIFLASH_MPP_LAB_PROJECTION.reducedMotion
-    ? EMPTY_TIFLASH_MPP_LAB_PROJECTION
-    : { ...EMPTY_TIFLASH_MPP_LAB_PROJECTION, reducedMotion }
-}
-
-/**
- * Projects exactly one detailed 3D lab from the event-owned discriminator.
- * Lock and Raft snapshots retain shared Region summaries, so their explicit
- * discriminators take precedence over the generic transaction projection.
- */
-export function projectCityLabs(
-  event: TraceEvent | null,
-  inspect: boolean,
-  reducedMotion: boolean,
-  pulse = 0,
-): CityLabProjections {
-  const hiddenTransaction = hiddenTransactionLab(reducedMotion)
-  const hiddenLock = hiddenLockLab(reducedMotion)
-  const hiddenRaft = hiddenRaftLab(reducedMotion)
-  const hiddenProtocol = hiddenProtocolLab(reducedMotion)
-  const hiddenGcStorage = hiddenGcStorageLab(reducedMotion)
-  const hiddenTiFlashMpp = hiddenTiFlashMppLab(reducedMotion)
-  if (!inspect || !event?.snapshot) {
-    return {
-      transaction: hiddenTransaction,
-      lock: hiddenLock,
-      raft: hiddenRaft,
-      protocol: hiddenProtocol,
-      gcStorage: hiddenGcStorage,
-      tiflashMpp: hiddenTiFlashMpp,
-    }
-  }
-  if (event.snapshot.tiflashMppLab) {
-    return {
-      transaction: hiddenTransaction,
-      lock: hiddenLock,
-      raft: hiddenRaft,
-      protocol: hiddenProtocol,
-      gcStorage: hiddenGcStorage,
-      tiflashMpp: projectTiFlashMppLab(event, {
-        inspect: true,
-        reducedMotion,
-        pulse,
-      }) ?? hiddenTiFlashMpp,
-    }
-  }
-  if (event.snapshot.gcLab) {
-    return {
-      transaction: hiddenTransaction,
-      lock: hiddenLock,
-      raft: hiddenRaft,
-      protocol: hiddenProtocol,
-      gcStorage: projectGcStorageLab(event, {
-        inspect: true,
-        reducedMotion,
-        pulse,
-      }) ?? hiddenGcStorage,
-      tiflashMpp: hiddenTiFlashMpp,
-    }
-  }
-  if (event.snapshot.protocolLab) {
-    return {
-      transaction: hiddenTransaction,
-      lock: hiddenLock,
-      raft: hiddenRaft,
-      protocol: projectProtocolLab(event, {
-        inspect: true,
-        reducedMotion,
-        pulse,
-      }) ?? hiddenProtocol,
-      gcStorage: hiddenGcStorage,
-      tiflashMpp: hiddenTiFlashMpp,
-    }
-  }
-  if (event.snapshot.raftLab) {
-    return {
-      transaction: hiddenTransaction,
-      lock: hiddenLock,
-      raft: projectRaftLab(event, {
-        inspect: true,
-        reducedMotion,
-        pulse,
-      }) ?? hiddenRaft,
-      protocol: hiddenProtocol,
-      gcStorage: hiddenGcStorage,
-      tiflashMpp: hiddenTiFlashMpp,
-    }
-  }
-  if (event.snapshot.lockLab) {
-    return {
-      transaction: hiddenTransaction,
-      lock: projectLockLab(event, {
-        inspect: true,
-        reducedMotion,
-        pulse,
-      }) ?? hiddenLock,
-      raft: hiddenRaft,
-      protocol: hiddenProtocol,
-      gcStorage: hiddenGcStorage,
-      tiflashMpp: hiddenTiFlashMpp,
-    }
-  }
-  if (event.snapshot.transaction) {
-    return {
-      transaction: projectTransactionLab(event, {
-        inspect: true,
-        reducedMotion,
-        pulse,
-      }) ?? hiddenTransaction,
-      lock: hiddenLock,
-      raft: hiddenRaft,
-      protocol: hiddenProtocol,
-      gcStorage: hiddenGcStorage,
-      tiflashMpp: hiddenTiFlashMpp,
-    }
-  }
-  return {
-    transaction: hiddenTransaction,
-    lock: hiddenLock,
-    raft: hiddenRaft,
-    protocol: hiddenProtocol,
-    gcStorage: hiddenGcStorage,
-    tiflashMpp: hiddenTiFlashMpp,
-  }
+function verticalFraming(width: number, height: number): number {
+  return width > 900 ? height * 0.075 : 0
 }
 
 function measure(container: HTMLElement): readonly [number, number] {
@@ -291,11 +112,6 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     alpha: false,
     stencil: false,
   })
-  renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.08
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.setPixelRatio(cityPixelRatio(width, window.devicePixelRatio))
   renderer.setSize(width, height, false)
   renderer.domElement.style.display = 'block'
@@ -317,43 +133,28 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   scene.fog = new THREE.Fog(0x050b12, initialFog.near, initialFog.far)
 
   const camera = new THREE.PerspectiveCamera(
-    52,
+    38,
     cityProjectionAspect(width, height, hudExpanded),
     0.3,
     4_000,
   )
   camera.position.set(...CITY_ORBIT.homePosition)
   camera.lookAt(...CITY_ORBIT.target)
-  if (initialOcclusion > 0) {
+  camera.zoom = cityViewZoom(width, height)
+  if (initialOcclusion > 0 || width > 900) {
     camera.setViewOffset(
       width + initialOcclusion,
       height,
       initialOcclusion,
-      0,
+      verticalFraming(width, height),
       width,
       height,
     )
   }
+  camera.updateProjectionMatrix()
 
-  const hemisphere = new THREE.HemisphereLight(0x91b8db, 0x0a1018, 1.05)
-  const ambient = new THREE.AmbientLight(0x6b9fc2, 0.62)
-  const key = new THREE.DirectionalLight(0xc8e4ff, 2.1)
-  key.position.set(180, 300, -160)
-  key.target.position.set(0, 0, 30)
-  key.castShadow = true
-  key.shadow.mapSize.set(1024, 1024)
-  key.shadow.camera.left = -330
-  key.shadow.camera.right = 330
-  key.shadow.camera.top = 330
-  key.shadow.camera.bottom = -330
-  key.shadow.camera.near = 20
-  key.shadow.camera.far = 760
-  key.shadow.bias = -0.00045
-  key.shadow.normalBias = 0.42
-  const fill = new THREE.DirectionalLight(0x6f9fd0, 0.42)
-  fill.position.set(-280, 170, 260)
-  fill.target.position.set(0, 16, 10)
-  scene.add(hemisphere, ambient, key, key.target, fill, fill.target)
+  const rendering = createCityRendering(renderer, scene, camera)
+  rendering.resize(width, height, cityPixelRatio(width, window.devicePixelRatio))
 
   const city = createTiDBSceneGraph()
   const flows = createTraceFlows(city)
@@ -376,19 +177,9 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   const labels = createCityLabels(container, camera, city)
   labels.setMode(options.mode ?? 'orbit')
   const audio = createCityAudio()
-  const composer = new EffectComposer(renderer)
-  composer.setPixelRatio(cityPixelRatio(width, window.devicePixelRatio))
-  composer.setSize(width, height)
-  const renderPass = new RenderPass(scene, camera)
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.34, 0.38, 0.9)
-  const outputPass = new OutputPass()
-  composer.addPass(renderPass)
-  composer.addPass(bloomPass)
-  composer.addPass(outputPass)
-
   let theme: CityTheme = options.theme ?? 'night'
-  let viewportWidth = width
-  let postProcessing = false
+  const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
+
   let raf = 0
   let running = false
   let disposed = false
@@ -441,47 +232,20 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     city.setTheme(next)
     flows.setTheme(next)
     picker.setTheme(next)
-    const night = next === 'night'
-    if (scene.background instanceof THREE.Color) {
-      scene.background.setHex(night ? 0x050b12 : 0xc7d6e2)
-    }
-    if (scene.fog instanceof THREE.Fog) {
-      const fog = TICITY_LAYOUT.fog[next]
-      scene.fog.color.setHex(night ? 0x050b12 : 0xc7d6e2)
-      scene.fog.near = fog.near
-      scene.fog.far = fog.far
-    }
-    hemisphere.color.setHex(night ? 0x91b8db : 0xd9efff)
-    hemisphere.groundColor.setHex(night ? 0x0a1018 : 0x71806e)
-    hemisphere.intensity = night ? 1.05 : 1.32
-    ambient.color.setHex(night ? 0x6b9fc2 : 0xffffff)
-    ambient.intensity = night ? 0.54 : 0.3
-    key.color.setHex(night ? 0xc8e4ff : 0xfff0cf)
-    key.intensity = night ? 2.35 : 3.25
-    key.castShadow = !night
-    fill.color.setHex(night ? 0x557fb8 : 0x97bce2)
-    fill.intensity = night ? 0.62 : 0.46
-    renderer.shadowMap.enabled = !night
-    renderer.toneMapping = night ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping
-    renderer.toneMappingExposure = night ? 1.18 : 0.98
-    bloomPass.enabled = night
-    postProcessing =
-      night &&
-      viewportWidth > 900 &&
-      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    rendering.setTheme(next)
   }
 
   function resize(): void {
     const [nextWidth, nextHeight] = measure(container)
-    viewportWidth = nextWidth
     const occlusion = cityViewOcclusion(nextWidth, hudExpanded)
     camera.aspect = cityProjectionAspect(nextWidth, nextHeight, hudExpanded)
-    if (occlusion > 0) {
+    camera.zoom = cityViewZoom(nextWidth, nextHeight)
+    if (occlusion > 0 || nextWidth > 900) {
       camera.setViewOffset(
         nextWidth + occlusion,
         nextHeight,
         occlusion,
-        0,
+        verticalFraming(nextWidth, nextHeight),
         nextWidth,
         nextHeight,
       )
@@ -489,16 +253,16 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       camera.clearViewOffset()
     }
     camera.updateProjectionMatrix()
-    renderer.setPixelRatio(cityPixelRatio(nextWidth, window.devicePixelRatio))
-    renderer.setSize(nextWidth, nextHeight, false)
-    composer.setPixelRatio(cityPixelRatio(nextWidth, window.devicePixelRatio))
-    composer.setSize(nextWidth, nextHeight)
-    postProcessing =
-      theme === 'night' &&
-      nextWidth > 900 &&
-      !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    rendering.resize(nextWidth, nextHeight, cityPixelRatio(nextWidth, window.devicePixelRatio))
     picker?.resize()
     labels.update(true)
+  }
+
+  function setMode(mode: CityViewMode): void {
+    controls.setMode(mode)
+    labels.setMode(mode)
+    if (mode === 'walk') picker.select(null)
+    resize()
   }
 
   function frame(time: number): void {
@@ -506,15 +270,17 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     const delta = lastTime === 0 ? 1 / 60 : Math.min(0.05, Math.max(0, (time - lastTime) / 1000))
     lastTime = time
     controls.update(delta)
-    city.updateVisuals(delta)
+    // Picking and cached HTML labels must project the current camera pose.
+    // WebGLRenderer normally updates this later, after those consumers run.
+    camera.updateMatrixWorld()
+    city.updateVisuals(motionPreference.matches ? 0 : delta)
     flows.update(delta)
     syncDetailedLabs()
     syncNetworkEmphasis()
     audio.update(flows.activity)
     picker.update()
     labels.update()
-    if (postProcessing) composer.render()
-    else renderer.render(scene, camera)
+    rendering.render()
     raf = window.requestAnimationFrame(frame)
   }
 
@@ -524,6 +290,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     if (state.tick !== lastStateTick || traceChanged) {
       lastStateTick = state.tick
       city.updateState(state)
+      rendering.invalidateShadows()
     }
     /*
      * Model pause and trace presentation pause are intentionally separate.
@@ -566,6 +333,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize)
   resizeObserver?.observe(container)
   window.addEventListener('resize', resize)
+  resize()
   setTheme(theme)
   if (options.autoStart !== false) start()
 
@@ -581,11 +349,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     update,
     focus,
     setTheme,
-    setMode(mode: CityViewMode): void {
-      controls.setMode(mode)
-      labels.setMode(mode)
-      if (mode === 'walk') picker.select(null)
-    },
+    setMode,
     setLabInspect(enabled: boolean): void {
       if (labInspect === enabled) return
       labInspect = enabled
@@ -618,7 +382,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       controls.dispose()
       flows.dispose()
       city.dispose()
-      composer.dispose()
+      rendering.dispose()
       renderer.dispose()
       renderer.domElement.remove()
       scene.clear()

@@ -15,6 +15,7 @@ import {
   RAFT_LAB_ORIGIN,
   TIFLASH_MPP_LAB_ORIGIN,
   TICITY_LAYOUT,
+  TIKV_ARCHITECTURE,
 } from './layout'
 import { createTiDBSceneGraph } from './city'
 
@@ -258,7 +259,9 @@ describe('TiCity scene graph', () => {
      */
     expect(drawables).toBeLessThanOrEqual(270)
     expect(geometries.size).toBeLessThanOrEqual(225)
-    expect(materials.size).toBeLessThanOrEqual(68)
+    // Instanced status marks and authored facade/environment surfaces use a
+    // few additional materials; drawable and shadow budgets remain fixed.
+    expect(materials.size).toBeLessThanOrEqual(72)
     expect(shadowCasters).toBeLessThanOrEqual(55)
     expect(instancedMeshes).toBeGreaterThanOrEqual(30)
     expect(instances).toBeGreaterThanOrEqual(1_000)
@@ -301,6 +304,62 @@ describe('TiCity scene graph', () => {
 
     expect(city.registry.get('region.35.peer.2')?.peerRole).toBe('leader')
     expect(city.registry.get('region.35.peer.0')?.peerRole).toBe('follower')
+    city.dispose()
+  })
+
+  it('keeps heated racks and their status strips above the deck with matching selection anchors', () => {
+    const city = createTiDBSceneGraph()
+    const simulation = createTiDBSimulation()
+    const component = city.registry.get('region.0.peer.0')!
+    const bodies = component.object as THREE.InstancedMesh
+    const lights = city.root.getObjectByName('tikv:peer-status-lights') as THREE.InstancedMesh
+    const matrix = new THREE.Matrix4()
+    const position = new THREE.Vector3()
+    const scale = new THREE.Vector3()
+    const anchor = new THREE.Vector3()
+
+    for (const heat of [0, 100, 0]) {
+      simulation.state.regions[0].hotScore = heat
+      city.updateState(simulation.state)
+      bodies.getMatrixAt(component.instanceId!, matrix)
+      position.setFromMatrixPosition(matrix)
+      scale.setFromMatrixScale(matrix)
+      expect(position.y - TIKV_ARCHITECTURE.peerHeight / 2 * scale.y)
+        .toBeCloseTo(TIKV_ARCHITECTURE.peerFootY)
+      expect(TIKV_ARCHITECTURE.peerFootY).toBeGreaterThan(TIKV_ARCHITECTURE.deckTop)
+      city.getAnchor(component.id, anchor)
+      expect(anchor.y).toBeCloseTo(position.y)
+      for (let strip = 0; strip < 4; strip++) {
+        lights.getMatrixAt(component.instanceId! * 4 + strip, matrix)
+        expect(new THREE.Vector3().setFromMatrixPosition(matrix).y)
+          .toBeGreaterThan(TIKV_ARCHITECTURE.deckTop)
+      }
+    }
+    city.dispose()
+  })
+
+  it('projects leader triangles and fault crosses independently of colour', () => {
+    const city = createTiDBSceneGraph()
+    const simulation = createTiDBSimulation()
+    const leader = city.registry.get('region.0.peer.0')!
+    const follower = city.registry.get('region.0.peer.1')!
+    const leaders = city.root.getObjectByName('tikv:peer-leader-marks') as THREE.InstancedMesh
+    const faults = city.root.getObjectByName('tikv:peer-fault-marks') as THREE.InstancedMesh
+    const matrix = new THREE.Matrix4()
+    const scale = new THREE.Vector3()
+    leaders.getMatrixAt(leader.instanceId!, matrix)
+    expect(scale.setFromMatrixScale(matrix).y).toBe(1)
+    leaders.getMatrixAt(follower.instanceId!, matrix)
+    expect(scale.setFromMatrixScale(matrix).y).toBe(0)
+
+    simulation.state.regions[0].peers[0].healthy = false
+    city.updateState(simulation.state)
+    leaders.getMatrixAt(leader.instanceId!, matrix)
+    expect(scale.setFromMatrixScale(matrix).y).toBe(0)
+    faults.getMatrixAt(leader.instanceId! * 2, matrix)
+    expect(scale.setFromMatrixScale(matrix).y).toBeGreaterThan(0)
+    faults.getMatrixAt(follower.instanceId! * 2, matrix)
+    expect(scale.setFromMatrixScale(matrix).y).toBe(0)
     city.dispose()
   })
 })

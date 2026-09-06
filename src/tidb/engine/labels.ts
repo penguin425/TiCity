@@ -2,8 +2,8 @@
  * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  *
- * A deliberately small overview-label layer. It labels districts and service
- * instances, never all 108 Region peers, so the city remains readable.
+ * District identities are screen-space annotations of the city geography.
+ * Layout is bounded around the projected roof, with a leader back to it.
  */
 
 import * as THREE from 'three'
@@ -12,6 +12,9 @@ import type { TiDBSceneGraph } from '../world/city'
 import { FOCUS_ANCHORS } from '../world/layout'
 import type { Point3 } from '../world/layout'
 import type { SemanticDomain } from '../world/palette'
+import type { Locale } from '../ui/catalog'
+import { CITY_LABEL_COPY, type CityLabelId } from './label-copy'
+import { placeCityLabels, type CityLabelPlacement } from './label-layout'
 
 export interface CityLabels {
   setMode(mode: CityViewMode): void
@@ -20,49 +23,37 @@ export interface CityLabels {
 }
 
 interface LabelSpec {
-  readonly id: string
-  readonly label: string
-  readonly detail: string
+  readonly id: CityLabelId
   readonly domain: SemanticDomain
   readonly lift: number
+  readonly side?: -1 | 1
   readonly anchor?: Point3
 }
 
 const LABELS: readonly LabelSpec[] = [
-  { id: 'client.terminal', label: 'CLIENTS', detail: 'MySQL workloads', domain: 'client', lift: 90 },
-  {
-    id: 'tiproxy.0',
-    label: 'TiProxy',
-    detail: '2 connection routers',
-    domain: 'sql',
-    lift: 9,
-    anchor: [0, 7, -220],
-  },
-  {
-    id: 'tidb.1',
-    label: 'TiDB SQL',
-    detail: '3 stateless servers',
-    domain: 'sql',
-    lift: 64,
-  },
-  { id: 'pd.control', label: 'PD / TSO', detail: 'control plane', domain: 'tso', lift: 55 },
-  { id: 'tikv.0', label: 'TiKV STORE 1', detail: '36 Region voters', domain: 'kv', lift: 29 },
-  { id: 'tikv.1', label: 'TiKV STORE 2', detail: '36 Region voters', domain: 'kv', lift: 29 },
-  { id: 'tikv.2', label: 'TiKV STORE 3', detail: '36 Region voters', domain: 'kv', lift: 29 },
-  { id: 'gc.yard', label: 'MVCC GC', detail: 'safe-point yard', domain: 'gc', lift: 38 },
-  { id: 'tiflash.0', label: 'TiFlash', detail: 'learner · MPP', domain: 'tiflash', lift: 46 },
-] as const
+  { id: 'client.terminal', domain: 'client', lift: 76 },
+  { id: 'tiproxy.0', domain: 'sql', lift: 9, anchor: FOCUS_ANCHORS['tiproxy.gate'], side: -1 },
+  { id: 'tidb.1', domain: 'sql', lift: 57.5, side: 1 },
+  { id: 'pd.control', domain: 'tso', lift: 55 },
+  { id: 'tikv.0', domain: 'kv', lift: 29 },
+  { id: 'tikv.1', domain: 'kv', lift: 29 },
+  { id: 'tikv.2', domain: 'kv', lift: 29 },
+  { id: 'gc.yard', domain: 'gc', lift: 38 },
+  { id: 'tiflash.0', domain: 'tiflash', lift: 46 },
+]
 
-interface LabelEntry {
+interface LabelEntry extends CityLabelPlacement {
   readonly spec: LabelSpec
   readonly node: HTMLDivElement
+  readonly name: HTMLElement
+  readonly detail: HTMLElement
+  readonly leader: HTMLDivElement
   readonly anchor: THREE.Vector3
   readonly projected: THREE.Vector3
   width: number
   height: number
-  screenX: number
-  screenY: number
-  visible: boolean
+  anchorX: number
+  anchorY: number
 }
 
 export function createCityLabels(
@@ -76,140 +67,131 @@ export function createCityLabels(
   container.appendChild(root)
 
   const entries: LabelEntry[] = []
+  let locale: Locale = document.documentElement.lang === 'en' ? 'en' : 'ja'
   for (const spec of LABELS) {
     const component = city.registry.get(spec.id)
     if (!component) continue
     const node = document.createElement('div')
     node.className = 'tidb-world-label'
     node.dataset.domain = spec.domain
+    node.dataset.component = spec.id
     const name = document.createElement('strong')
-    name.textContent = spec.label
     const detail = document.createElement('small')
-    detail.textContent = spec.detail
+    name.textContent = CITY_LABEL_COPY[locale][spec.id].name
+    detail.textContent = CITY_LABEL_COPY[locale][spec.id].detail
     node.append(name, detail)
-    root.appendChild(node)
+    const leader = document.createElement('div')
+    leader.className = 'tidb-world-label-leader'
+    leader.dataset.domain = spec.domain
+    root.append(leader, node)
     entries.push({
-      spec,
-      node,
+      spec, node, name, detail, leader,
       anchor: spec.anchor
         ? new THREE.Vector3(spec.anchor[0], spec.anchor[1] + spec.lift, spec.anchor[2])
         : component.anchor.clone().add(new THREE.Vector3(0, spec.lift, 0)),
       projected: new THREE.Vector3(),
-      width: 1,
-      height: 1,
-      screenX: 0,
-      screenY: 0,
+      side: spec.side ?? 0,
+      width: 1, height: 1,
+      anchorX: 0, anchorY: 0,
+      x: 0, y: 0,
       visible: false,
     })
   }
-  for (const entry of entries) {
-    entry.width = Math.max(1, entry.node.offsetWidth)
-    entry.height = Math.max(1, entry.node.offsetHeight)
-  }
-
+  const orderedEntries = [...entries]
+  let measuresDirty = true
   let lastWidth = 0
   let lastHeight = 0
-  let lastCameraX = Infinity
-  let lastCameraY = Infinity
-  let lastCameraZ = Infinity
-  let lastCameraQx = Infinity
-  let lastCameraQy = Infinity
-  let lastCameraQz = Infinity
-  let lastCameraQw = Infinity
+  const lastCameraPosition = new THREE.Vector3(Infinity, Infinity, Infinity)
+  const lastCameraQuaternion = new THREE.Quaternion(0, 0, 0, 0)
   let hidden = false
+
+  // The page shell writes html.lang and data-theme on every language/theme
+  // change. Observe these explicit signals, never measure DOM every frame.
+  const appearanceObserver = new MutationObserver(() => {
+    const next: Locale = document.documentElement.lang === 'en' ? 'en' : 'ja'
+    if (next !== locale) {
+      locale = next
+      for (const entry of entries) {
+        entry.name.textContent = CITY_LABEL_COPY[locale][entry.spec.id].name
+        entry.detail.textContent = CITY_LABEL_COPY[locale][entry.spec.id].detail
+      }
+    }
+    measuresDirty = true
+    update(true)
+  })
+  appearanceObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['lang', 'data-theme', 'class'],
+  })
 
   function update(force = false): void {
     if (hidden) return
     const width = Math.max(1, container.clientWidth)
     const height = Math.max(1, container.clientHeight)
     const cameraMoved =
-      Math.abs(camera.position.x - lastCameraX) > 0.02 ||
-      Math.abs(camera.position.y - lastCameraY) > 0.02 ||
-      Math.abs(camera.position.z - lastCameraZ) > 0.02 ||
-      Math.abs(camera.quaternion.x - lastCameraQx) > 0.0002 ||
-      Math.abs(camera.quaternion.y - lastCameraQy) > 0.0002 ||
-      Math.abs(camera.quaternion.z - lastCameraQz) > 0.0002 ||
-      Math.abs(camera.quaternion.w - lastCameraQw) > 0.0002
-    if (!force && !cameraMoved && width === lastWidth && height === lastHeight) return
+      camera.position.distanceToSquared(lastCameraPosition) > 0.0004 ||
+      1 - Math.abs(camera.quaternion.dot(lastCameraQuaternion)) > 0.00000002
+    if (!force && !measuresDirty && !cameraMoved && width === lastWidth && height === lastHeight) return
 
+    if (width !== lastWidth || height !== lastHeight) measuresDirty = true
     lastWidth = width
     lastHeight = height
-    lastCameraX = camera.position.x
-    lastCameraY = camera.position.y
-    lastCameraZ = camera.position.z
-    lastCameraQx = camera.quaternion.x
-    lastCameraQy = camera.quaternion.y
-    lastCameraQz = camera.quaternion.z
-    lastCameraQw = camera.quaternion.w
+    lastCameraPosition.copy(camera.position)
+    lastCameraQuaternion.copy(camera.quaternion)
 
     const overview = FOCUS_ANCHORS['city.overview']
-    const overviewDx = camera.position.x - overview[0]
-    const overviewDy = camera.position.y - overview[1]
-    const overviewDz = camera.position.z - overview[2]
     const overviewDistanceSq =
-      overviewDx * overviewDx +
-      overviewDy * overviewDy +
-      overviewDz * overviewDz
-    root.classList.toggle('is-overview', overviewDistanceSq > 950 * 950)
+      (camera.position.x - overview[0]) ** 2 +
+      (camera.position.y - overview[1]) ** 2 +
+      (camera.position.z - overview[2]) ** 2
+    const compact = width <= 720 || height < 700 || overviewDistanceSq > 1_350 * 1_350
+    if (root.classList.contains('is-overview') !== compact) measuresDirty = true
+    root.classList.toggle('is-overview', compact)
     root.classList.toggle('is-distant', overviewDistanceSq > 1_350 * 1_350)
 
-    for (const entry of entries) {
-      entry.projected.copy(entry.anchor).project(camera)
-      const visible =
-        entry.projected.z >= -1 &&
-        entry.projected.z <= 1 &&
-        entry.projected.x >= -1.12 &&
-        entry.projected.x <= 1.12 &&
-        entry.projected.y >= -1.12 &&
-        entry.projected.y <= 1.12
-      if (!visible) {
-        entry.visible = false
-        entry.node.hidden = true
-        continue
-      }
-      entry.visible = true
-      entry.node.hidden = false
-      entry.screenX = (entry.projected.x * 0.5 + 0.5) * width
-      entry.screenY = (-entry.projected.y * 0.5 + 0.5) * height
-      if (entry.width <= 1 || entry.height <= 1) {
+    // Batch reads after compact/locale writes. Temporarily expose hidden nodes
+    // so their cached size stays valid when they enter the viewport again.
+    if (measuresDirty) {
+      for (const entry of entries) entry.node.hidden = false
+      for (const entry of entries) {
         entry.width = Math.max(1, entry.node.offsetWidth)
         entry.height = Math.max(1, entry.node.offsetHeight)
       }
-      const distance = camera.position.distanceTo(entry.anchor)
-      entry.node.classList.toggle('is-far', distance > 520)
+      measuresDirty = false
     }
 
-    /*
-     * Keep overview signs legible in short desktop viewports. Labels are
-     * ordered from top to bottom and only displaced when their actual screen
-     * rectangles overlap horizontally and vertically.
-     */
-    entries.sort((left, right) => left.screenY - right.screenY)
-    for (let index = 0; index < entries.length; index++) {
-      const entry = entries[index]
+    for (const entry of entries) {
+      entry.projected.copy(entry.anchor).project(camera)
+      entry.visible =
+        entry.projected.z >= -1 && entry.projected.z <= 1 &&
+        entry.projected.x >= -1 && entry.projected.x <= 1 &&
+        entry.projected.y >= -1 && entry.projected.y <= 1
+      entry.anchorX = (entry.projected.x * 0.5 + 0.5) * width
+      entry.anchorY = (-entry.projected.y * 0.5 + 0.5) * height
+    }
+    orderedEntries.sort((left, right) => left.anchorY - right.anchorY)
+    placeCityLabels(orderedEntries, width, height)
+
+    for (const entry of entries) {
+      entry.node.hidden = !entry.visible
+      entry.leader.hidden = !entry.visible
       if (!entry.visible) continue
-      for (let previousIndex = 0; previousIndex < index; previousIndex++) {
-        const previous = entries[previousIndex]
-        if (!previous.visible) continue
-        const overlapsX =
-          Math.abs(entry.screenX - previous.screenX) <
-          (entry.width + previous.width) / 2 + 8
-        const overlapsY =
-          entry.screenY - entry.height < previous.screenY + 5 &&
-          entry.screenY > previous.screenY - previous.height - 5
-        if (overlapsX && overlapsY) {
-          entry.screenY = previous.screenY + entry.height + 6
-        }
-      }
-      entry.screenY = Math.min(height - 10, Math.max(entry.height + 10, entry.screenY))
       entry.node.style.transform =
-        `translate3d(${entry.screenX.toFixed(1)}px,${entry.screenY.toFixed(1)}px,0) ` +
-        'translate(-50%,-100%)'
+        `translate3d(${entry.x.toFixed(1)}px,${entry.y.toFixed(1)}px,0) translate(-50%,-100%)`
+      // Join the nearest point of the sign, not its centre, to the roof.
+      const startX = Math.max(entry.x - entry.width / 2, Math.min(entry.x + entry.width / 2, entry.anchorX))
+      const startY = Math.max(entry.y - entry.height, Math.min(entry.y, entry.anchorY))
+      const dx = entry.anchorX - startX
+      const dy = entry.anchorY - startY
+      const length = Math.hypot(dx, dy)
+      entry.leader.hidden = length < 3
+      entry.leader.style.width = `${length.toFixed(1)}px`
+      entry.leader.style.transform =
+        `translate3d(${startX.toFixed(1)}px,${startY.toFixed(1)}px,0) rotate(${Math.atan2(dy, dx)}rad)`
     }
   }
 
   update(true)
-
   return {
     setMode(mode: CityViewMode): void {
       hidden = mode === 'walk'
@@ -218,6 +200,7 @@ export function createCityLabels(
     },
     update,
     dispose(): void {
+      appearanceObserver.disconnect()
       root.remove()
     },
   }
