@@ -78,6 +78,10 @@ ratio and contact shading in both themes. Compact displays use direct rendering,
 colour remains full-size and multisampled. Diagram lines retain depth testing
 but do not write depth, so faint topology does not become a solid AO occluder.
 Renderer counters include the complete frame, including postprocessing.
+After a frame takes more than 100 milliseconds of main-thread work, the renderer
+leaves a short input-processing window before submitting the next one (at most
+100 milliseconds). Normal frames have no extra delay. This does not change the
+resolution, materials, lighting or deterministic model steps.
 
 At a 1440 × 1000 Chromium software-WebGL viewport, the reviewed daytime overview
 used 159 draw calls, about 112,000 triangles and 58 uploaded geometries. The
@@ -107,10 +111,15 @@ offline operation and the existing model/cross-view invariants.
 
 Browser tests use one worker per machine because software WebGL rendering is
 CPU-heavy. CI and Pages validation split the complete suite across four
-independent runners and allow 120 seconds per test (60 seconds locally). This
-keeps the production graphics and test assertions unchanged; every shard must
-pass before the required CI check or Pages packaging can succeed. Failure
-reports retain screenshots, videos and traces for each shard.
+independent runners and allow 300 seconds per test (60 seconds locally), including
+long lab/transport cases and their recorded retries. CI also
+allows 15 seconds for assertions (5 seconds locally), since a software-rendered
+frame can delay even a successful browser response beyond five seconds. This
+keeps the production graphics and expected results unchanged; every shard must
+pass before the required CI check or Pages packaging can succeed. Screenshots
+are retained on failure, while detailed traces and videos are recorded on the
+first retry to avoid continuous GPU readbacks in passing runs. To record a
+local diagnostic run explicitly, use `npm run test:e2e -- --trace on`.
 
 ## Reproduce the views
 
@@ -133,7 +142,8 @@ Captures include campus day/night/detail/mobile and go to the ignored
 `artifacts/graphics/` directory. Use `--base-url` to
 select a server and `--output` to select another destination. The lab set uses
 fixed event IDs for primary commit, deadlock, election, Async Commit response,
-GC compaction and learner apply. The script freezes each settled frame during
+GC compaction and learner apply. Settling waits for actual rendered frames, not
+just animation callbacks. The script freezes each settled frame during
 capture, then resumes rendering, and fails on runtime or WebGL errors.
 
 The visual inspiration remains PGSimCity's layered building silhouettes and

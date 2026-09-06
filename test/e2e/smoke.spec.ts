@@ -3,6 +3,7 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import type { InstancedMesh } from 'three'
+import { waitForRenderedFrames } from './helpers/render-frames'
 
 const pages = [
   { path: '/', title: /TiCity/ },
@@ -1619,9 +1620,7 @@ test('orbit view can zoom out to a city-scale overview without clipping the atmo
     { steps: 4 },
   )
   await page.mouse.up()
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  }))
+  await waitForRenderedFrames(page, 2)
   const orbitAfterDrag = await cameraSnapshot(page)
   expect(distance3(orbitAfterDrag.position, orbitBeforeDrag.position)).toBeGreaterThan(1)
   expect(distance3(orbitAfterDrag.direction, orbitBeforeDrag.direction)).toBeGreaterThan(0.01)
@@ -1634,9 +1633,7 @@ test('orbit view can zoom out to a city-scale overview without clipping the atmo
     deltaMode: 0,
     deltaY: 2_000,
   })
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  }))
+  await waitForRenderedFrames(page, 2)
 
   const overview = await page.evaluate(() => {
     const { camera, scene, city } = window.TICITY.world!.shell
@@ -1985,9 +1982,7 @@ test('overview labels do not overlap in a short desktop viewport', async ({ page
   await page.setViewportSize({ width: 1_200, height: 630 })
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  }))
+  await waitForRenderedFrames(page, 2)
   const verticalLayout = await page.evaluate(() => ({
     viewport: window.innerHeight,
     document: document.documentElement.scrollHeight,
@@ -2031,15 +2026,16 @@ test('overview labels do not overlap in a short desktop viewport', async ({ page
   expect(overlaps).toEqual([])
 })
 
-test('trace replay keeps the causal route readable and supports transport controls', async ({
-  page,
-}) => {
+async function openCrossRegionTrace(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
   await page.evaluate(() => {
     window.TICITY.runScenario('cross-region-transaction')
   })
+}
 
+test('trace transport controls pause, step, and replay the causal route', async ({ page }) => {
+  await openCrossRegionTrace(page)
   const dock = page.locator('[data-trace-dock]')
   const eventCount = await page.evaluate(() => window.TICITY.trace?.events.length ?? 0)
   expect(eventCount).toBeGreaterThanOrEqual(32)
@@ -2088,6 +2084,14 @@ test('trace replay keeps the causal route readable and supports transport contro
   expect(visual.networkOpacity).toBeLessThan(0.12)
   expect(visual.dropped).toBe(0)
 
+  await page.locator('[data-action="trace-replay"]').click()
+  await expect(dock).toHaveAttribute('data-phase', 'playing')
+  await expect(dock).toHaveAttribute('data-event-index', '0')
+})
+
+test('trace replay loops without mutating its immutable receipt', async ({ page }) => {
+  await openCrossRegionTrace(page)
+  const dock = page.locator('[data-trace-dock]')
   await page.locator('[data-action="trace-replay"]').click()
   await expect(dock).toHaveAttribute('data-phase', 'playing')
   await expect(dock).toHaveAttribute('data-event-index', '0')
@@ -2148,6 +2152,23 @@ test('trace replay keeps the causal route readable and supports transport contro
   )
 
   await page.locator('[data-action="trace-replay"]').click()
+  await expect(dock).toHaveAttribute('data-iteration', '1')
+})
+
+test('trace playback resumes and replays while model playback is stepped', async ({ page }) => {
+  await openCrossRegionTrace(page)
+  const dock = page.locator('[data-trace-dock]')
+  // Preserve the original sequence: this receipt has already looped before
+  // Replay resets it and model step mode pauses its presentation.
+  await page.evaluate(() => {
+    const flows = window.TICITY.world!.shell.flows
+    flows.update(flows.playback.durationMs / 1_000 + 1)
+    flows.update(3)
+  })
+  await expect(dock).toHaveAttribute('data-iteration', '2')
+  await page.locator('[data-action="trace-replay"]').click()
+  await expect(dock).toHaveAttribute('data-phase', 'playing')
+  await expect(dock).toHaveAttribute('data-event-index', '0')
   await expect(dock).toHaveAttribute('data-iteration', '1')
 
   // A trace is historical presentation data: it can resume and replay even
@@ -2244,9 +2265,7 @@ test('mobile reduced-motion keeps a static route and usable trace controls', asy
 test('city rendering stays within the desktop frame budget', async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  }))
+  await waitForRenderedFrames(page, 2)
 
   const metrics = await page.evaluate(() => {
     const renderer = window.TICITY.world?.shell.renderer

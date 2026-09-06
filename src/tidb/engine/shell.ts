@@ -89,6 +89,11 @@ export function cityViewZoom(width: number, height: number): number {
   return width <= 900 ? Math.min(1, Math.max(0.35, width / Math.max(1, height) * 0.9)) : 1
 }
 
+/** Leave input and DOM work a turn after an exceptionally slow render. */
+export function cityFrameDelay(renderDurationMs: number): number {
+  return renderDurationMs > 100 ? Math.min(100, renderDurationMs / 5) : 0
+}
+
 function verticalFraming(width: number, height: number): number {
   return width > 900 ? height * 0.075 : 0
 }
@@ -184,6 +189,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   let running = false
   let disposed = false
   let lastTime = 0
+  let nextFrameAt = 0
   let lastStateTick = -1
   let lastTrace: TraceReceipt | null = null
   let networkEmphasis = false
@@ -267,6 +273,11 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
 
   function frame(time: number): void {
     if (!running || disposed) return
+    const startedAt = performance.now()
+    if (startedAt < nextFrameAt) {
+      raf = window.requestAnimationFrame(frame)
+      return
+    }
     const delta = lastTime === 0 ? 1 / 60 : Math.min(0.05, Math.max(0, (time - lastTime) / 1000))
     lastTime = time
     controls.update(delta)
@@ -281,6 +292,11 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     picker.update()
     labels.update()
     rendering.render()
+    // Software WebGL can block for seconds. Yield a short window for queued
+    // input/DOM tasks instead of immediately submitting another heavy frame.
+    // Normal GPU frames keep their existing cadence and all quality settings.
+    const finishedAt = performance.now()
+    nextFrameAt = finishedAt + cityFrameDelay(finishedAt - startedAt)
     raf = window.requestAnimationFrame(frame)
   }
 
@@ -320,6 +336,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     if (running || disposed) return
     running = true
     lastTime = 0
+    nextFrameAt = 0
     raf = window.requestAnimationFrame(frame)
   }
 
@@ -328,6 +345,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     running = false
     window.cancelAnimationFrame(raf)
     raf = 0
+    nextFrameAt = 0
   }
 
   const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize)

@@ -2,16 +2,7 @@
 
 import { expect, test, type Page } from '@playwright/test'
 import type { DirectionalLight } from 'three'
-
-async function frames(page: Page, count = 4): Promise<void> {
-  await page.evaluate((count) => new Promise<void>((resolve) => {
-    function next(): void {
-      if (--count <= 0) resolve()
-      else requestAnimationFrame(next)
-    }
-    requestAnimationFrame(next)
-  }), count)
-}
+import { waitForRenderedFrames } from './helpers/render-frames'
 
 async function captureSettledFrame(page: Page, path: string): Promise<void> {
   // The assertions above/below still exercise live frames. Pause only while
@@ -37,7 +28,7 @@ test('night retains its lighting with reduced motion and releases the renderer',
     window.TICITY.setTheme('night')
   })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await frames(page)
+  await waitForRenderedFrames(page, 4)
   const before = await page.evaluate(() => {
     const shell = window.TICITY.world!.shell
     return {
@@ -46,7 +37,7 @@ test('night retains its lighting with reduced motion and releases the renderer',
       memory: { ...shell.renderer.info.memory },
     }
   })
-  await frames(page, 8)
+  await waitForRenderedFrames(page, 8)
   const after = await page.evaluate(() => {
     const shell = window.TICITY.world!.shell
     const sun = shell.scene.children.find((object) =>
@@ -77,6 +68,31 @@ test('night retains its lighting with reduced motion and releases the renderer',
   // Real bevels, curtain walls and layered canopies deliberately spend more
   // triangles; the depth-based AO must not draw the campus a second time.
   expect(after.triangles).toBeLessThanOrEqual(140_000)
+
+  const stoppedFrame = await page.evaluate(() => {
+    const shell = window.TICITY.world!.shell
+    const frame = shell.renderer.info.render.frame
+    shell.stop()
+    shell.stop()
+    return frame
+  })
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 50)
+  }))
+  const stillStoppedFrame = await page.evaluate(() =>
+    window.TICITY.world!.shell.renderer.info.render.frame,
+  )
+  expect(stillStoppedFrame).toBe(stoppedFrame)
+  await page.evaluate(() => {
+    const shell = window.TICITY.world!.shell
+    shell.start()
+    shell.start()
+  })
+  await waitForRenderedFrames(page)
+  const restartedFrame = await page.evaluate(() =>
+    window.TICITY.world!.shell.renderer.info.render.frame,
+  )
+  expect(restartedFrame).toBeGreaterThan(stoppedFrame)
   await captureSettledFrame(page, info.outputPath('night-reduced-motion.png'))
 
   const teardown = await page.evaluate(() => {
@@ -96,7 +112,7 @@ test('portrait opens on a full city with unobstructed touch controls', async ({ 
     await page.goto('/')
     await page.waitForFunction(() => Boolean(window.TICITY?.world))
     await expect(page.locator('.tidb-layout')).toHaveAttribute('data-panel', 'closed')
-    await frames(page)
+    await waitForRenderedFrames(page, 4)
     const layout = await page.evaluate(() => {
       const canvas = document.querySelector('.tidb-world canvas')!.getBoundingClientRect()
       const dock = document.querySelector('[data-trace-dock]')!.getBoundingClientRect()
@@ -139,7 +155,7 @@ test('selection follows a growing rack and refreshes its role without reselectio
     state.regions[0].hotScore = 100
     window.TICITY.world!.shell.city.updateState(state)
   })
-  await frames(page)
+  await waitForRenderedFrames(page, 4)
   await expect(page.locator('.tidb-inspector p')).toHaveText('Raft follower voter')
   const selection = await page.evaluate(() => {
     const { picker } = window.TICITY.world!.shell

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { expect, test, type Page } from '@playwright/test'
+import { waitForRenderedFrames } from './helpers/render-frames'
 
 async function expectReadableLabels(page: Page, minimum: number): Promise<void> {
   const layout = await page.locator('.tidb-world-labels').evaluate((root) => {
@@ -64,9 +65,7 @@ test('short and mobile views retain compact district identities without overlaps
   await expect(page.locator('.tidb-world-labels')).toBeVisible()
   await expect.poll(async () => page.locator('.tidb-world-labels').evaluate((root) => root.clientWidth))
     .toBe(390)
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  }))
+  await waitForRenderedFrames(page, 2)
   await expectReadableLabels(page, 5)
   await expect(page.locator('.tidb-world-label small').first()).toBeHidden()
 })

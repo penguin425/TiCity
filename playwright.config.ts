@@ -14,16 +14,22 @@ export default defineConfig({
    * Chromium software WebGL is CPU-heavy, especially with contact shading and
    * high-resolution shadows. Use one browser per runner; CI shards the suite
    * across separate runners. Two-CPU software rendering can also delay browser
-   * commands, so CI gets 120s per test without lowering graphics or assertions.
+   * commands. Long lab/transport cases and recorded retries can take minutes,
+   * so CI gets 300s per test without lowering graphics or expected results.
    */
   workers: 1,
-  timeout: process.env.CI ? 120_000 : 60_000,
+  timeout: process.env.CI ? 300_000 : 60_000,
+  // A correct polling result can arrive after 5s while software WebGL finishes
+  // a frame. Keep the assertion values intact and budget for that round trip.
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
   reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',
   use: {
     baseURL: previewUrl,
-    trace: 'retain-on-failure',
+    // Continuous trace/video capture adds GPU readbacks to every WebGL frame.
+    // Preserve diagnostics on the first retry without recording passing runs.
+    trace: 'on-first-retry',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    video: 'on-first-retry',
   },
   projects: [
     {

@@ -22,6 +22,9 @@ recorded in `NOTICE`.
   retain the compact direct-render path and frame the campus with a longer lens.
 - Keep motion preferences, bilingual district labels and touch controls usable;
   add graphical regression checks and reproducible day/night/detail captures.
+- Give queued input a short processing window after exceptionally slow frames,
+  verify actual rendered frames and stop/restart behavior, and shard full-quality
+  browser checks across independent CI runners.
 - Keep the educational overview and its data-flow presentation as the default;
   exclude the experimental decorative City view from this release.
 - Include the graphics documentation and reference captures in the downloadable

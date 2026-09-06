@@ -27,9 +27,10 @@ try {
   })
   async function settle() {
     await page.evaluate(() => new Promise((done) => {
-      let remaining = 5
+      const renderer = window.TICITY.world.shell.renderer
+      const targetFrame = renderer.info.render.frame + 5
       function frame() {
-        if (--remaining === 0) done()
+        if (renderer.info.render.frame >= targetFrame) done()
         else requestAnimationFrame(frame)
       }
       requestAnimationFrame(frame)
