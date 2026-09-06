@@ -6,7 +6,7 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
-## [0.10.0] — 2026-09-06
+## [0.10.0] — 2026-09-07
 
 - Rebuild the campus graphics with layered architecture, visible Region racks,
   landscaped streets, restrained night lighting and a portrait overview.
