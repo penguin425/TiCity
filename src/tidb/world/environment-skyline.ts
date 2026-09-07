@@ -6,9 +6,11 @@
  */
 
 import * as THREE from 'three'
+import {
+  SKYLINE_PLACEMENTS,
+  SKYLINE_ROOFTOP_LIGHT_COUNT,
+} from './layout'
 
-const BUILDING_COUNT = 52
-const ROOFTOP_LIGHT_COUNT = 8
 const MAX_FACADE_ROWS = 5
 
 /** Flat normals preserve a narrow, sunlit facet along each chamfered corner. */
@@ -56,22 +58,17 @@ export function createSkyline(
   const root = new THREE.Group()
   root.name = 'city:distant-skyline'
 
-  let seed = 4_250
-  const random = (): number => {
-    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0
-    return seed / 0x1_0000_0000
-  }
-
-  const towers = new THREE.InstancedMesh(createTowerGeometry(), material, BUILDING_COUNT * 2)
+  const buildingCount = SKYLINE_PLACEMENTS.length
+  const towers = new THREE.InstancedMesh(createTowerGeometry(), material, buildingCount * 2)
   const details = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     material,
-    BUILDING_COUNT * 4,
+    buildingCount * 4,
   )
   const lights = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(1, 1),
     beaconMaterial,
-    BUILDING_COUNT * MAX_FACADE_ROWS * 4 + ROOFTOP_LIGHT_COUNT * 4,
+    buildingCount * MAX_FACADE_ROWS * 4 + SKYLINE_ROOFTOP_LIGHT_COUNT * 4,
   )
   towers.name = 'city:skyline-towers'
   details.name = 'city:skyline-architectural-metalwork'
@@ -132,21 +129,15 @@ export function createSkyline(
     }
   }
 
-  for (let index = 0; index < BUILDING_COUNT; index++) {
-    // The rear row leaves a generous central opening for the client approach.
-    // Side rows stay beyond the service roads, within the ground's perimeter.
-    const rear = index < 18
-    const sideIndex = index - 18
-    const x = rear
-      ? (index < 9 ? -1 : 1) * (40 + (index % 9) * 34 + random() * 4)
-      : (sideIndex < 17 ? -1 : 1) * (341 + random() * 4)
-    const z = rear
-      ? -344 + random() * 3
-      : -297 + (sideIndex % 17) * 37.5 + random() * 4
-    const width = 9 + random() * 9
-    const depth = 9 + random() * 9
+  for (let index = 0; index < buildingCount; index++) {
+    // The layout owns tower sites and the random samples that authored them;
+    // dimensions and local architectural offsets remain drawing concerns.
+    const placement = SKYLINE_PLACEMENTS[index]
+    const { x, z, rear, sideIndex } = placement
+    const width = 9 + placement.widthJitter * 9
+    const depth = 9 + placement.depthJitter * 9
     const landmark = index % 7 === 0
-    const height = landmark ? 43 + random() * 17 : 13 + random() * 28
+    const height = landmark ? 43 + placement.heightJitter * 17 : 13 + placement.heightJitter * 28
     const style = index % 4
     const baseHeight = height * [0.64, 0.84, 0.55, 0.74][style]
     const crownHeight = height - baseHeight
@@ -154,7 +145,7 @@ export function createSkyline(
     const crownDepth = depth * [0.74, 0.62, 0.64, 0.86][style]
     const crownX = x + (style === 3 ? (width - crownWidth) * 0.28 : 0)
     const crownZ = z + (style === 2 ? (depth - crownDepth) * 0.28 : 0)
-    const value = 0.68 + random() * 0.25
+    const value = 0.68 + placement.valueJitter * 0.25
 
     place(towers, index * 2, x, baseHeight / 2, z, width, baseHeight, depth)
     tint.setRGB(value * 0.72, value * 0.87, value)
@@ -231,7 +222,11 @@ export function createSkyline(
     // cluster activity. Keep several darker floors between the broad ribbons.
     const lowerRows = Math.max(2, Math.min(4, Math.floor(baseHeight / 7)))
     const upperRows = Math.max(1, Math.min(MAX_FACADE_ROWS - lowerRows, Math.floor(crownHeight / 7)))
-    tint.setRGB(0.57 + random() * 0.13, 0.74 + random() * 0.12, 0.86)
+    tint.setRGB(
+      0.57 + placement.lowerFacadeJitter * 0.13,
+      0.74 + placement.upperFacadeJitter * 0.12,
+      0.86,
+    )
     facadeRows(x, 0, z, width, baseHeight, depth, lowerRows)
     tint.multiplyScalar(0.78)
     facadeRows(crownX, baseHeight, crownZ, crownWidth, crownHeight, crownDepth, upperRows)

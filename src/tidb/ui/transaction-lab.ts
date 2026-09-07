@@ -4,14 +4,21 @@ import type {
   TraceEvent,
   TraceRegionSnapshot,
   TraceStateSnapshot,
+  TraceTransactionStage,
 } from '../model/types'
 import type { Locale } from './catalog'
 import { element } from './dom'
+import { traceEventCopy } from './event-copy'
+
+type MvccCfState = TraceRegionSnapshot['mvcc']['defaultCf'] |
+  TraceRegionSnapshot['mvcc']['lockCf'] |
+  TraceRegionSnapshot['mvcc']['writeCf']
 
 interface TransactionLabCopy {
   readonly region: string
   readonly model: string
   readonly stage: string
+  readonly stages: Readonly<Record<TraceTransactionStage, string>>
   readonly timestamps: string
   readonly active: string
   readonly primary: string
@@ -26,6 +33,8 @@ interface TransactionLabCopy {
   readonly cfLock: string
   readonly cfDefault: string
   readonly cfWrite: string
+  readonly cfStates: Readonly<Record<MvccCfState, string>>
+  readonly commitApply: string
 }
 
 const COPY: Readonly<Record<Locale, TransactionLabCopy>> = {
@@ -33,6 +42,18 @@ const COPY: Readonly<Record<Locale, TransactionLabCopy>> = {
     region: 'Transaction Lab 内部断面',
     model: 'MODEL / SIMULATED',
     stage: 'Transaction段階',
+    stages: {
+      request: 'request受付',
+      active: 'transaction実行中',
+      locking: 'ロック取得中',
+      prewriting: 'Prewrite中',
+      prewritten: 'Prewrite完了',
+      committing_primary: 'primary Commit中',
+      client_acknowledged: 'client応答済み',
+      committing_secondary: 'secondary Commit中',
+      complete: '完了',
+      rolled_back: 'rollback済み',
+    },
     timestamps: 'TSO',
     active: '同時進行',
     primary: 'PRIMARY',
@@ -47,11 +68,30 @@ const COPY: Readonly<Record<Locale, TransactionLabCopy>> = {
     cfLock: 'LOCK CF',
     cfDefault: 'DEFAULT CF',
     cfWrite: 'WRITE CF',
+    cfStates: {
+      empty: '空',
+      value: '代表value',
+      prewrite: 'Prewrite lock',
+      commit: 'commit record',
+    },
+    commitApply: 'commit / apply',
   },
   en: {
     region: 'Transaction Lab cutaway',
     model: 'MODEL / SIMULATED',
     stage: 'Transaction stage',
+    stages: {
+      request: 'request',
+      active: 'active',
+      locking: 'locking',
+      prewriting: 'prewriting',
+      prewritten: 'prewritten',
+      committing_primary: 'committing_primary',
+      client_acknowledged: 'client_acknowledged',
+      committing_secondary: 'committing_secondary',
+      complete: 'complete',
+      rolled_back: 'rolled_back',
+    },
     timestamps: 'TSO',
     active: 'In parallel',
     primary: 'PRIMARY',
@@ -66,6 +106,13 @@ const COPY: Readonly<Record<Locale, TransactionLabCopy>> = {
     cfLock: 'LOCK CF',
     cfDefault: 'DEFAULT CF',
     cfWrite: 'WRITE CF',
+    cfStates: {
+      empty: 'empty',
+      value: 'value',
+      prewrite: 'prewrite',
+      commit: 'commit',
+    },
+    commitApply: 'commit / apply',
   },
 }
 
@@ -85,12 +132,12 @@ function metric(label: string, value: string): HTMLElement {
   )
 }
 
-function cfCell(label: string, value: string): HTMLElement {
+function cfCell(label: string, value: string, state: string): HTMLElement {
   return element(
     'div',
     {
       className: 'tidb-transaction-lab__cf',
-      attrs: { 'data-cf-state': value },
+      attrs: { 'data-cf-state': state },
     },
     element('dt', { text: label }),
     element('dd', { text: value }),
@@ -136,7 +183,7 @@ function regionCard(
         copy.raft,
         `${copy.voters} · ${region.acknowledgements}/${region.quorum} ${copy.quorum}`,
       ),
-      metric('commit / apply', `${region.commitIndex} / ${region.appliedIndex}`),
+      metric(copy.commitApply, `${region.commitIndex} / ${region.appliedIndex}`),
     ),
     element('p', {
       className: 'tidb-transaction-lab__lock',
@@ -156,9 +203,9 @@ function regionCard(
     element(
       'dl',
       { className: 'tidb-transaction-lab__mvcc' },
-      cfCell(copy.cfLock, region.mvcc.lockCf),
-      cfCell(copy.cfDefault, region.mvcc.defaultCf),
-      cfCell(copy.cfWrite, region.mvcc.writeCf),
+      cfCell(copy.cfLock, copy.cfStates[region.mvcc.lockCf], region.mvcc.lockCf),
+      cfCell(copy.cfDefault, copy.cfStates[region.mvcc.defaultCf], region.mvcc.defaultCf),
+      cfCell(copy.cfWrite, copy.cfStates[region.mvcc.writeCf], region.mvcc.writeCf),
     ),
   )
 }
@@ -218,8 +265,11 @@ export function createTransactionLabPanel(
     root.setAttribute('aria-label', copy.region)
     const transaction = snapshot.transaction
     const active = currentActive.length > 0
-      ? currentActive.map((event) => event.label).join(' · ')
-      : currentEvent?.label ?? '—'
+      ? currentActive.map((event) => traceEventCopy(event, locale).label).join(' · ')
+      : currentEvent ? traceEventCopy(currentEvent, locale).label : '—'
+    const stage = transaction
+      ? copy.stages[transaction.stage]
+      : copy.stages.request
     const timestamp = transaction
       ? `start_ts ${transaction.startTs} · commit_ts ${transaction.commitTs ?? '—'}`
       : `last ${snapshot.tsoLastAllocated}`
@@ -239,13 +289,13 @@ export function createTransactionLabPanel(
         ),
         element('strong', {
           className: 'tidb-transaction-lab__stage',
-          text: transaction?.stage ?? 'request',
+          text: stage,
         }),
       ),
       element(
         'dl',
         { className: 'tidb-transaction-lab__summary' },
-        metric(copy.stage, transaction?.stage ?? 'request'),
+        metric(copy.stage, stage),
         metric(copy.timestamps, timestamp),
         metric(copy.active, active),
       ),

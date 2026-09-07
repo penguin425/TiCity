@@ -1,32 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Locale } from './ui/catalog'
+import { CATALOG, type Locale } from './ui/catalog'
 
 export type SurfaceId = 'city' | 'machine' | 'diagnose'
 export type Theme = 'day' | 'night'
 
 const THEME_STORAGE_KEY = 'ticity:theme'
-
-const text = {
-  ja: {
-    city: '3D City',
-    machine: '2D Machine',
-    diagnose: '診断',
-    source: 'GitHub',
-    day: '昼',
-    night: '夜',
-    model: 'TiDB v8.5 LTS 教育モデル',
-  },
-  en: {
-    city: '3D City',
-    machine: '2D Machine',
-    diagnose: 'Diagnose',
-    source: 'GitHub',
-    day: 'Day',
-    night: 'Night',
-    model: 'TiDB v8.5 LTS teaching model',
-  },
-} as const
 
 function safeStorage(): Storage | undefined {
   try {
@@ -89,7 +68,7 @@ export function createWordmark(locale: Locale): HTMLDivElement {
   const name = document.createElement('strong')
   name.textContent = 'TiCity'
   const model = document.createElement('small')
-  model.textContent = text[locale].model
+  model.textContent = CATALOG[locale].navigation.model
   copy.append(name, model)
   root.append(logoMark(), copy)
   return root
@@ -119,6 +98,7 @@ export interface NavigationHandle {
   root: HTMLElement
   themeButton: HTMLButtonElement
   setLocale(locale: Locale): void
+  syncTheme(): void
   setTraceContext(scenario: string | null, eventId: string | null): void
 }
 
@@ -127,12 +107,13 @@ export function createNavigation(
   initialLocale: Locale,
 ): NavigationHandle {
   let locale = initialLocale
+  const copy = () => CATALOG[locale].navigation
   const initialSearch = new URLSearchParams(window.location.search)
   let scenario = initialSearch.get('scenario')
   let eventId = initialSearch.get('event')
   const root = document.createElement('nav')
   root.className = 'tidb-top-actions'
-  root.setAttribute('aria-label', locale === 'ja' ? '主要ナビゲーション' : 'Primary navigation')
+  root.setAttribute('aria-label', copy().ariaLabel)
 
   const themeButton = document.createElement('button')
   themeButton.className = 'tidb-icon-button'
@@ -152,43 +133,50 @@ export function createNavigation(
     return `${path}?${search.toString()}`
   }
 
+  const syncTheme = () => {
+    const labels = copy()
+    const theme = document.documentElement.dataset.theme === 'day' ? 'day' : 'night'
+    const nextTheme = theme === 'day' ? 'night' : 'day'
+    themeButton.textContent = nextTheme === 'day' ? `☀ ${labels.day}` : `☾ ${labels.night}`
+    themeButton.setAttribute('aria-label', nextTheme === 'day'
+      ? labels.switchToDay
+      : labels.switchToNight)
+    themeButton.setAttribute('aria-pressed', String(theme === 'night'))
+  }
+
   const sync = () => {
-    root.setAttribute('aria-label', locale === 'ja' ? '主要ナビゲーション' : 'Primary navigation')
+    const labels = copy()
+    root.setAttribute('aria-label', labels.ariaLabel)
     root.replaceChildren(
       navLink(
         'city',
-        text[locale].city,
+        labels.city,
         traceHref(surface === 'city' ? './' : '../'),
         surface === 'city',
       ),
       navLink(
         'machine',
-        text[locale].machine,
+        labels.machine,
         traceHref(surface === 'city' ? 'machine/' : surface === 'machine' ? './' : '../machine/'),
         surface === 'machine',
       ),
       navLink(
         'diagnose',
-        text[locale].diagnose,
+        labels.diagnose,
         traceHref(surface === 'city' ? 'diagnose/' : surface === 'diagnose' ? './' : '../diagnose/'),
         surface === 'diagnose',
       ),
-      navLink('github', text[locale].source, 'https://github.com/penguin425/TiCity', false, true),
+      navLink('github', labels.source, 'https://github.com/penguin425/TiCity', false, true),
       themeButton,
     )
-    const theme = document.documentElement.dataset.theme === 'day' ? 'day' : 'night'
-    const nextTheme = theme === 'day' ? 'night' : 'day'
-    themeButton.textContent = nextTheme === 'day' ? `☀ ${text[locale].day}` : `☾ ${text[locale].night}`
-    themeButton.setAttribute('aria-label', nextTheme === 'day'
-      ? (locale === 'ja' ? '昼テーマに切り替える' : 'Switch to day theme')
-      : (locale === 'ja' ? '夜テーマに切り替える' : 'Switch to night theme'))
-    themeButton.setAttribute('aria-pressed', String(theme === 'night'))
+    syncTheme()
   }
 
   sync()
   return {
     root,
     themeButton,
+    syncTheme,
     setLocale(next) {
       locale = next
       sync()
@@ -205,9 +193,7 @@ export function prepareDocument(locale: Locale): void {
   document.documentElement.lang = locale
   const skip = document.querySelector<HTMLElement>('.skip-link')
   if (skip) {
-    skip.textContent = locale === 'ja'
-      ? 'メインコンテンツへ移動'
-      : 'Skip to main content'
+    skip.textContent = CATALOG[locale].city.skip
   }
   applyTheme(resolveTheme())
 }

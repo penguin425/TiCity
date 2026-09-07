@@ -21,10 +21,12 @@ import {
   type Theme,
 } from './page-shell'
 import {
+  CATALOG,
   mountCityUi,
   resolveLocale,
   type Locale,
 } from './ui'
+import { selectionCopy } from './ui/selection-copy'
 import { createLockLabPanel } from './ui/lock-lab'
 import { createProtocolLabPanel } from './ui/protocol-lab'
 import { createRaftLabPanel } from './ui/raft-lab'
@@ -50,104 +52,8 @@ const SCENARIOS: readonly ScenarioId[] = [
 const NO_ACTIVE_TRACE_EVENTS: readonly string[] = Object.freeze([])
 
 const copy = {
-  ja: {
-    skip: 'メインコンテンツへ移動',
-    qps: 'QPS',
-    txn: '取引',
-    regions: 'Regions',
-    trace: 'Trace',
-    none: 'なし',
-    succeeded: 'success',
-    committed: 'commit',
-    rolledBack: 'rollback',
-    failed: 'failed',
-    orbit: '俯瞰',
-    fly: '飛行',
-    walk: '歩行',
-    sound: '音',
-    inspect: '内部',
-    showInspect: '現在の詳細ラボを開く',
-    hideInspect: '現在の詳細ラボを閉じる',
-    panel: '操作',
-    showPanel: '操作パネルを開く',
-    hidePanel: '操作パネルを閉じる',
-    canvas: 'TiCityの対話型3Dアーキテクチャ。画面上の表示切替またはキーボードで探索できます。',
-    hint: {
-      orbit: 'ドラッグ: 回転 · wheel: zoom · 建物をclick: 詳細',
-      fly: 'ドラッグ: 視点 · WASD: 移動 · Space/E: 上昇 · Q: 下降 · wheel: 速度',
-      walk: 'ドラッグ: 視点 · WASD: 歩行 · Shift: 早歩き',
-    },
-    selected: '選択したコンポーネント',
-    noWebgl: 'WebGL2を開始できませんでした。モデルと解説UIは引き続き利用できます。',
-    movement: {
-      flyControls: '飛行移動',
-      walkControls: '歩行移動',
-      forward: '前へ移動',
-      backward: '後ろへ移動',
-      left: '左へ移動',
-      right: '右へ移動',
-      ascend: '上昇',
-      descend: '下降',
-      sprint: '高速移動',
-    },
-    legend: {
-      sql: 'SQL / data route',
-      tso: 'TSO / control',
-      txn2pc: 'Transaction 2PC',
-      raft: 'Region Raft',
-      kv: 'KV / MVCC',
-      tiflash: 'TiFlash / MPP',
-    },
-  },
-  en: {
-    skip: 'Skip to main content',
-    qps: 'QPS',
-    txn: 'Txn',
-    regions: 'Regions',
-    trace: 'Trace',
-    none: 'none',
-    succeeded: 'success',
-    committed: 'commit',
-    rolledBack: 'rollback',
-    failed: 'failed',
-    orbit: 'Orbit',
-    fly: 'Fly',
-    walk: 'Walk',
-    sound: 'Sound',
-    inspect: 'Inspect',
-    showInspect: 'Open the active detail lab',
-    hideInspect: 'Close the active detail lab',
-    panel: 'Panel',
-    showPanel: 'Open control panel',
-    hidePanel: 'Close control panel',
-    canvas: 'TiCity interactive 3D architecture. Use the view controls or keyboard to explore.',
-    hint: {
-      orbit: 'Drag: orbit · wheel: zoom · click a building: inspect',
-      fly: 'Drag: look · WASD: move · Space/E: ascend · Q: descend · wheel: speed',
-      walk: 'Drag: look · WASD: walk · Shift: move faster',
-    },
-    selected: 'Selected component',
-    noWebgl: 'WebGL2 could not start. The model and explanatory interface remain available.',
-    movement: {
-      flyControls: 'Fly movement',
-      walkControls: 'Walk movement',
-      forward: 'Move forward',
-      backward: 'Move backward',
-      left: 'Move left',
-      right: 'Move right',
-      ascend: 'Ascend',
-      descend: 'Descend',
-      sprint: 'Move faster',
-    },
-    legend: {
-      sql: 'SQL / data route',
-      tso: 'TSO / control',
-      txn2pc: 'Transaction 2PC',
-      raft: 'Region Raft',
-      kv: 'KV / MVCC',
-      tiflash: 'TiFlash / MPP',
-    },
-  },
+  ja: CATALOG.ja.city,
+  en: CATALOG.en.city,
 } as const
 
 interface TiCityPublicApi {
@@ -247,20 +153,20 @@ function button(
   return result
 }
 
-function metric(term: string): { root: HTMLDivElement; value: HTMLElement } {
+function metric(term: string): { root: HTMLDivElement; name: HTMLElement; value: HTMLElement } {
   const root = document.createElement('div')
   root.className = 'tidb-status'
   const name = document.createElement('dt')
   name.textContent = term
   const value = document.createElement('dd')
   root.append(name, value)
-  return { root, value }
+  return { root, name, value }
 }
 
 function createLegend(locale: Locale): HTMLElement {
   const root = document.createElement('aside')
   root.className = 'tidb-scene-legend'
-  root.setAttribute('aria-label', locale === 'ja' ? '意味を表す色' : 'Semantic colours')
+  root.setAttribute('aria-label', copy[locale].legendLabel)
   for (const domain of ['sql', 'tso', 'txn2pc', 'raft', 'kv', 'tiflash'] as const) {
     const chip = document.createElement('span')
     chip.className = 'tidb-domain-chip'
@@ -538,20 +444,24 @@ function boot(): void {
   const onSelect = (component: CityComponent | null) => {
     selected.hidden = component === null
     if (!component) return
-    selected.setAttribute('aria-label', copy[locale].selected)
-    selectedTitle.textContent = component.name
-    selectedRole.textContent = component.role
-    selectedDomain.textContent = `MODEL / SIMULATED · ${component.domain}`
+    const projection = selectionCopy(locale, component)
+    selected.setAttribute(
+      'aria-label',
+      `${copy[locale].selected}: ${projection.name} — ${projection.role} (${projection.disclosure})`,
+    )
+    selectedTitle.textContent = projection.name
+    selectedRole.textContent = projection.role
+    selectedDomain.textContent = `${projection.disclosure} · ${projection.domain}`
   }
 
   try {
     world = createTiDBWorld(worldHost, {
       theme: document.documentElement.dataset.theme === 'day' ? 'day' : 'night',
       mode: currentView,
+      locale,
       hudExpanded: panelExpanded,
       onSelect,
     })
-    world.shell.renderer.domElement.setAttribute('aria-label', copy[locale].canvas)
     world.update(simulation.state, currentTrace)
     if (initialEventId !== null && world.shell.flows.seek(initialEventId)) {
       world.shell.flows.setPaused(true)
@@ -718,6 +628,7 @@ function boot(): void {
   const regions = metric(copy[locale].regions)
   const trace = metric(copy[locale].trace)
   status.append(qps.root, txn.root, regions.root, trace.root)
+  let legend = createLegend(locale)
 
   const uiHost = document.createElement('div')
   uiHost.className = 'tidb-ui-host'
@@ -801,7 +712,15 @@ function boot(): void {
       locale = next
       document.documentElement.lang = next
       navigation.setLocale(next)
+      world?.setLocale(next)
       wordmarkHost.replaceChildren(createWordmark(next))
+      qps.name.textContent = copy[next].qps
+      txn.name.textContent = copy[next].txn
+      regions.name.textContent = copy[next].regions
+      trace.name.textContent = copy[next].trace
+      const nextLegend = createLegend(next)
+      legend.replaceWith(nextLegend)
+      legend = nextLegend
       for (const [mode, control] of viewButtons) {
         control.textContent = copy[next][mode]
         control.title = copy[next].hint[mode]
@@ -844,7 +763,6 @@ function boot(): void {
   syncSurfaceLinks(initialEventId)
 
   hud.append(status, uiHost)
-  const legend = createLegend(locale)
   layout.append(pageTitle, worldHost, topbar, hud, selected, hint, legend)
   app.replaceChildren(layout)
 
@@ -896,9 +814,9 @@ function boot(): void {
       const latest = simulation.state.lastTrace
       txn.value.textContent =
         playback?.phase === 'playing'
-          ? 'PLAY'
+          ? copy[locale].playing
           : playback?.phase === 'paused'
-            ? 'PAUSE'
+            ? copy[locale].paused
             : latest
               ? latest.outcome === 'committed'
                 ? copy[locale].committed
@@ -918,8 +836,10 @@ function boot(): void {
         )
           ? `${playback.currentIndex + 1}/${playback.total}`
           : latest?.scenarioId === 'commit-protocols'
-            ? '1PC / Async / 2PC'
-            : latest?.protocol ?? copy[locale].none
+            ? copy[locale].protocolSummary
+            : latest?.protocol
+              ? copy[locale].protocol[latest.protocol]
+              : copy[locale].none
     }
     animationFrame = requestAnimationFrame(frame)
   }
@@ -927,6 +847,7 @@ function boot(): void {
 
   const themeObserver = new MutationObserver(() => {
     world?.setTheme(document.documentElement.dataset.theme === 'day' ? 'day' : 'night')
+    navigation.syncTheme()
   })
   themeObserver.observe(document.documentElement, {
     attributes: true,
@@ -1014,6 +935,7 @@ try {
   document.body.dataset.ready = 'error'
   const app = document.querySelector<HTMLElement>('#city-app')
   if (app) {
-    app.textContent = 'TiCity could not start. See the browser console for details.'
+    const locale: Locale = document.documentElement.lang === 'en' ? 'en' : 'ja'
+    app.textContent = copy[locale].startupError
   }
 }

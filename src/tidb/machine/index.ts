@@ -13,11 +13,14 @@ import type {
   TraceRaftLabPeerSnapshot,
   TraceRaftLabSnapshot,
   TraceReceipt,
+  TraceMetadataValue,
+  TraceStateDelta,
   TraceStateSnapshot,
   TraceTiFlashMppLabSnapshot,
 } from '../model/types'
 import { CATALOG, resolveLocale, type Locale } from '../ui/catalog'
 import { element, svgElement } from '../ui/dom'
+import { traceEndpointLabel, traceEventCopy } from '../ui/event-copy'
 import { createModelBadge } from '../ui/legal'
 import { installCityUiStyles } from '../ui/styles'
 import { installMachineStyles } from './styles'
@@ -52,6 +55,9 @@ export interface MachineEvent {
   transactionId?: string
   /** Stable parallel-branch identity from the canonical receipt. */
   branchId?: string
+  /** Typed metadata/deltas retained for pure UI localization of the event. */
+  metadata?: Readonly<Record<string, TraceMetadataValue>>
+  deltas?: readonly TraceStateDelta[]
   /** The exact immutable post-event model projection; never reconstructed here. */
   snapshot?: TraceStateSnapshot
 }
@@ -76,9 +82,9 @@ export interface MachineOptions {
 
 const LANE_LABELS: Record<Locale, Record<MachineLane, string>> = {
   ja: {
-    sql: 'SQL / Client',
+    sql: 'SQL / クライアント',
     tso: 'TSO',
-    txn2pc: 'Transaction commit',
+    txn2pc: 'トランザクション commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
     tiflash: 'TiFlash / MPP',
@@ -111,6 +117,16 @@ const MACHINE_COPY = {
     activeLayer: '現在の層',
     timeWindow: '時間幅',
     progress: 'トレース再生位置',
+    timeline: 'TiDB traceの層別タイムライン',
+    eventCount: (value: number) => `${value}件のイベント`,
+    statusPrefix: '状態',
+    status: {
+      queued: '待機',
+      active: '処理中',
+      success: '成功',
+      warning: '注意',
+      failed: '失敗',
+    },
     duration: '継続時間',
     route: '経路',
     current: '現在のイベント',
@@ -311,6 +327,16 @@ const MACHINE_COPY = {
     activeLayer: 'Active layer',
     timeWindow: 'Time window',
     progress: 'Trace replay position',
+    timeline: 'Layered TiDB trace timeline',
+    eventCount: (value: number) => `${value} events`,
+    statusPrefix: 'status',
+    status: {
+      queued: 'queued',
+      active: 'active',
+      success: 'success',
+      warning: 'warning',
+      failed: 'failed',
+    },
     duration: 'Duration',
     route: 'Route',
     current: 'Current event',
@@ -879,6 +905,27 @@ function asStringArray(value: unknown): readonly string[] | undefined {
   const strings = value.filter((entry): entry is string =>
     typeof entry === 'string' && entry.length > 0)
   return strings.length > 0 ? strings : undefined
+}
+
+function asMetadata(
+  value: unknown,
+): Readonly<Record<string, TraceMetadataValue>> | undefined {
+  const source = record(value)
+  const entries = Object.entries(source).filter(([, candidate]) =>
+    typeof candidate === 'string' ||
+    typeof candidate === 'number' ||
+    typeof candidate === 'boolean',
+  ) as [string, TraceMetadataValue][]
+  return entries.length > 0 ? Object.freeze(Object.fromEntries(entries)) : undefined
+}
+
+function asTraceDeltas(value: unknown): readonly TraceStateDelta[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const deltas = value.filter((candidate) => {
+    const kind = record(candidate).kind
+    return typeof kind === 'string' && kind.length > 0
+  }) as TraceStateDelta[]
+  return deltas.length > 0 ? Object.freeze(deltas) : undefined
 }
 
 function asTraceSnapshot(value: unknown): TraceStateSnapshot | undefined {
@@ -3957,6 +4004,8 @@ export function adaptTraceReceipt(source: unknown): MachineReceipt {
         : undefined,
       transactionId: asString(raw.transactionId) || undefined,
       branchId: asString(raw.branchId) || undefined,
+      metadata: asMetadata(raw.metadata),
+      deltas: asTraceDeltas(raw.deltas),
       snapshot: asTraceSnapshot(raw.snapshot),
     })
   }
@@ -4001,7 +4050,7 @@ function renderTimeline(
     class: 'tidb-machine__svg',
     viewBox: `0 0 ${width} ${height}`,
     role: 'group',
-    'aria-label': locale === 'ja' ? 'TiDB traceの層別タイムライン' : 'Layered TiDB trace timeline',
+    'aria-label': MACHINE_COPY[locale].timeline,
   })
 
   const defs = svgElement('defs')
@@ -4104,7 +4153,7 @@ function renderTimeline(
       String(eventCount).padStart(2, '0'),
       186,
       y + 38,
-      { 'text-anchor': 'end', 'aria-label': `${eventCount} events` },
+      { 'text-anchor': 'end', 'aria-label': MACHINE_COPY[locale].eventCount(eventCount) },
     )
     group.append(axis)
     svg.append(group)
@@ -4219,13 +4268,14 @@ function renderTimeline(
 
   for (const layout of layouts) {
     const { event, index, state, status, x, y } = layout
+    const eventCopy = traceEventCopy(event, locale)
     const accessibleName = [
       `${CATALOG[locale].event} ${index + 1}`,
       LANE_LABELS[locale][event.domain],
-      event.label,
+      eventCopy.label,
       formatModelTime(event.atMs),
       `${MACHINE_COPY[locale].duration}: ${formatModelTime(Math.max(0, event.durationMs))}`,
-      `status: ${status}`,
+      `${MACHINE_COPY[locale].statusPrefix}: ${MACHINE_COPY[locale].status[status]}`,
     ].join(', ')
     const eventNode = svgElement('g', {
       class: `tidb-machine__event is-${status} is-${state}`,
@@ -4283,6 +4333,7 @@ function renderTimeline(
   }
 
   if (currentLayout) {
+    const currentCopy = traceEventCopy(currentLayout.event, locale)
     const calloutWidth = 238
     const calloutHeight = 28
     const calloutOnLeft = currentLayout.x > width - calloutWidth - 46
@@ -4310,7 +4361,7 @@ function renderTimeline(
     appendSvgText(
       svg,
       'tidb-machine__event-label',
-      `${String(currentLayout.index + 1).padStart(2, '0')}  ${shortLabel(currentLayout.event.label)}`,
+      `${String(currentLayout.index + 1).padStart(2, '0')}  ${shortLabel(currentCopy.label)}`,
       calloutX + 11,
       currentLayout.y + 4,
       { 'aria-hidden': 'true' },
@@ -4452,6 +4503,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     progressText.textContent = `${position} / ${total}`
 
     if (event) {
+      const eventCopy = traceEventCopy(event, locale)
       const route = [event.source, event.target].filter(Boolean).join(' → ')
       const status = machineStatus(event.status)
       detail.setAttribute('data-current-domain', event.domain)
@@ -4478,7 +4530,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
           attrs: { 'data-detail-event-kind': event.kind },
         },
         element('dt', { text: copy.eventKind }),
-        element('dd', { text: event.kind }),
+        element('dd', { text: eventCopy.kind }),
         ))
       }
       if (event.branchId) {
@@ -4497,19 +4549,27 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
           }),
           element('p', {
             className: `tidb-machine__status is-${status}`,
-            text: `status: ${status}`,
+            text: `${copy.statusPrefix}: ${copy.status[status]}`,
           }),
         ),
-        element('h2', { text: event.label }),
+        element('h2', { text: eventCopy.label }),
         eventMeta,
       ]
-      if (event.detail) {
-        detailNodes.push(element('p', { className: 'tidb-machine__detail-copy', text: event.detail }))
+      if (eventCopy.detail) {
+        detailNodes.push(element('p', {
+          className: 'tidb-machine__detail-copy',
+          text: eventCopy.detail,
+        }))
       }
       if (route) {
         detailNodes.push(element('p', { className: 'tidb-machine__route' },
           element('strong', { text: `${copy.route}: ` }),
-          element('span', { text: route }),
+          element('span', {
+            text: [
+              traceEndpointLabel(locale, event.source, event),
+              traceEndpointLabel(locale, event.target, event),
+            ].join(' → '),
+          }),
         ))
       }
       detail.replaceChildren(...detailNodes)

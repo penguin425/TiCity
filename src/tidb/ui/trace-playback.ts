@@ -5,13 +5,17 @@
 
 import type { TraceFlowPlayback, TracePlaybackPhase } from '../engine/trace-flows'
 import type {
-  TraceDomain,
   TraceEvent,
   TraceEventStatus,
   TraceReceipt,
 } from '../model/types'
 import type { Locale } from './catalog'
 import { element } from './dom'
+import {
+  traceDomainLabel,
+  traceEndpointLabel,
+  traceEventCopy,
+} from './event-copy'
 
 interface TracePlaybackCopy {
   readonly region: string
@@ -117,30 +121,7 @@ const COPY: Readonly<Record<Locale, TracePlaybackCopy>> = {
   },
 }
 
-const DOMAIN_LABELS: Readonly<Record<Locale, Readonly<Record<TraceDomain, string>>>> = {
-  ja: {
-    client: 'CLIENT',
-    sql: 'SQL',
-    tso: 'TSO / PD',
-    txn2pc: 'Transaction 2PC',
-    raft: 'Region Raft',
-    kv: 'TiKV / MVCC',
-    tiflash: 'TiFlash / MPP',
-    return: 'RETURN',
-  },
-  en: {
-    client: 'CLIENT',
-    sql: 'SQL',
-    tso: 'TSO / PD',
-    txn2pc: 'Transaction 2PC',
-    raft: 'Region Raft',
-    kv: 'TiKV / MVCC',
-    tiflash: 'TiFlash / MPP',
-    return: 'RETURN',
-  },
-}
-
-const DOMAIN_COLORS: Readonly<Record<TraceDomain, string>> = {
+const DOMAIN_COLORS: Readonly<Record<TraceEvent['domain'], string>> = {
   client: 'var(--city-cyan)',
   sql: 'var(--domain-sql)',
   tso: 'var(--domain-tso)',
@@ -199,50 +180,6 @@ function railSymbol(state: RailState, status: TraceEventStatus): string {
   if (status === 'failed') return '×'
   if (status === 'warning') return '!'
   return '✓'
-}
-
-function endpointLabel(rawValue: string | undefined, event: TraceEvent): string {
-  if (!rawValue) return '—'
-  const raw = rawValue.trim().toLowerCase()
-  const clientBranch = /^client[-._]([a-z0-9]+)$/i.exec(raw)
-  if (clientBranch) return `CLIENT ${clientBranch[1].toUpperCase()}`
-  if (
-    raw === 'client' ||
-    raw === 'clients' ||
-    raw === 'application' ||
-    raw === 'client-terminal'
-  ) {
-    return 'CLIENTS'
-  }
-  if (raw === 'pd' || raw === 'tso' || /^pd[-._]?\d*$/.test(raw)) {
-    return 'PD / TSO'
-  }
-  if (raw === 'gc' || raw === 'gc-worker' || raw === 'safe-point') return 'MVCC GC'
-  if (raw === 'tiflash' || raw === 'mpp' || /^tiflash[-._]?\d*$/.test(raw)) {
-    return 'TiFlash / MPP'
-  }
-
-  const numbered = (
-    pattern: RegExp,
-    label: string,
-    includeRegion = false,
-  ): string | null => {
-    const match = raw.match(pattern)
-    if (!match) return null
-    const number = match[1] || '1'
-    const region = includeRegion && event.regionId !== undefined
-      ? ` · Region ${event.regionId}`
-      : ''
-    return `${label} ${number}${region}`
-  }
-  return (
-    numbered(/^tiproxy[-._]?(\d+)?$/, 'TiProxy') ??
-    numbered(/^tidb[-._]?(\d+)?$/, 'TiDB') ??
-    numbered(/^tikv[-._]?(\d+)?$/, 'TiKV', true) ??
-    (raw.startsWith('region') && event.regionId !== undefined
-      ? `Region ${event.regionId}`
-      : rawValue)
-  )
 }
 
 function setDisabled(button: HTMLButtonElement, disabled: boolean): void {
@@ -482,6 +419,7 @@ export function createTracePlaybackDock(
     rail.hidden = false
     rail.setAttribute('aria-label', copy.progress)
     entries = receipt.events.map((event, index) => {
+      const copy = traceEventCopy(event, locale)
       const symbol = element('span', {
         className: 'tidb-trace-playback__tick-symbol',
         attrs: { 'aria-hidden': 'true' },
@@ -494,7 +432,7 @@ export function createTracePlaybackDock(
             'data-event-index': String(index),
             'data-domain': event.domain,
             'data-status': event.status,
-            title: event.label,
+            title: copy.label,
           },
         },
         symbol,
@@ -521,14 +459,15 @@ export function createTracePlaybackDock(
     const copy = COPY[locale]
     const total = entries.length
     for (const entry of entries) {
+      const eventCopy = traceEventCopy(entry.event, locale)
       const state = railState(entry.index, currentIndex, playbackPhase, atEnd)
       entry.root.className = `tidb-trace-playback__tick is-${state}`
       entry.root.dataset.state = state
       entry.symbol.textContent = railSymbol(state, entry.event.status)
       entry.root.setAttribute(
         'aria-label',
-        `${entry.index + 1} / ${total}: ${entry.event.label}. ` +
-        `${DOMAIN_LABELS[locale][entry.event.domain]}. ` +
+        `${entry.index + 1} / ${total}: ${eventCopy.label}. ` +
+        `${traceDomainLabel(locale, entry.event.domain)}. ` +
         `${copy.status[entry.event.status]}. ${copy.railState[state]}.`,
       )
       if (state === 'current') entry.root.setAttribute('aria-current', 'step')
@@ -550,6 +489,7 @@ export function createTracePlaybackDock(
     const overallPercent = Math.round(overall * 100)
     const eventPercent = Math.round(eventValue * 100)
     const hasTrace = receiptTotal > 0
+    const eventCopy = event ? traceEventCopy(event, locale) : null
 
     root.setAttribute('aria-label', copy.region)
     root.dataset.phase = playback.phase
@@ -583,7 +523,7 @@ export function createTracePlaybackDock(
       : copy.phase[playback.phase]
     phase.dataset.tracePhase = playback.phase
     position.textContent = `${item} / ${total}`
-    domain.textContent = event ? DOMAIN_LABELS[locale][event.domain] : '—'
+    domain.textContent = event ? traceDomainLabel(locale, event.domain) : '—'
     domain.dataset.traceDomain = event?.domain ?? ''
     status.textContent = event ? copy.status[event.status] : copy.phase[playback.phase]
     status.dataset.traceStatus = event?.status ?? playback.phase
@@ -606,7 +546,7 @@ export function createTracePlaybackDock(
     if (announcementKey !== nextAnnouncementKey) {
       announcementKey = nextAnnouncementKey
       label.textContent = event
-        ? event.label
+        ? eventCopy?.label ?? copy.ready
         : hasTrace
           ? copy.ready
           : copy.empty
@@ -614,8 +554,8 @@ export function createTracePlaybackDock(
       if (event) {
         const rawFrom = event.source || '—'
         const rawTo = event.target || '—'
-        const from = endpointLabel(event.source, event)
-        const to = endpointLabel(event.target, event)
+        const from = traceEndpointLabel(locale, event.source, event)
+        const to = traceEndpointLabel(locale, event.target, event)
         source.textContent = from
         target.textContent = to
         route.dataset.local = String(rawFrom === rawTo && rawFrom !== '—')

@@ -9,6 +9,7 @@ import { FOCUS_COMPONENT_TARGETS, TICITY_LAYOUT } from '../world/layout'
 import { createTiDBSceneGraph } from '../world/city'
 import type { CityComponent, TiDBSceneGraph } from '../world/city'
 import type { CityTheme } from '../world/palette'
+import { CATALOG, type Locale } from '../ui/catalog'
 import { createCityAudio } from './audio'
 import type { CityAudio } from './audio'
 import { CITY_ORBIT, createCityCameraController } from './camera'
@@ -26,6 +27,7 @@ export type { CityLabProjections } from './lab-projections'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
+  readonly locale?: Locale
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
   readonly autoStart?: boolean
@@ -47,6 +49,7 @@ export interface CityShell {
   update(state: TiCityState, trace?: TraceReceipt | null): void
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
+  setLocale(locale: Locale): void
   setMode(mode: CityViewMode): void
   setLabInspect(enabled: boolean): void
   /** @deprecated Use `setLabInspect`. */
@@ -111,6 +114,9 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   const [width, height] = measure(container)
   if (getComputedStyle(container).position === 'static') container.style.position = 'relative'
 
+  let locale: Locale = options.locale
+    ?? (document.documentElement.lang === 'en' ? 'en' : 'ja')
+
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: 'high-performance',
@@ -124,10 +130,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   renderer.domElement.style.height = '100%'
   renderer.domElement.style.touchAction = 'none'
   renderer.domElement.tabIndex = 0
-  renderer.domElement.setAttribute(
-    'aria-label',
-    'TiCity interactive architecture. Use the view controls or keyboard to explore.',
-  )
+  renderer.domElement.setAttribute('aria-label', CATALOG[locale].city.canvas)
   container.appendChild(renderer.domElement)
 
   const scene = new THREE.Scene()
@@ -176,10 +179,11 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     container,
     camera,
     city,
+    locale,
     onSelect: options.onSelect,
   })
   scene.add(picker.object)
-  const labels = createCityLabels(container, camera, city)
+  const labels = createCityLabels(container, camera, city, options.locale)
   labels.setMode(options.mode ?? 'orbit')
   const audio = createCityAudio()
   let theme: CityTheme = options.theme ?? 'night'
@@ -239,6 +243,14 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     flows.setTheme(next)
     picker.setTheme(next)
     rendering.setTheme(next)
+  }
+
+  function setLocale(next: Locale): void {
+    labels.setLocale(next)
+    if (locale === next) return
+    locale = next
+    renderer.domElement.setAttribute('aria-label', CATALOG[locale].city.canvas)
+    picker.setLocale(next)
   }
 
   function resize(): void {
@@ -367,6 +379,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     update,
     focus,
     setTheme,
+    setLocale,
     setMode,
     setLabInspect(enabled: boolean): void {
       if (labInspect === enabled) return

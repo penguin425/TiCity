@@ -9,9 +9,11 @@ import type { CityShell } from '../engine/shell'
 import type { CityViewMode } from '../engine/camera'
 import type { CityComponent } from './city'
 import type { CityTheme } from './palette'
+import type { Locale } from '../ui/catalog'
 
 export interface WorldOptions {
   readonly theme?: CityTheme
+  readonly locale?: Locale
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
   readonly autoStart?: boolean
@@ -27,6 +29,7 @@ export interface WorldHandle {
   update(state: TiCityState, trace?: TraceReceipt | null): void
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
+  setLocale(locale: Locale): void
   setMode(mode: CityViewMode): void
   setLabInspect(enabled: boolean): void
   /** @deprecated Use `setLabInspect`. */
@@ -58,6 +61,9 @@ export function createTiDBWorld(
     },
     setTheme(theme: CityTheme): void {
       shell.setTheme(theme)
+    },
+    setLocale(locale: Locale): void {
+      shell.setLocale(locale)
     },
     setMode(mode: CityViewMode): void {
       shell.setMode(mode)

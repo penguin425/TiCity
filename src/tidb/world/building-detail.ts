@@ -27,7 +27,9 @@ interface BoxDetail {
  *
  * The caller owns the shared unit-box geometry through its normal root
  * traversal. Materials remain owned by CityMaterials. There is no update loop,
- * shadow pass, picking target, or additional disposal lifecycle.
+ * picking target, or additional disposal lifecycle. Structural and mechanical
+ * batches cast one shared shadow silhouette each; glass panes stay receive-only
+ * so the detail remains inexpensive at overview scale.
  */
 export function addBuildingDetails(parent: THREE.Object3D, materials: CityMaterials): void {
   const batches: Record<DetailMaterial, BoxDetail[]> = {
@@ -87,7 +89,11 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
         box('trim', point(x, (bottom + top) / 2, 0.29), [0.2, top - bottom + 0.2, 0.35], angle)
       }
       for (let floor = 1; floor < floors; floor++) {
-        box('trim', point(0, bottom + floor * floorHeight, 0.25), [span - 0.8, 0.13, 0.3], angle)
+        const y = bottom + floor * floorHeight
+        // A recessed spandrel behind the joint gives each floor a real shadow
+        // line; the visible mullion remains the thin aluminium trim in front.
+        box('darkStructure', point(0, y + 0.03, 0.08), [span - 0.8, 0.2, 0.2], angle)
+        box('trim', point(0, y, 0.25), [span - 0.8, 0.13, 0.3], angle)
       }
       for (const corner of [-1, 1]) {
         box('structure', point(corner * (span / 2 - 0.35), (bottom + top) / 2, 0.15),
@@ -130,6 +136,14 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
       for (let vent = 0; vent < 4; vent++) {
         box('trim', at(anchor, side * 13.7, height + 2.55, -7 + vent * 3.3), [1.7, 0.5, 1.2])
       }
+      // Small service caps sit between the broad vents.  They are deliberately
+      // repeated in the same trim batch, so the roof reads as equipment rather
+      // than as an unbroken dark slab without adding drawables.
+      for (let unit = 0; unit < 3; unit++) {
+        const z = -8.8 + unit * 5.5
+        box('darkStructure', at(anchor, side * 13.7, height + 3.05, z), [1.3, 0.42, 1.45])
+        box('trim', at(anchor, side * 13.7, height + 3.29, z), [1.55, 0.1, 1.65])
+      }
     }
     // Setback terraces have slender parapets and small mechanical housings;
     // the central crown now reads as roof plant instead of a glowing antenna.
@@ -144,6 +158,9 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     }
     box('structure', at(anchor, 0, height + 18.1, 6.8), [4.4, 1.7, 3])
     box('trim', at(anchor, 0, height + 19.12, 6.8), [4.8, 0.35, 3.4])
+    for (let duct = 0; duct < 3; duct++) {
+      box('darkStructure', at(anchor, -1.15 + duct * 1.15, height + 19.75, 6.8), [0.48, 0.78, 2.15])
+    }
   }
 
   const pd = COMPONENT_ANCHORS['pd.control']
@@ -181,6 +198,15 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
   box('glass', at(pd, 0, 7, 19.76), [5, 6.4, 0.2])
   box('structure', at(pd, 0, 11.5, 21), [10, 0.8, 5.5])
   box('window', at(pd, 0, 11.08, 23.4), [7, 0.2, 0.35])
+  // Four compact rooftop units around the clock plinth provide a tangible
+  // mechanical crown while leaving the PD tower's circular silhouette intact.
+  for (let unit = 0; unit < 4; unit++) {
+    const angle = unit * Math.PI / 2 + Math.PI / 4
+    const x = Math.cos(angle) * 7.6
+    const z = Math.sin(angle) * 7.6
+    box('darkStructure', at(pd, x, 42.65, z), [1.8, 1.15, 2.4], -angle)
+    box('trim', at(pd, x, 43.26, z), [2.05, 0.12, 2.65], -angle)
+  }
 
   const flash = COMPONENT_ANCHORS['tiflash.0']
   // Six repeated analytical halls read as a columnar machine at overview
@@ -213,6 +239,9 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     box('trim', at(flash, x, roofY + 3.16, 0), [5.9, 0.24, 29.5])
     for (let grille = 0; grille < 8; grille++) {
       box('darkStructure', at(flash, x, roofY + 3.4, -12.5 + grille * 3.6), [4.7, 0.22, 2.1])
+      for (const side of [-1, 1]) {
+        box('trim', at(flash, x + side * 2.05, roofY + 3.4, -12.5 + grille * 3.6), [0.16, 0.2, 2.25])
+      }
     }
   }
   // The columnar hall gets an external steel frame and rear service gallery.
@@ -276,7 +305,9 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     if (instances.length === 0) continue
     const mesh = new THREE.InstancedMesh(geometry, materials[material], instances.length)
     mesh.name = `architecture:${material}`
-    mesh.castShadow = false
+    mesh.castShadow = material === 'structure'
+      || material === 'darkStructure'
+      || material === 'trim'
     mesh.receiveShadow = true
     mesh.raycast = () => {}
     for (let index = 0; index < instances.length; index++) {

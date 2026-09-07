@@ -129,11 +129,12 @@ describe('trace playback dock', () => {
     expect(dock.root.dataset.phase).toBe('paused')
     expect(dock.root.dataset.currentDomain).toBe('tso')
     expect(dock.root.dataset.currentStatus).toBe('warning')
-    expect(dock.root.querySelector('[data-trace-label]')?.textContent).toBe('timestamp label')
+    expect(dock.root.querySelector('[data-trace-label]')?.textContent).toBe('タイムスタンプを処理')
     expect(dock.root.querySelector('[data-trace-route]')?.textContent).toContain(
       'TiDB 1→PD / TSO',
     )
     expect(dock.root.querySelector('[data-trace-position]')?.textContent).toBe('3 / 4')
+    expect(dock.root.dataset.eventCount).toBe('4')
     expect(dock.root.querySelector('[data-trace-domain]')?.textContent).toBe('TSO / PD')
     expect(dock.root.querySelector('[data-trace-status]')?.textContent).toBe('注意')
     expect(
@@ -150,6 +151,8 @@ describe('trace playback dock', () => {
     ])
     expect(ticks[2].getAttribute('aria-current')).toBe('step')
     expect(ticks[2].getAttribute('aria-label')).toContain('現在')
+    expect(ticks[2].getAttribute('aria-label')).toContain('タイムスタンプを処理')
+    expect(ticks[2].getAttribute('aria-label')).not.toContain('timestamp label')
     expect(ticks[3].querySelector('.tidb-trace-playback__tick-symbol')?.textContent).toBe('·')
   })
 
@@ -212,7 +215,7 @@ describe('trace playback dock', () => {
     expect(dock.root.querySelector('[data-action="trace-replay"]')?.textContent).toBe('Replay')
     expect(
       dock.root.querySelector('[data-event-index="1"]')?.getAttribute('aria-label'),
-    ).toContain('2 / 4: route label')
+    ).toContain('2 / 4: TiProxy routed the session')
   })
 
   it('normalizes independent Lock Lab client endpoints', () => {

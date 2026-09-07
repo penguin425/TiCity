@@ -137,7 +137,7 @@ test('portrait opens on a full city with unobstructed touch controls', async ({ 
 })
 
 test('selection follows a growing rack and refreshes its role without reselection', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?lang=en')
   await page.waitForFunction(() => Boolean(window.TICITY?.world))
   await page.evaluate(() => {
     window.TICITY.model.setPlayback('step')

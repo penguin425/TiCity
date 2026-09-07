@@ -4,7 +4,6 @@
  */
 
 import * as THREE from 'three'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
@@ -12,6 +11,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { TICITY_LAYOUT } from '../world/layout'
 import type { CityTheme } from '../world/palette'
 import { CityAmbientOcclusionPass } from './ambient-occlusion'
+import { CITY_SUN_POSITION, createCityReflections } from './reflections'
 
 /** Owns lighting, offscreen targets and output conversion as one lifecycle. */
 export interface CityRendering {
@@ -30,7 +30,7 @@ export function createCityRendering(
   const hemisphere = new THREE.HemisphereLight()
   const ambient = new THREE.AmbientLight()
   const sun = new THREE.DirectionalLight()
-  sun.position.set(-240, 280, 160)
+  sun.position.set(...CITY_SUN_POSITION)
   sun.target.position.set(0, 0, 20)
   sun.castShadow = true
   sun.shadow.mapSize.set(4096, 4096)
@@ -49,14 +49,10 @@ export function createCityRendering(
   rim.position.set(220, 160, -240)
   scene.add(hemisphere, ambient, sun, sun.target, rim, rim.target)
 
-  // A local, generated reflection environment gives glass and metal a surface
-  // without fetching an HDR asset or changing the educational scene's sky.
-  const room = new RoomEnvironment()
-  const generator = new THREE.PMREMGenerator(renderer)
-  const reflections = generator.fromScene(room, 0.025)
-  room.dispose()
-  generator.dispose()
-  scene.environment = reflections.texture
+  // Outdoor sky, horizon and soft sun reflections suit the campus architecture.
+  // Both themes are baked once, without fetching an HDR or drawing extra scenery.
+  const reflections = createCityReflections(renderer)
+  scene.environment = reflections.day
 
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.shadowMap.enabled = true
@@ -109,7 +105,8 @@ export function createCityRendering(
     sun.intensity = night ? 1.7 : 3.6
     rim.color.setHex(night ? 0x5b83ca : 0xb8d9ff)
     rim.intensity = night ? 0.7 : 0.65
-    scene.environmentIntensity = night ? 0.3 : 0.5
+    scene.environment = reflections[next]
+    scene.environmentIntensity = night ? 1.1 : 0.85
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = night ? 1.1 : 0.94
     occlusion.blendIntensity = night ? 0.6 : 0.85

@@ -5,8 +5,12 @@ import { describe, expect, it } from 'vitest'
 import { installTestDom } from '../../../test/dom'
 import { createTiDBSimulation } from '../model'
 import type { TraceEvent } from '../model/types'
+import { traceEventCopy } from './event-copy'
 import { createLockLabPanel } from './lock-lab'
-import { createTransactionLabPanel } from './transaction-lab'
+import {
+  createTransactionLabPanel,
+  type TransactionLabPanel,
+} from './transaction-lab'
 
 function detailedEvent(): TraceEvent {
   return {
@@ -133,7 +137,62 @@ function detailedEvent(): TraceEvent {
   }
 }
 
+function primaryCommitRecordEvent(): TraceEvent {
+  return {
+    ...detailedEvent(),
+    domain: 'kv',
+    kind: 'mvcc_primary_commit',
+    label: 'Publish the primary commit record',
+    detail: 'Region 0 removes the lock-CF entry and writes the commit record to write CF.',
+  }
+}
+
+function activeEventText(panel: TransactionLabPanel): string {
+  const metrics = panel.root.querySelectorAll<HTMLElement>(
+    '.tidb-transaction-lab__summary .tidb-transaction-lab__metric',
+  )
+  return metrics[2]?.querySelector('dd')?.textContent ?? ''
+}
+
 describe('Transaction Lab accessible projection', () => {
+  it('uses localized event-copy labels for both active and current events', () => {
+    const event = primaryCommitRecordEvent()
+
+    for (const locale of ['ja', 'en'] as const) {
+      installTestDom()
+      const panel = createTransactionLabPanel(locale)
+      const expected = traceEventCopy(event, locale).label
+
+      panel.update(event, [event])
+      expect(activeEventText(panel)).toBe(expected)
+      if (locale === 'ja') {
+        expect(activeEventText(panel)).not.toBe(event.label)
+        expect(panel.root.textContent).not.toContain(event.label)
+      }
+
+      panel.update(event)
+      expect(activeEventText(panel)).toBe(expected)
+      if (locale === 'ja') {
+        expect(activeEventText(panel)).not.toBe(event.label)
+        expect(panel.root.textContent).not.toContain(event.label)
+      }
+    }
+  })
+
+  it('does not mutate model event copy inputs while localizing statuses', () => {
+    const event = primaryCommitRecordEvent()
+    const before = structuredClone(event)
+    const panel = createTransactionLabPanel('ja')
+
+    panel.update(event, [event])
+
+    expect(event).toEqual(before)
+    expect(event.label).toBe('Publish the primary commit record')
+    expect(panel.root.textContent).toContain('Prewrite中')
+    expect(panel.root.textContent).toContain('Prewrite lock')
+    expect(panel.root.textContent).toContain('代表value')
+  })
+
   it('shows the same event snapshot as a keyboard and screen-reader friendly DOM view', () => {
     const dom = installTestDom()
     dom.mount('transaction-lab')

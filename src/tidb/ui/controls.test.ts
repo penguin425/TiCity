@@ -78,4 +78,26 @@ describe('TiCity controls', () => {
     expect(root.querySelector('[data-nav="diagnose"]')?.getAttribute('href')).toBe('diagnose/')
     expect(root.querySelector('[data-nav="github"]')?.getAttribute('href')).toContain('github.com')
   })
+
+  it('localizes choice labels while preserving model values as option values', () => {
+    const dom = installTestDom()
+    const root = dom.mount('city') as unknown as HTMLElement
+
+    mountCityUi(root, { locale: 'ja', showControls: true })
+
+    const distribution = root.querySelector<HTMLSelectElement>(
+      '[data-control="keyDistribution"]',
+    )!
+    expect(distribution.querySelector<HTMLOptionElement>('[value="uniform"]')?.textContent)
+      .toBe('均一')
+    expect(distribution.querySelector<HTMLOptionElement>('[value="sequential"]')?.textContent)
+      .toBe('連続')
+
+    const protocol = root.querySelector<HTMLSelectElement>(
+      '[data-control="commitProtocol"]',
+    )!
+    expect(protocol.querySelector<HTMLOptionElement>('[value="async_commit"]')?.textContent)
+      .toBe('Async Commit')
+    expect(protocol.value).toBe('auto')
+  })
 })

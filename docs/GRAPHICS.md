@@ -28,6 +28,15 @@ teal glass and brushed trim have distinct surface responses. Large masses and
 rack cabinets use dimension-aware bevels, so edges catch highlights without
 stretching the corner radius along a tall tower.
 
+Shared world-scale colour, roughness and bump maps add panel joints, fine grain
+and subtle glass variation without creating a material for each building.
+The reflection environment now describes an outdoor sky and perimeter horizon,
+not an indoor studio. Day and night HDR maps are generated locally, baked once,
+and reused when switching themes; the night fill preserves readable metal racks.
+Daytime data/control lines use normal blending so they remain visible on pale
+paving, while the night theme retains luminous additive routes. Direction arrows
+and endpoint markers still identify the selected transfer independently of colour.
+
 PD has a ribbed glass drum and layered terraces; TiFlash has framed glass ends,
 metal louvers, service rails and roof plant. Rack doors, bezels and roof vents
 remain aligned with the state-driven enclosures. These fittings are instanced,
@@ -57,15 +66,20 @@ and resolve small collisions near the building with short leader lines.
 
 ## Rendering boundaries
 
-- `world/layout.ts`: authored geography and Region height constants.
+- `world/layout.ts`: authored geography, including roads, gardens, trees, lamps,
+  deterministic skyline sites and Region height constants.
 - `world/geometry.ts`: shared primitives and static sibling batches that retain
   their selectable district parents, plus dimension-keyed beveled masses.
 - `world/building-detail.ts`, `world/region-peers.ts`: architectural fittings and
   the state-driven rack projection.
 - `world/environment-streets.ts`, `world/environment-skyline.ts`: instanced scenery.
 - `world/environment-surfaces.ts`: deterministic texture maps and world-scale UVs.
+- `world/architectural-surfaces.ts`: shared panel/grain maps and world-scale
+  architectural shading for regular and instanced meshes.
 - `engine/rendering.ts`: lighting, local reflection environment, cached shadows,
   multisampled desktop output, night bloom and resource disposal.
+- `engine/reflections.ts`: deterministic outdoor HDR radiance, cached day/night
+  PMREM environments and their disposal.
 - `engine/ambient-occlusion.ts`: half-resolution contact shading reconstructed
   from the colour pass's depth, without drawing the campus a second time.
 - `engine/lab-projections.ts`: exclusive projection of the six detailed labs.
@@ -84,9 +98,11 @@ leaves a short input-processing window before submitting the next one (at most
 resolution, materials, lighting or deterministic model steps.
 
 At a 1440 × 1000 Chromium software-WebGL viewport, the reviewed daytime overview
-used 159 draw calls, about 112,000 triangles and 58 uploaded geometries. The
-preceding polish used 168 calls, about 60,000 triangles and 49 geometries; the
-original overview used 225 calls, about 45,000 triangles and 182 geometries.
+used 159 draw calls, about 115,000 triangles and 58 uploaded geometries. Before
+the outdoor-reflection/surface correction, it used 159 calls and about 112,000
+triangles. The preceding polish used 168 calls, about 60,000 triangles and
+49 geometries; the original overview used 225 calls, about 45,000 triangles
+and 182 geometries.
 These are scene counters, not an FPS benchmark; camera framing, shadow updates,
 driver and selected lab affect the values. More visible detail increases triangle
 count while shared primitives and instancing reduce calls and buffers.
@@ -94,10 +110,10 @@ count while shared primitives and instancing reduce calls and buffers.
 The complete educational campus, including hidden labs, remains within 270 drawables,
 225 unique geometries and 55 shadow casters. The material ceiling is 72 to
 accommodate the separate instanced status lights and architectural glass.
-The reviewed overview's steady-frame triangle ceiling is deliberately increased
-from 80,000 to 140,000 for real bevels, facade bays and layered vegetation. Live
-frames that refresh the shadow map have a separate 180,000 ceiling (the reviewed
-refresh used 194 calls and about 149,000 triangles); the 280-call ceiling remains
+The v0.10.0 graphics upgrade raised the steady-frame triangle ceiling from
+80,000 to 140,000 for real bevels, facade bays and layered vegetation. Live
+frames that refresh the shadow map have a separate 180,000 ceiling. The current
+reflection/surface corrections keep these limits and the 280-call ceiling
 unchanged. Pixel fill cost also increases at desktop high DPI:
 these improvements trade some GPU work for visibly finer surfaces and shading,
 not a claim of faster frame rates.
@@ -108,6 +124,9 @@ transitions.
 Regression checks cover missing vertex colours, fixed rack footing, moving
 selection anchors, borrowed depth-buffer swaps, exactly-once disposal, reduced motion, portrait controls,
 offline operation and the existing model/cross-view invariants.
+Additional checks cover cached reflection reuse, theme-dependent route blending,
+unchanged scenery coordinates, Japanese/English event and selection copy, and
+mobile navigation back from Machine and Diagnose.
 
 Browser tests use one worker per machine because software WebGL rendering is
 CPU-heavy. CI and Pages validation split the complete suite across four
