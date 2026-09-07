@@ -49,6 +49,136 @@ export const DISTRICT_BOUNDS = {
 
 export type DistrictId = keyof typeof DISTRICT_BOUNDS
 
+export interface RoadSegment {
+  readonly x: number
+  readonly z: number
+  readonly width: number
+  readonly depth: number
+}
+
+/** Authored campus roads. Keep all street geography in this module. */
+export const ROAD_SEGMENTS = [
+  { x: 0, z: -339, width: 28, depth: 40 },
+  { x: 0, z: -251, width: 28, depth: 18 },
+  { x: 0, z: -188, width: 28, depth: 28 },
+  { x: 0, z: -25, width: 654, depth: 22 },
+  { x: 0, z: 155, width: 654, depth: 20 },
+  { x: 0, z: 286, width: 654, depth: 18 },
+  { x: -318, z: -12, width: 18, depth: 614 },
+  { x: 318, z: -12, width: 18, depth: 614 },
+] as const satisfies readonly RoadSegment[]
+
+export type GardenBed = readonly [x: number, z: number, width: number, depth: number]
+
+/** Empty campus planting blocks, authored alongside the other world bounds. */
+export const GARDEN_BEDS = [
+  [-222, -241, 132, 100], [-222, -109, 132, 86],
+  [224, -248, 132, 108], [139, -245, 20, 110],
+  [-106, 223, 94, 62], [106, 223, 94, 62],
+  [-75, 83, 12, 104], [75, 83, 12, 104],
+  [-269, 72, 43, 106], [269, 72, 43, 106],
+  [-158, -54, 204, 8], [117, -54, 132, 8],
+  [-104, 178, 88, 7], [102, 178, 96, 7],
+] as const satisfies readonly GardenBed[]
+
+function isClearOfDistrict(x: number, z: number, margin: number): boolean {
+  return !Object.values(DISTRICT_BOUNDS).some((bounds) =>
+    x >= bounds.minX - margin && x <= bounds.maxX + margin &&
+    z >= bounds.minZ - margin && z <= bounds.maxZ + margin,
+  )
+}
+
+/** Generate the fixed tree sites without coupling scenery to Three.js. */
+export function createTreePositions(): readonly Point3[] {
+  const trees: Point3[] = []
+  for (let x = -278; x <= 278; x += 46) {
+    if (Math.abs(x) > 32 && isClearOfDistrict(x, -54, 8)) trees.push([x, 0, -54])
+    if (Math.abs(x) > 32 && isClearOfDistrict(x + 8, 178, 8)) trees.push([x + 8, 0, 178])
+  }
+  // Small asymmetrical groves frame the approach, leaving its sightline open.
+  for (const [x, z] of [
+    [-268, -269], [-244, -269], [-257, -253], [-268, -238], [-175, -273], [-177, -207],
+    [-263, -130], [-244, -100], [-268, -82], [-176, -124],
+    [185, -283], [210, -282], [198, -269], [263, -282], [270, -244], [263, -213],
+    [-271, 35], [-271, 74], [-271, 112], [271, 36], [271, 77], [271, 114],
+    [-139, 237], [-127, 226], [-116, 237], [-73, 238], [74, 235], [85, 228], [110, 237], [140, 236],
+  ] as const) {
+    if (isClearOfDistrict(x, z, 8)) trees.push([x, 0, z])
+  }
+  return trees
+}
+
+export const TREE_POSITIONS = createTreePositions()
+
+/** Fixed lamp sites around the authored road perimeter. */
+export function createLampPositions(): readonly Point3[] {
+  const lamps: Point3[] = []
+  for (let x = -280; x <= 280; x += 40) lamps.push([x, 0, -39], [x, 0, 167])
+  for (let z = -300; z <= 260; z += 40) lamps.push([-304, 0, z], [304, 0, z])
+  return lamps
+}
+
+export const LAMP_POSITIONS = createLampPositions()
+
+export interface SkylinePlacement {
+  readonly x: number
+  readonly z: number
+  readonly rear: boolean
+  readonly sideIndex: number
+  /** Random samples retained here so the renderer keeps the historical stream exactly. */
+  readonly widthJitter: number
+  readonly depthJitter: number
+  readonly heightJitter: number
+  readonly valueJitter: number
+  readonly lowerFacadeJitter: number
+  readonly upperFacadeJitter: number
+}
+
+export const SKYLINE_RANDOM_SEED = 4_250
+export const SKYLINE_BUILDING_COUNT = 52
+export const SKYLINE_ROOFTOP_LIGHT_COUNT = 8
+
+/**
+ * Generate deterministic perimeter tower sites and their legacy random
+ * samples. Position formulas live here; architectural dimensions stay in the
+ * skyline renderer. Consuming every sample in the authored order keeps the
+ * existing silhouette and material variation bit-for-bit stable.
+ */
+export function createSkylinePlacements(seed = SKYLINE_RANDOM_SEED): readonly SkylinePlacement[] {
+  let value = seed >>> 0
+  const random = (): number => {
+    value = (Math.imul(value, 1_664_525) + 1_013_904_223) >>> 0
+    return value / 0x1_0000_0000
+  }
+  const placements: SkylinePlacement[] = []
+  for (let index = 0; index < SKYLINE_BUILDING_COUNT; index++) {
+    const rear = index < 18
+    const sideIndex = index - 18
+    const xJitter = random()
+    const zJitter = random()
+    const x = rear
+      ? (index < 9 ? -1 : 1) * (40 + (index % 9) * 34 + xJitter * 4)
+      : (sideIndex < 17 ? -1 : 1) * (341 + xJitter * 4)
+    const z = rear
+      ? -344 + zJitter * 3
+      : -297 + (sideIndex % 17) * 37.5 + zJitter * 4
+    const widthJitter = random()
+    const depthJitter = random()
+    const heightJitter = random()
+    const valueJitter = random()
+    const lowerFacadeJitter = random()
+    const upperFacadeJitter = random()
+    placements.push({
+      x, z, rear, sideIndex,
+      widthJitter, depthJitter, heightJitter, valueJitter,
+      lowerFacadeJitter, upperFacadeJitter,
+    })
+  }
+  return placements
+}
+
+export const SKYLINE_PLACEMENTS = createSkylinePlacements()
+
 export const TIKV_BOUNDS: readonly PlanBounds[] = [
   DISTRICT_BOUNDS.tikv0,
   DISTRICT_BOUNDS.tikv1,

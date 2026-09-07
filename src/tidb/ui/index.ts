@@ -25,8 +25,10 @@ import { TOUR_CHAPTERS, tourChapter } from './tour'
 
 export {
   CATALOG,
+  type CityCopy,
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
+  type NavigationMessages,
   isLocale,
   message,
   persistLocale,
@@ -81,6 +83,22 @@ export {
 } from './sql'
 export { CITY_UI_CSS, installCityUiStyles } from './styles'
 export { TOUR_CHAPTERS, tourChapter, type TourChapter } from './tour'
+export {
+  TRACE_EVENT_KINDS,
+  eventCopy,
+  getTraceEventCopy,
+  traceDomainLabel,
+  traceEndpointLabel,
+  traceEventCopy,
+  type TraceEventCopy,
+  type TraceEventCopyInput,
+} from './event-copy'
+export {
+  MODEL_DISCLOSURE,
+  projectCityComponent,
+  type CityComponentCopy,
+} from './component-copy'
+export { selectionCopy, type CitySelectionCopy } from './selection-copy'
 
 export interface CityUiSimulation {
   readonly state?: {
@@ -263,12 +281,12 @@ export function mountCityUi(root: HTMLElement, options: CityUiOptions): CityUiHa
 
     const navigation = element('nav', {
       className: 'tidb-navigation',
-      attrs: { 'aria-label': locale === 'ja' ? '関連画面' : 'Related surfaces' },
+      attrs: { 'aria-label': CATALOG[locale].navigation.relatedSurfaces },
     })
     const links = [
-      ['machine', 'Machine', options.machineHref ?? 'machine/'],
-      ['diagnose', 'Diagnose', options.diagnoseHref ?? 'diagnose/'],
-      ['github', 'GitHub', options.githubHref ?? 'https://github.com/penguin425/TiCity/'],
+      ['machine', CATALOG[locale].navigation.machine, options.machineHref ?? 'machine/'],
+      ['diagnose', CATALOG[locale].navigation.diagnose, options.diagnoseHref ?? 'diagnose/'],
+      ['github', CATALOG[locale].navigation.source, options.githubHref ?? 'https://github.com/penguin425/TiCity/'],
     ] as const
     for (const [id, label, href] of links) {
       navigation.append(element('a', {

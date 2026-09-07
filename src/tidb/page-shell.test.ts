@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { installTestDom } from '../../test/dom'
-import { createNavigation, prepareDocument } from './page-shell'
+import { applyTheme, createNavigation, prepareDocument } from './page-shell'
 
 describe('TiDB page shell navigation', () => {
   it('identifies every destination so responsive navigation can select it', () => {
@@ -15,6 +15,8 @@ describe('TiDB page shell navigation', () => {
     expect(navigation.root.querySelector('[data-nav="diagnose"]')).not.toBeNull()
     expect(navigation.root.querySelector('[data-nav="github"]')).not.toBeNull()
     expect(navigation.root.querySelector('[data-nav="theme"]')).not.toBeNull()
+    expect(navigation.root.querySelector('[data-nav="city"]')?.textContent).toBe('3D俯瞰')
+    expect(navigation.root.querySelector('[data-nav="machine"]')?.textContent).toBe('2D構成図')
 
     navigation.setLocale('en')
     expect(navigation.root.querySelector('[data-nav="city"]')?.textContent).toBe('3D City')
@@ -56,5 +58,26 @@ describe('TiDB page shell navigation', () => {
 
     prepareDocument('ja')
     expect(skip.textContent).toBe('メインコンテンツへ移動')
+  })
+
+  it('refreshes the next-theme label and pressed state after an external theme change', () => {
+    installTestDom()
+    applyTheme('day')
+    const navigation = createNavigation('city', 'ja')
+    const originalMachineLink = navigation.root.querySelector('[data-nav="machine"]')
+    expect(navigation.themeButton.getAttribute('aria-label')).toBe('夜テーマに切り替える')
+
+    applyTheme('night')
+    navigation.syncTheme()
+    expect(navigation.themeButton.textContent).toBe('☀ 昼')
+    expect(navigation.themeButton.getAttribute('aria-pressed')).toBe('true')
+    expect(navigation.root.querySelector('[data-nav="machine"]')).toBe(originalMachineLink)
+
+    navigation.setLocale('en')
+    expect(navigation.themeButton.getAttribute('aria-label')).toBe('Switch to day theme')
+    applyTheme('day')
+    navigation.syncTheme()
+    expect(navigation.themeButton.textContent).toBe('☾ Night')
+    expect(navigation.themeButton.getAttribute('aria-pressed')).toBe('false')
   })
 })

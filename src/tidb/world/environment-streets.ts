@@ -7,26 +7,16 @@
  */
 
 import * as THREE from 'three'
-import { DISTRICT_BOUNDS } from './layout'
+import {
+  GARDEN_BEDS,
+  LAMP_POSITIONS,
+  ROAD_SEGMENTS,
+  TREE_POSITIONS,
+} from './layout'
 import type { Point3 } from './layout'
 
-interface RoadSegment {
-  readonly x: number
-  readonly z: number
-  readonly width: number
-  readonly depth: number
-}
-
-export const ROAD_SEGMENTS: readonly RoadSegment[] = [
-  { x: 0, z: -339, width: 28, depth: 40 },
-  { x: 0, z: -251, width: 28, depth: 18 },
-  { x: 0, z: -188, width: 28, depth: 28 },
-  { x: 0, z: -25, width: 654, depth: 22 },
-  { x: 0, z: 155, width: 654, depth: 20 },
-  { x: 0, z: 286, width: 654, depth: 18 },
-  { x: -318, z: -12, width: 18, depth: 614 },
-  { x: 318, z: -12, width: 18, depth: 614 },
-] as const
+// Keep the historical import path stable for environment.ts and integrations.
+export { ROAD_SEGMENTS } from './layout'
 
 interface CampusMaterials {
   readonly road: THREE.MeshStandardMaterial
@@ -109,13 +99,6 @@ function createCanopyGeometry(): THREE.BufferGeometry {
   }
   geometry.computeVertexNormals()
   return geometry
-}
-
-function isClearOfDistrict(x: number, z: number, margin: number): boolean {
-  return !Object.values(DISTRICT_BOUNDS).some((bounds) =>
-    x >= bounds.minX - margin && x <= bounds.maxX + margin &&
-    z >= bounds.minZ - margin && z <= bounds.maxZ + margin,
-  )
 }
 
 /** Soft elliptical street-lamp spill, baked locally without point lights. */
@@ -209,15 +192,7 @@ export function createCampusStreets(materials: CampusMaterials): THREE.Group {
   }
 
   // Low garden beds occupy the empty campus blocks and preserve all districts.
-  const beds = [
-    [-222, -241, 132, 100], [-222, -109, 132, 86],
-    [224, -248, 132, 108], [139, -245, 20, 110],
-    [-106, 223, 94, 62], [106, 223, 94, 62],
-    [-75, 83, 12, 104], [75, 83, 12, 104],
-    [-269, 72, 43, 106], [269, 72, 43, 106],
-    [-158, -54, 204, 8], [117, -54, 132, 8],
-    [-104, 178, 88, 7], [102, 178, 96, 7],
-  ] as const
+  const beds = GARDEN_BEDS
   const grass: BoxInstance[] = []
   const planterRims: BoxInstance[] = []
   const woodwork: BoxInstance[] = []
@@ -312,21 +287,7 @@ export function createCampusStreets(materials: CampusMaterials): THREE.Group {
     }
   }
 
-  const trees: Point3[] = []
-  for (let x = -278; x <= 278; x += 46) {
-    if (Math.abs(x) > 32 && isClearOfDistrict(x, -54, 8)) trees.push([x, 0, -54])
-    if (Math.abs(x) > 32 && isClearOfDistrict(x + 8, 178, 8)) trees.push([x + 8, 0, 178])
-  }
-  // Small asymmetrical groves frame the approach, leaving its sightline open.
-  for (const [x, z] of [
-    [-268, -269], [-244, -269], [-257, -253], [-268, -238], [-175, -273], [-177, -207],
-    [-263, -130], [-244, -100], [-268, -82], [-176, -124],
-    [185, -283], [210, -282], [198, -269], [263, -282], [270, -244], [263, -213],
-    [-271, 35], [-271, 74], [-271, 112], [271, 36], [271, 77], [271, 114],
-    [-139, 237], [-127, 226], [-116, 237], [-73, 238], [74, 235], [85, 228], [110, 237], [140, 236],
-  ]) {
-    if (isClearOfDistrict(x, z, 8)) trees.push([x, 0, z])
-  }
+  const trees = TREE_POSITIONS
 
   const trunks: BoxInstance[] = []
   const crowns: BoxInstance[] = [...lowPlants]
@@ -360,9 +321,7 @@ export function createCampusStreets(materials: CampusMaterials): THREE.Group {
       },
     )
   }
-  const lampPositions: Point3[] = []
-  for (let x = -280; x <= 280; x += 40) lampPositions.push([x, 0, -39], [x, 0, 167])
-  for (let z = -300; z <= 260; z += 40) lampPositions.push([-304, 0, z], [304, 0, z])
+  const lampPositions = LAMP_POSITIONS
   for (const [x, , z] of lampPositions) trunks.push({
     position: [x, 4.3, z], size: [0.48, 8.3 / 6.4, 0.48],
   })

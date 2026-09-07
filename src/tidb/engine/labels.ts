@@ -18,6 +18,7 @@ import { placeCityLabels, type CityLabelPlacement } from './label-layout'
 
 export interface CityLabels {
   setMode(mode: CityViewMode): void
+  setLocale(locale: Locale): void
   update(force?: boolean): void
   dispose(): void
 }
@@ -60,6 +61,7 @@ export function createCityLabels(
   container: HTMLElement,
   camera: THREE.PerspectiveCamera,
   city: TiDBSceneGraph,
+  initialLocale?: Locale,
 ): CityLabels {
   const root = document.createElement('div')
   root.className = 'tidb-world-labels'
@@ -67,7 +69,8 @@ export function createCityLabels(
   container.appendChild(root)
 
   const entries: LabelEntry[] = []
-  let locale: Locale = document.documentElement.lang === 'en' ? 'en' : 'ja'
+  let followDocumentLocale = initialLocale === undefined
+  let locale: Locale = initialLocale ?? (document.documentElement.lang === 'en' ? 'en' : 'ja')
   for (const spec of LABELS) {
     const component = city.registry.get(spec.id)
     if (!component) continue
@@ -105,16 +108,22 @@ export function createCityLabels(
   const lastCameraQuaternion = new THREE.Quaternion(0, 0, 0, 0)
   let hidden = false
 
+  function applyLocale(next: Locale): void {
+    if (next === locale) return
+    locale = next
+    for (const entry of entries) {
+      entry.name.textContent = CITY_LABEL_COPY[locale][entry.spec.id].name
+      entry.detail.textContent = CITY_LABEL_COPY[locale][entry.spec.id].detail
+    }
+    measuresDirty = true
+    update(true)
+  }
+
   // The page shell writes html.lang and data-theme on every language/theme
   // change. Observe these explicit signals, never measure DOM every frame.
   const appearanceObserver = new MutationObserver(() => {
-    const next: Locale = document.documentElement.lang === 'en' ? 'en' : 'ja'
-    if (next !== locale) {
-      locale = next
-      for (const entry of entries) {
-        entry.name.textContent = CITY_LABEL_COPY[locale][entry.spec.id].name
-        entry.detail.textContent = CITY_LABEL_COPY[locale][entry.spec.id].detail
-      }
+    if (followDocumentLocale) {
+      applyLocale(document.documentElement.lang === 'en' ? 'en' : 'ja')
     }
     measuresDirty = true
     update(true)
@@ -193,6 +202,10 @@ export function createCityLabels(
 
   update(true)
   return {
+    setLocale(next: Locale): void {
+      followDocumentLocale = false
+      applyLocale(next)
+    },
     setMode(mode: CityViewMode): void {
       hidden = mode === 'walk'
       root.hidden = hidden

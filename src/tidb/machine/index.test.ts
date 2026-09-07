@@ -62,6 +62,37 @@ describe('TiCity Machine replay', () => {
     expect(root.textContent).toContain('再生できるイベントはありません')
   })
 
+  it('renders localized event copy, Japanese ARIA, status, and lane count', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine')
+    const receipt = createTiDBSimulation({ seed: 425 }).runScenario('point-read')
+    const event = receipt.events.find((candidate) => candidate.kind === 'snapshot_ts')
+    if (!event) throw new Error('Expected snapshot_ts event')
+
+    mountMachine(root as unknown as HTMLElement, {
+      locale: 'ja',
+      receipt,
+      initialEventId: event.id,
+    })
+
+    const timeline = root.querySelector('.tidb-machine__svg')
+    expect(timeline?.getAttribute('aria-label')).toBe('TiDB traceの層別タイムライン')
+    const current = root.querySelector(`[data-event-id="${event.id}"]`)
+    expect(current?.getAttribute('aria-current')).toBe('step')
+    expect(current?.getAttribute('aria-label')).toContain('PDがスナップショットTSOを割り当て')
+    expect(current?.getAttribute('aria-label')).toContain('状態: 成功')
+    expect(current?.getAttribute('aria-label')).not.toContain(event.label)
+    expect(root.querySelector('.tidb-machine__detail h2')?.textContent)
+      .toBe('PDがスナップショットTSOを割り当て')
+    expect(root.querySelector('.tidb-machine__status')?.textContent).toBe('状態: 成功')
+    expect(root.querySelector('[data-detail-event-kind="snapshot_ts"] dd')?.textContent)
+      .toBe('PDがスナップショットTSOを割り当て')
+    expect(root.querySelector('[data-lane="tso"] .tidb-machine__lane-count')
+      ?.getAttribute('aria-label')).toBe('1件のイベント')
+    expect(root.querySelector('.tidb-machine__progress-text')?.textContent)
+      .toBe(`4 / ${receipt.events.length}`)
+  })
+
   it('exposes failed and warning events visually and accessibly', () => {
     const dom = installTestDom()
     const root = dom.mount('machine')

@@ -4,6 +4,10 @@
  */
 
 import * as THREE from 'three'
+import {
+  applyArchitecturalSurface,
+  createArchitecturalSurfaces,
+} from './architectural-surfaces'
 
 export type CityTheme = 'day' | 'night'
 export type SemanticDomain =
@@ -197,6 +201,17 @@ export function createCityMaterials(): CityMaterials {
     metalness: 0,
   })
 
+  // Keep the public palette small: architectural variation is carried by
+  // shared local maps on these existing five materials rather than by adding
+  // per-building materials.  World-space projection keeps panel seams and
+  // grain aligned across both regular meshes and detail InstancedMesh batches.
+  const architecturalSurfaces = createArchitecturalSurfaces()
+  applyArchitecturalSurface(structure, architecturalSurfaces.concrete, 8, 0.11)
+  applyArchitecturalSurface(darkStructure, architecturalSurfaces.metal, 5, 0.075)
+  applyArchitecturalSurface(glass, architecturalSurfaces.glass, 9, 0.018)
+  applyArchitecturalSurface(window, architecturalSurfaces.window, 7, 0.016)
+  applyArchitecturalSurface(trim, architecturalSurfaces.metal, 2.8, 0.055)
+
   const all: readonly THREE.Material[] = [
     structure,
     darkStructure,
@@ -221,6 +236,7 @@ export function createCityMaterials(): CityMaterials {
 
   let currentTheme: CityTheme = 'night'
   let networkEmphasis = false
+  let disposed = false
 
   function applyNetworkOpacity(): void {
     const opacity = NETWORK_OPACITY[currentTheme]
@@ -238,13 +254,16 @@ export function createCityMaterials(): CityMaterials {
     structure.color.setHex(night ? 0x69818c : 0xd2d1c7)
     darkStructure.color.setHex(night ? 0x203647 : 0x253e4b)
     pavement.color.setHex(night ? 0x293e50 : 0x8b9595)
-    glass.color.setHex(night ? 0x42647a : 0x16485e)
+    // The old daytime 0x16485e glass read as an almost opaque navy box.  Keep
+    // the semantic cool palette, but lift the base so local reflections and
+    // the generated panel variation can be seen in a bright campus scene.
+    glass.color.setHex(night ? 0x42647a : 0x4c7f8e)
     glass.emissive.setHex(night ? 0x1e6d96 : 0x000000)
     glass.emissiveIntensity = night ? 0.25 : 0
-    window.color.setHex(night ? 0xb4cfd5 : 0x28586a)
+    window.color.setHex(night ? 0xb4cfd5 : 0x7ca9af)
     window.emissive.setHex(night ? 0xb0d6de : 0x000000)
     window.emissiveIntensity = night ? 0.7 : 0
-    trim.color.setHex(night ? 0x91a7b6 : 0xb4bec0)
+    trim.color.setHex(night ? 0x91a7b6 : 0xb9c0bb)
     edge.color.setHex(night ? 0x5ccff0 : 0x324b5a)
     edge.opacity = night ? 0.18 : 0.15
     ground.color.setHex(night ? 0x07101a : 0x919fa7)
@@ -272,6 +291,16 @@ export function createCityMaterials(): CityMaterials {
     dataLine.color.setHex(palette.sql)
     controlLine.color.setHex(palette.tso)
     htapLine.color.setHex(palette.tiflash)
+    // Additive lines are legible against the dark night ground, but they
+    // saturate on the bright daytime campus.  Switch the three data/control
+    // route materials as a group whenever the theme changes.
+    const networkBlending = night ? THREE.AdditiveBlending : THREE.NormalBlending
+    dataLine.blending = networkBlending
+    controlLine.blending = networkBlending
+    htapLine.blending = networkBlending
+    dataLine.needsUpdate = true
+    controlLine.needsUpdate = true
+    htapLine.needsUpdate = true
     applyNetworkOpacity()
   }
 
@@ -304,7 +333,10 @@ export function createCityMaterials(): CityMaterials {
       applyNetworkOpacity()
     },
     dispose(): void {
+      if (disposed) return
+      disposed = true
       for (const material of all) material.dispose()
+      architecturalSurfaces.dispose()
     },
   }
 }

@@ -7,6 +7,8 @@ import * as THREE from 'three'
 import type { CityComponent, TiDBSceneGraph } from '../world/city'
 import { SEMANTIC_COLORS } from '../world/palette'
 import type { CityTheme } from '../world/palette'
+import type { Locale } from '../ui/catalog'
+import { MODEL_DISCLOSURE, selectionCopy } from '../ui/selection-copy'
 
 export interface CityPicker {
   readonly object: THREE.Group
@@ -15,6 +17,7 @@ export interface CityPicker {
   pick(clientX: number, clientY: number): CityComponent | null
   resize(): void
   update(): void
+  setLocale(locale: Locale): void
   setTheme(theme: CityTheme): void
   dispose(): void
 }
@@ -24,6 +27,7 @@ export interface CityPickerOptions {
   readonly container: HTMLElement
   readonly camera: THREE.PerspectiveCamera
   readonly city: TiDBSceneGraph
+  readonly locale?: Locale
   readonly onSelect?: (component: CityComponent | null) => void
 }
 
@@ -58,16 +62,29 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
   label.className = 'ticity-selection-label'
   label.setAttribute('role', 'status')
   label.setAttribute('aria-live', 'polite')
+  const labelName = document.createElement('strong')
+  labelName.className = 'ticity-selection-label__name'
+  const labelDisclosure = document.createElement('small')
+  labelDisclosure.className = 'ticity-selection-label__disclosure'
+  labelDisclosure.setAttribute('aria-hidden', 'true')
+  label.append(labelName, labelDisclosure)
   label.style.cssText =
-    'position:absolute;display:none;z-index:20;max-width:270px;padding:8px 10px;' +
+    'position:absolute;display:none;z-index:20;max-width:270px;padding:5px 8px;' +
     'border:1px solid currentColor;border-radius:6px;background:rgba(6,14,24,.9);' +
     'color:#f7fbff;font:600 12px/1.35 system-ui,sans-serif;pointer-events:none;' +
-    'transform:translate(-50%,-115%);white-space:normal'
+    'transform:translate(-50%,-115%);white-space:normal;gap:2px'
+  labelName.style.display = 'block'
+  labelDisclosure.style.cssText =
+    'display:inline-block;padding:1px 4px;border:1px solid currentColor;border-radius:3px;' +
+    'font:600 8px/1.2 ui-monospace,monospace;letter-spacing:.04em;opacity:.9;white-space:nowrap'
   container.appendChild(label)
 
   let selected: CityComponent | null = null
   let selectedRole = ''
   let selectedDomain = ''
+  let selectedPeerRole: CityComponent['peerRole']
+  let locale: Locale = options.locale
+    ?? (document.documentElement.lang === 'en' ? 'en' : 'ja')
   let downX = 0
   let downY = 0
   let downPointer = -1
@@ -84,20 +101,44 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
     rectHeight = Math.max(1, rect.height)
   }
 
+  function syncSelectionCopy(force = false): boolean {
+    if (!selected) return false
+    const changed = force ||
+      selected.role !== selectedRole ||
+      selected.domain !== selectedDomain ||
+      selected.peerRole !== selectedPeerRole
+    if (!changed) return false
+    const projection = selectionCopy(locale, selected)
+    labelName.textContent = projection.visibleLabel
+    labelDisclosure.textContent = projection.disclosure
+    label.setAttribute('aria-label', projection.ariaLabel)
+    label.setAttribute('data-model-disclosure', MODEL_DISCLOSURE)
+    selectedRole = selected.role
+    selectedDomain = selected.domain
+    selectedPeerRole = selected.peerRole
+    return true
+  }
+
   function select(id: string | null): CityComponent | null {
     selected = id ? city.registry.get(id) ?? null : null
     city.setFocus(selected?.id ?? null)
     ring.visible = selected !== null
-    label.style.display = selected ? 'block' : 'none'
+    label.style.display = selected ? 'grid' : 'none'
     if (selected) {
       ring.position.copy(selected.anchor)
       ring.position.y += 0.75
-      label.textContent = selected.name
-      label.setAttribute('aria-label', `${selected.name} — ${selected.role}`)
-      selectedRole = selected.role
-      selectedDomain = selected.domain
+      selectedRole = ''
+      selectedDomain = ''
+      selectedPeerRole = undefined
+      syncSelectionCopy(true)
     } else {
-      label.textContent = ''
+      labelName.textContent = ''
+      labelDisclosure.textContent = ''
+      label.removeAttribute('aria-label')
+      label.removeAttribute('data-model-disclosure')
+      selectedRole = ''
+      selectedDomain = ''
+      selectedPeerRole = undefined
     }
     options.onSelect?.(selected)
     return selected
@@ -141,10 +182,7 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
     if (!selected) return
     ring.position.copy(selected.anchor)
     ring.position.y += 0.75
-    if (selected.role !== selectedRole || selected.domain !== selectedDomain) {
-      selectedRole = selected.role
-      selectedDomain = selected.domain
-      label.setAttribute('aria-label', `${selected.name} — ${selected.role}`)
+    if (syncSelectionCopy()) {
       options.onSelect?.(selected)
     }
     _projected.copy(selected.anchor).project(camera)
@@ -168,6 +206,14 @@ export function createCityPicker(options: CityPickerOptions): CityPicker {
     pick,
     resize,
     update,
+    setLocale(next: Locale): void {
+      if (locale === next) return
+      locale = next
+      if (selected) {
+        syncSelectionCopy(true)
+        options.onSelect?.(selected)
+      }
+    },
     setTheme(theme: CityTheme): void {
       ringMaterial.color.setHex(SEMANTIC_COLORS[theme].return)
       label.style.background = theme === 'night' ? 'rgba(6,14,24,.9)' : 'rgba(247,250,252,.94)'

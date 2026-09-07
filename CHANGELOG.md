@@ -6,6 +6,23 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-09-07
+
+- Make daytime data/control routes readable with theme-appropriate blending,
+  and replace indoor studio reflections with cached, locally generated outdoor
+  day/night radiance that keeps glass, metal and Region racks legible.
+- Add world-scale architectural panel, grain and roughness maps plus roof-plant
+  details without adding scene drawables or changing the campus topology.
+- Localize component selection, trace events, playback/control choices and
+  accessibility labels; keep the model-disclosure text and mobile return links.
+- Match displayed Region IDs to the model, synchronize locale and theme controls,
+  and retain protocol-, GC-round- and replica-specific details in translated traces.
+- Centralize scenery geography in `world/layout.ts` while preserving the
+  existing road, garden, tree, lamp and skyline coordinates.
+- Refresh the graphics reference captures and add localization, reflection and
+  high-DPI browser coverage. The deterministic model remains `tidb-v8.5-model-7`;
+  the withdrawn experimental City view remains excluded.
+
 ## [0.10.0] — 2026-09-07
 
 - Rebuild the campus graphics with layered architecture, visible Region racks,

@@ -2802,8 +2802,12 @@ a {
 
   .tidb-wordmark small,
   .tidb-top-actions .optional,
-  .tidb-top-actions [data-nav="github"],
-  .tidb-top-actions [data-nav="city"] {
+  .tidb-top-actions [data-nav="github"] {
+    display: none;
+  }
+
+  /* Keep the route back to the 3D overview visible on Machine/Diagnose. */
+  .tidb-top-actions [data-nav="city"][aria-current="page"] {
     display: none;
   }
 

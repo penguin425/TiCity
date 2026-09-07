@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  CommitProtocol,
+  KeyDistribution,
   PlaybackMode,
+  ReadPolicy,
   ScenarioId,
   TiDBControls,
+  TransactionMode,
 } from '../model/types'
 import type { Locale } from './catalog'
 import { element } from './dom'
@@ -38,6 +42,13 @@ interface ControlCopy {
   playbackSpeed: string
   paused: string
   playback: string
+  choices: {
+    keyDistribution: Readonly<Record<KeyDistribution, string>>
+    transactionMode: Readonly<Record<TransactionMode, string>>
+    commitProtocol: Readonly<Record<CommitProtocol, string>>
+    readPolicy: Readonly<Record<ReadPolicy, string>>
+    playback: Readonly<Record<PlaybackMode, string>>
+  }
   running: string
   pointRead: string
   crossRegionTransaction: string
@@ -56,15 +67,15 @@ export const CONTROL_COPY: Record<Locale, ControlCopy> = {
     scenarios: 'ガイドシナリオ',
     controls: '負荷と分散設定',
     qps: 'QPS',
-    writeRatio: 'write比率',
-    keyDistribution: 'key分布',
-    transactionMode: 'transaction mode',
-    commitProtocol: 'commit protocol',
-    readPolicy: 'read policy',
-    regionSplitThresholdMiB: 'Region split閾値',
-    gcLifetimeSeconds: 'GC lifetime',
-    networkLatencyMs: 'network latency',
-    tiflashLagSeconds: 'TiFlash lag',
+    writeRatio: '書き込み比率',
+    keyDistribution: 'キー分布',
+    transactionMode: 'トランザクションモード',
+    commitProtocol: 'コミットプロトコル',
+    readPolicy: '読み取りポリシー',
+    regionSplitThresholdMiB: 'Region分割閾値',
+    gcLifetimeSeconds: 'GC保持期間',
+    networkLatencyMs: 'ネットワーク遅延',
+    tiflashLagSeconds: 'TiFlash遅延',
     playbackSpeed: '再生速度',
     paused: '一時停止',
     playback: '再生モード',
@@ -78,6 +89,18 @@ export const CONTROL_COPY: Record<Locale, ControlCopy> = {
     tikvFailover: 'TiKV failover',
     gcSafePoint: 'GC safe point',
     tiflashMpp: 'TiFlash MPP',
+    choices: {
+      keyDistribution: { uniform: '均一', sequential: '連続' },
+      transactionMode: { pessimistic: '悲観的', optimistic: '楽観的' },
+      commitProtocol: {
+        auto: '自動',
+        '1pc': '1PC',
+        async_commit: 'Async Commit',
+        '2pc': '2PC',
+      },
+      readPolicy: { leader: 'Leader', follower: 'Follower' },
+      playback: { step: 'ステップ', slow: '低速再生', live: 'ライブ' },
+    },
   },
   en: {
     title: 'Simulation controls',
@@ -106,10 +129,33 @@ export const CONTROL_COPY: Record<Locale, ControlCopy> = {
     tikvFailover: 'TiKV failover',
     gcSafePoint: 'GC safe point',
     tiflashMpp: 'TiFlash MPP',
+    choices: {
+      keyDistribution: { uniform: 'Uniform', sequential: 'Sequential' },
+      transactionMode: { pessimistic: 'Pessimistic', optimistic: 'Optimistic' },
+      commitProtocol: {
+        auto: 'Automatic',
+        '1pc': '1PC',
+        async_commit: 'Async Commit',
+        '2pc': '2PC',
+      },
+      readPolicy: { leader: 'Leader', follower: 'Follower' },
+      playback: { step: 'Step', slow: 'Slow', live: 'Live' },
+    },
   },
 }
 
-const SCENARIO_COPY_KEYS: Record<ScenarioId, keyof ControlCopy> = {
+type ScenarioCopyKey =
+  | 'pointRead'
+  | 'crossRegionTransaction'
+  | 'optimisticConflict'
+  | 'lockDeadlock'
+  | 'commitProtocols'
+  | 'hotspotSplit'
+  | 'tikvFailover'
+  | 'gcSafePoint'
+  | 'tiflashMpp'
+
+const SCENARIO_COPY_KEYS: Record<ScenarioId, ScenarioCopyKey> = {
   'point-read': 'pointRead',
   'cross-region-transaction': 'crossRegionTransaction',
   'optimistic-conflict': 'optimisticConflict',
@@ -182,6 +228,19 @@ const CHOICE_SPECS: readonly {
   { key: 'readPolicy', choices: ['leader', 'follower'] },
 ]
 
+function choiceLabel(copy: ControlCopy, key: ChoiceKey, choice: string): string {
+  switch (key) {
+    case 'keyDistribution':
+      return copy.choices.keyDistribution[choice as KeyDistribution]
+    case 'transactionMode':
+      return copy.choices.transactionMode[choice as TransactionMode]
+    case 'commitProtocol':
+      return copy.choices.commitProtocol[choice as CommitProtocol]
+    case 'readPolicy':
+      return copy.choices.readPolicy[choice as ReadPolicy]
+  }
+}
+
 export function createControlPanel(
   locale: Locale,
   bridge: CityControlBridge = {},
@@ -251,7 +310,10 @@ export function createControlPanel(
       attrs: { 'data-control': spec.key, 'aria-label': copy[spec.key] },
     })
     for (const choice of spec.choices) {
-      select.append(element('option', { text: choice, attrs: { value: choice } }))
+      select.append(element('option', {
+        text: choiceLabel(copy, spec.key, choice),
+        attrs: { value: choice },
+      }))
     }
     select.value = String(values[spec.key])
     select.addEventListener('change', () => {
@@ -288,7 +350,10 @@ export function createControlPanel(
     attrs: { 'data-control': 'playback', 'aria-label': copy.playback },
   })
   for (const mode of ['step', 'slow', 'live'] as const) {
-    playback.append(element('option', { text: mode, attrs: { value: mode } }))
+    playback.append(element('option', {
+      text: copy.choices.playback[mode],
+      attrs: { value: mode },
+    }))
   }
   playback.value = bridge.playback ?? 'slow'
   playback.addEventListener('change', () => {
