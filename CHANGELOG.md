@@ -6,6 +6,15 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-10-05
+
+- Require Node.js 26 or later for local development and update CI, GitHub Pages,
+  and release workflows to Node.js 26.
+- Explicitly approve the locked esbuild 0.28.1 install script for newer npm
+  versions while preserving existing dependency resolutions.
+- Update bilingual development requirements. The deterministic educational
+  model remains `tidb-v8.5-model-7`.
+
 ## [0.10.1] — 2026-09-07
 
 - Make daytime data/control routes readable with theme-appropriate blending,
