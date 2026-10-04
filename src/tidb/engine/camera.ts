@@ -35,8 +35,8 @@ export interface CityCameraOptions {
 }
 
 export const CITY_ORBIT = {
-  homePosition: [235, 525, 835],
-  target: [0, 14, 30],
+  homePosition: [290, 420, 850],
+  target: [0, 20, 25],
   fov: 38,
   minDistance: 24,
   maxDistance: 2_400,

@@ -185,17 +185,17 @@ export const TIKV_BOUNDS: readonly PlanBounds[] = [
   DISTRICT_BOUNDS.tikv2,
 ] as const
 
-/** Shared construction datums for the storage decks and their mounted racks. */
+/** Open service story below each independent store's rack deck. */
 export const TIKV_ARCHITECTURE = {
   deckWidth: 100,
-  deckHeight: 5,
-  deckCenterY: 2.9,
-  deckTop: 5.4,
+  deckHeight: 2.4,
+  deckCenterY: 22,
+  deckTop: 23.2,
   peerWidth: 8.4,
-  peerHeight: 7.2,
+  peerHeight: 10.2,
   peerDepth: 7.2,
-  peerFootY: 5.55,
-  raftPortY: 6.3,
+  peerFootY: 23.35,
+  raftPortY: 24.1,
 } as const
 
 /** Elevated overlay origin for the selected two-Region internal cutaway. */
@@ -238,16 +238,16 @@ export const COMPONENT_ANCHORS = {
   'client.terminal': [0, 3, -288],
   'tiproxy.0': [-34, 7, -220],
   'tiproxy.1': [34, 7, -220],
-  'tidb.0': [-74, 18, -132],
-  'tidb.1': [0, 18, -132],
-  'tidb.2': [74, 18, -132],
+  'tidb.0': [-74, 30, -132],
+  'tidb.1': [0, 30, -132],
+  'tidb.2': [74, 30, -132],
   'pd.0': [206, 8, -128],
   'pd.1': [267, 8, -107],
   'pd.2': [228, 8, -64],
   'pd.control': [232, 4, -102],
-  'tikv.0': [-150, 5, 84],
-  'tikv.1': [0, 5, 84],
-  'tikv.2': [150, 5, 84],
+  'tikv.0': [-150, TIKV_ARCHITECTURE.deckTop, 84],
+  'tikv.1': [0, TIKV_ARCHITECTURE.deckTop, 84],
+  'tikv.2': [150, TIKV_ARCHITECTURE.deckTop, 84],
   'gc.yard': [-231, 5, 215],
   'tiflash.0': [230, 14, 216],
 } as const satisfies Record<string, Point3>

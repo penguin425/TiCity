@@ -6,6 +6,13 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+- Rework the campus massing around three raised TiKV rack decks with open
+  service floors, braced supports and visible cooling machinery; preserve
+  Region selection, role markers and the deterministic educational model.
+- Give the SQL buildings rectangular proportions, offset upper floors and
+  mechanical roofs, add a PD clock dial, lower the perimeter scenery, and
+  use a lower establishing camera to make the architectural depth readable.
+
 ## [0.10.2] — 2026-10-05
 
 - Require Node.js 26 or later for local development and update CI, GitHub Pages,

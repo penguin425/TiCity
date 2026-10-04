@@ -9,7 +9,8 @@
 import * as THREE from 'three'
 import type { CityViewMode } from './camera'
 import type { TiDBSceneGraph } from '../world/city'
-import { FOCUS_ANCHORS } from '../world/layout'
+import { COMPONENT_ANCHORS, FOCUS_ANCHORS } from '../world/layout'
+import { SQL_TOWERS } from '../world/sql-architecture'
 import type { Point3 } from '../world/layout'
 import type { SemanticDomain } from '../world/palette'
 import type { Locale } from '../ui/catalog'
@@ -34,11 +35,11 @@ interface LabelSpec {
 const LABELS: readonly LabelSpec[] = [
   { id: 'client.terminal', domain: 'client', lift: 76 },
   { id: 'tiproxy.0', domain: 'sql', lift: 9, anchor: FOCUS_ANCHORS['tiproxy.gate'], side: -1 },
-  { id: 'tidb.1', domain: 'sql', lift: 57.5, side: 1 },
+  { id: 'tidb.1', domain: 'sql', lift: SQL_TOWERS[1].height - COMPONENT_ANCHORS['tidb.1'][1] + 6, side: 1 },
   { id: 'pd.control', domain: 'tso', lift: 55 },
-  { id: 'tikv.0', domain: 'kv', lift: 29 },
-  { id: 'tikv.1', domain: 'kv', lift: 29 },
-  { id: 'tikv.2', domain: 'kv', lift: 29 },
+  { id: 'tikv.0', domain: 'kv', lift: 25 },
+  { id: 'tikv.1', domain: 'kv', lift: 25 },
+  { id: 'tikv.2', domain: 'kv', lift: 25 },
   { id: 'gc.yard', domain: 'gc', lift: 38 },
   { id: 'tiflash.0', domain: 'tiflash', lift: 46 },
 ]

@@ -15,7 +15,10 @@ const siteURL = new URL(baseURL.endsWith('/') ? baseURL : `${baseURL}/`)
 const directory = resolve(option('--output', 'artifacts/graphics'))
 await mkdir(directory, { recursive: true })
 
-const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] })
+const browser = await chromium.launch({
+  executablePath: option('--executable-path', undefined),
+  args: ['--enable-unsafe-swiftshader'],
+})
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   const failures = []

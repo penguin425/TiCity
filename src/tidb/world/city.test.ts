@@ -217,6 +217,28 @@ describe('TiCity scene graph', () => {
     city.dispose()
   })
 
+  it('selects each store through its lower service machinery while leaving rack roofs reachable', () => {
+    const city = createTiDBSceneGraph()
+    city.root.updateMatrixWorld(true)
+    const ray = new THREE.Raycaster()
+
+    for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+      const anchor = COMPONENT_ANCHORS[`tikv.${store}` as 'tikv.0' | 'tikv.1' | 'tikv.2']
+      ray.set(new THREE.Vector3(anchor[0] - 30, 8.6, anchor[2] + 70), new THREE.Vector3(0, 0, -1))
+      const serviceHit = ray.intersectObjects([...city.registry.roots()], true)[0]
+      expect(serviceHit).toBeDefined()
+      expect(city.registry.resolve(serviceHit.object, serviceHit.instanceId)?.id).toBe(`tikv.${store}`)
+
+      const peer = city.registry.get(`region.0.peer.${store}`)!
+      ray.set(new THREE.Vector3(peer.anchor.x, 60, peer.anchor.z), new THREE.Vector3(0, -1, 0))
+      const roofHit = ray.intersectObjects([...city.registry.roots()], true)[0]
+      expect(roofHit).toBeDefined()
+      expect(city.registry.resolve(roofHit.object, roofHit.instanceId)?.id).toBe(peer.id)
+    }
+
+    city.dispose()
+  })
+
   it('keeps decorative detail inside the scene-graph rendering budget', () => {
     const city = createTiDBSceneGraph()
     const geometries = new Set<THREE.BufferGeometry>()

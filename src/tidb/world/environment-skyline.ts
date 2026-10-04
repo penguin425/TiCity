@@ -46,9 +46,9 @@ function createTowerGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Quiet perimeter architecture: chamfered glass towers, metal roof terraces,
- * mechanical caps and recessed floor bands. Three instance batches use at
- * most 6,928 triangles, including the sparse architectural roof lights.
+ * Quiet perimeter architecture: rear towers and lower side service blocks,
+ * metal roof terraces, mechanical caps and recessed floor bands. Three instance
+ * batches use at most 6,928 triangles, including sparse architectural roof lights.
  * Materials belong to the environment; this group never mutates or owns them.
  */
 export function createSkyline(
@@ -134,15 +134,21 @@ export function createSkyline(
     // dimensions and local architectural offsets remain drawing concerns.
     const placement = SKYLINE_PLACEMENTS[index]
     const { x, z, rear, sideIndex } = placement
-    const width = 9 + placement.widthJitter * 9
-    const depth = 9 + placement.depthJitter * 9
+    const width = (rear ? 10 : 14) + placement.widthJitter * 9
+    const depth = (rear ? 9 : 13) + placement.depthJitter * 9
     const landmark = index % 7 === 0
-    const height = landmark ? 43 + placement.heightJitter * 17 : 13 + placement.heightJitter * 28
+    // The rear buildings provide a distant horizon; side buildings stay broad
+    // and low, especially towards the foreground, so the perimeter does not
+    // read as a fence of towers competing with the educational architecture.
+    const foreground = rear ? 0 : Math.max(0, Math.min(1, (z - 40) / 270))
+    const rearHeight = landmark ? 30 + placement.heightJitter * 10 : 18 + placement.heightJitter * 16
+    const sideHeight = landmark ? 22 + placement.heightJitter * 6 : 12 + placement.heightJitter * 10
+    const height = rear ? rearHeight : sideHeight * (1 - foreground * 0.3)
     const style = index % 4
-    const baseHeight = height * [0.64, 0.84, 0.55, 0.74][style]
+    const baseHeight = height * (rear ? [0.64, 0.84, 0.55, 0.74] : [0.83, 0.92, 0.75, 0.86])[style]
     const crownHeight = height - baseHeight
-    const crownWidth = width * [0.68, 0.55, 0.84, 0.7][style]
-    const crownDepth = depth * [0.74, 0.62, 0.64, 0.86][style]
+    const crownWidth = width * (rear ? [0.68, 0.55, 0.84, 0.7] : [0.88, 0.72, 0.96, 0.8])[style]
+    const crownDepth = depth * (rear ? [0.74, 0.62, 0.64, 0.86] : [0.88, 0.86, 0.78, 0.93])[style]
     const crownX = x + (style === 3 ? (width - crownWidth) * 0.28 : 0)
     const crownZ = z + (style === 2 ? (depth - crownDepth) * 0.28 : 0)
     const value = 0.68 + placement.valueJitter * 0.25
