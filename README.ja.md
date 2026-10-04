@@ -18,7 +18,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 再現コマンドをまとめています。
 
 > [!IMPORTANT]
-> TiCity v0.10.1はTiDB v8.5 LTS系列を対象にした
+> TiCity v0.10.2はTiDB v8.5 LTS系列を対象にした
 > 静的・オフラインのモデルで、model-7 TiFlash/MPP Labを含みます。SQLを実行せず、
 > 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
 > モデル上の経路と説明だけを生成します。
@@ -251,7 +251,7 @@ pinとfailure境界の条件は[モデル境界](docs/MODEL_BOUNDARY.md)を参�
 
 ## ローカル実行
 
-Node.js 24以降とWebGL2対応ブラウザが必要です。
+Node.js 26以降とWebGL2対応ブラウザが必要です。
 
 ```bash
 npm install

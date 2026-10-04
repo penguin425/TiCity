@@ -19,7 +19,7 @@ See the [day/night graphics and rendering design](docs/GRAPHICS.md), including
 close-up and mobile views and the reproducible screenshot command.
 
 > [!IMPORTANT]
-> TiCity v0.10.1 targets the TiDB v8.5 LTS
+> TiCity v0.10.2 targets the TiDB v8.5 LTS
 > line as a static, offline model and includes the model-7 TiFlash/MPP Lab.
 > TiCity does not execute SQL or return real data or invented result rows. A
 > single SQL statement entered by the user is classified entirely in the
@@ -271,7 +271,7 @@ failure-boundary qualifications.
 
 ## Local development
 
-Node.js 24 or later and a WebGL2-capable browser are required.
+Node.js 26 or later and a WebGL2-capable browser are required.
 
 ```bash
 npm install
