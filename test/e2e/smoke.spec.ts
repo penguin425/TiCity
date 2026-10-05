@@ -13,7 +13,7 @@ const pages = [
 
 const TIFLASH_MPP_SCENARIO = 'tiflash-mpp'
 const TIFLASH_MPP_TRANSITION_EVENT = 'trace-1-event-37'
-const TIFLASH_MPP_FINAL_EVENT = 'trace-1-event-56'
+const TIFLASH_MPP_FINAL_EVENT = 'trace-1-event-57'
 
 async function expectNoSeriousAccessibilityViolations(page: Page) {
   const result = await new AxeBuilder({ page }).analyze()
@@ -860,7 +860,7 @@ test('GC/Storage Lab Machine keeps its semantic pipeline beside the causal DAG',
   )
   await expect(state).toHaveAttribute('data-gc-phase', 'compacting')
   await expect(state).toHaveAttribute('data-gc-round', '1')
-  await expect(state).toHaveAttribute('data-gc-model', 'model-8')
+  await expect(state).toHaveAttribute('data-gc-model', 'model-9')
   await expect(pipeline).toBeVisible()
   await expect(pipeline).toHaveAttribute('tabindex', '0')
   await expect(pipeline).toHaveAttribute('data-causal-dag-replaced', 'false')
@@ -1086,7 +1086,7 @@ test('TiFlash/MPP Lab keeps the exact learner-apply cursor responsive and loops 
   await expect(page.locator('[data-gc-storage-lab]')).toBeHidden()
   await expect(dock).toHaveAttribute('data-phase', 'paused')
   await expect(dock).toHaveAttribute('data-event-index', '36')
-  await expect(dock).toHaveAttribute('data-event-count', '56')
+  await expect(dock).toHaveAttribute('data-event-count', '57')
   await expect(dock).toHaveAttribute('data-looping', 'true')
   await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
     'aria-pressed',
@@ -1312,7 +1312,7 @@ test('TiFlash/MPP Machine separates the causal DAG from the fragment-task graph'
     'data-tiflash-mpp-phase',
     'snapshot_gating',
   )
-  await expect(state).toHaveAttribute('data-tiflash-mpp-model', 'model-8')
+  await expect(state).toHaveAttribute('data-tiflash-mpp-model', 'model-9')
   await expect(semantic).toBeVisible()
   await expect(semantic).toHaveAttribute('tabindex', '0')
   await expect(semantic).toHaveAttribute(
@@ -1383,7 +1383,7 @@ test('TiFlash/MPP Machine separates the causal DAG from the fragment-task graph'
   const finalCurrent = page.locator(
     '[data-event-index][aria-current="step"]',
   )
-  await expect(finalCurrent).toHaveAttribute('data-event-index', '55')
+  await expect(finalCurrent).toHaveAttribute('data-event-index', '56')
   await expect(finalCurrent).toHaveAttribute(
     'data-event-kind',
     'tiflash_client_query_complete',

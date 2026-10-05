@@ -34,6 +34,7 @@ describe('TiCity controls', () => {
           table: null,
           accessPath: 'none' as const,
           aggregateShape: null,
+  predicateShape: 'none' as const,
           readOnly: true,
           plan: [],
           warnings: [],

@@ -11,6 +11,8 @@ import type {
 } from '../model/types'
 import type { Locale } from './catalog'
 import { element } from './dom'
+import { buildTraceInspectionIndex, createTraceInspector } from './trace-inspector'
+import type { TraceInspectionIndex } from './trace-inspector'
 import {
   traceDomainLabel,
   traceEndpointLabel,
@@ -138,6 +140,8 @@ export interface TracePlaybackDockActions {
   readonly onNext: () => void
   readonly onReplay: () => void
   readonly onToggleLoop: () => void
+  readonly onSelectEvent?: (eventId: string) => void
+  readonly onInspect?: () => void
 }
 
 export interface TracePlaybackDock {
@@ -214,6 +218,9 @@ export function createTracePlaybackDock(
   let railPhase: TracePlaybackPhase | null = null
   let railAtEnd = false
   let announcementKey = ''
+  let inspectorReceipt: TraceReceipt | null = null
+  let inspectorIndex: TraceInspectionIndex | undefined
+  let inspectorKey = ''
   let entries: RailEntry[] = []
 
   const eyebrow = element('span', {
@@ -368,6 +375,9 @@ export function createTracePlaybackDock(
     replay,
     loop,
   )
+  const inspectorSlot = element('div', { className: 'tidb-trace-playback__inspector' })
+  const onInspectFocus = (): void => { actions.onInspect?.() }
+  inspectorSlot.addEventListener('focusin', onInspectFocus)
   const root = element(
     'section',
     {
@@ -400,6 +410,7 @@ export function createTracePlaybackDock(
       eventProgress,
     ),
     controls,
+    inspectorSlot,
   )
 
   function rebuildRail(receipt: TraceReceipt | null): void {
@@ -490,6 +501,19 @@ export function createTracePlaybackDock(
     const eventPercent = Math.round(eventValue * 100)
     const hasTrace = receiptTotal > 0
     const eventCopy = event ? traceEventCopy(event, locale) : null
+    const nextInspectorKey = `${locale}:${event?.id ?? ''}`
+    if (inspectorReceipt !== receipt || inspectorKey !== nextInspectorKey) {
+      const prior = inspectorSlot.querySelector('details')
+      const open = prior?.getAttribute('open') != null
+      if (inspectorReceipt !== receipt) {
+        inspectorReceipt = receipt
+        inspectorIndex = receipt ? buildTraceInspectionIndex(receipt.events) : undefined
+      }
+      inspectorKey = nextInspectorKey
+      inspectorSlot.replaceChildren(...(receipt ? [createTraceInspector(
+        receipt, event, locale, actions.onSelectEvent, { open, index: inspectorIndex },
+      )] : []))
+    }
 
     root.setAttribute('aria-label', copy.region)
     root.dataset.phase = playback.phase
@@ -645,9 +669,12 @@ export function createTracePlaybackDock(
       next.removeEventListener('click', onNext)
       replay.removeEventListener('click', onReplay)
       loop.removeEventListener('click', onToggleLoop)
+      inspectorSlot.removeEventListener('focusin', onInspectFocus)
       entries = []
       latestPlayback = null
       latestReceipt = null
+      inspectorReceipt = null
+      inspectorIndex = undefined
       root.replaceChildren()
       root.remove()
     },

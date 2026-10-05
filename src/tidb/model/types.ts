@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-8'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-9'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -545,12 +545,14 @@ export interface TraceGcStoreSnapshot {
 }
 
 /**
- * Model-8 GC/Storage Lab. It pins the TiDB v8.5.0 default Compaction Filter
+ * Model-9 GC/Storage Lab. It pins the TiDB v8.5.0 default Compaction Filter
  * path and projects synthetic aggregate MVCC chains, never real keys/values.
  */
 export interface TraceGcLabSnapshot {
   phase: TraceGcLabPhase
   round: TraceGcLabRound
+  /** One complete logical-input filter pass per modeled compaction round. */
+  compactionFilterApplied: boolean
   configuration: Readonly<{
     gcEnabled: true
     runIntervalSeconds: 600
@@ -726,7 +728,7 @@ export interface TraceTiFlashMppTunnelSnapshot {
 }
 
 /**
- * Model-8 TiFlash learner replication and MPP vertical slice. All identifiers,
+ * Model-9 TiFlash learner replication and MPP vertical slice. All identifiers,
  * counts, timestamps, and indexes are deterministic synthetic teaching data.
  */
 export interface TraceTiFlashMppLabSnapshot {
@@ -1331,6 +1333,8 @@ export interface TraceEvent {
   transactionId?: string
   /** Causal parents. An empty list denotes a DAG root. */
   dependsOn?: readonly string[]
+  /** Display ordering only; this predecessor is not a causal dependency. */
+  presentationAfter?: string
   /** Whether this event delays the client response or happens afterwards. */
   path?: TracePath
   /** Stable lane identifier for parallel Region branches. */
@@ -1364,12 +1368,21 @@ export type SqlAccessPath =
 export interface ModelPlanNode {
   id: string
   operator: string
-  task: 'root' | 'cop[tikv]' | 'mpp[tiflash]'
+  task: 'root' | 'cop[tikv]' | 'kv[tikv]' | 'mpp[tiflash]'
   accessObject: string | null
   children: readonly ModelPlanNode[]
 }
 
 export type SqlAggregateShape = 'scalar' | 'grouped'
+
+/** A literal-free predicate classification, never a key or SQL expression. */
+export type SqlPredicateShape =
+  | 'none'
+  | 'primary_key_equality'
+  | 'primary_key_with_residual'
+  | 'primary_range'
+  | 'primary_range_with_residual'
+  | 'scan_predicate'
 
 export interface SqlAnalysis {
   status: SqlStatus
@@ -1380,6 +1393,7 @@ export interface SqlAnalysis {
   accessPath: SqlAccessPath
   /** Literal-free aggregate shape; null for non-aggregate statements. */
   aggregateShape: SqlAggregateShape | null
+  predicateShape: SqlPredicateShape
   readOnly: boolean
   plan: readonly ModelPlanNode[]
   warnings: readonly string[]
@@ -1390,7 +1404,7 @@ export interface ReplaySpec {
   modelVersion: string
   seed: number
   scenarioId: ScenarioId | null
-  query: Pick<SqlAnalysis, 'kind' | 'statementKind' | 'table' | 'accessPath' | 'aggregateShape'>
+  query: Pick<SqlAnalysis, 'kind' | 'statementKind' | 'table' | 'accessPath' | 'aggregateShape' | 'predicateShape'>
   transactionMode: TransactionMode
   /** Null for reads and model-only EXPLAIN receipts. */
   commitProtocol: ResolvedCommitProtocol | null

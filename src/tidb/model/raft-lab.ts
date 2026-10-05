@@ -37,6 +37,8 @@ export interface RaftLabPeerDefinition {
   lastLogTerm: number
   commitIndex: number
   appliedIndex: number
+  /** A peer's current election term can exceed its last entry's term. */
+  currentTerm?: number
 }
 
 const RAFT_LAB_QUORUM = 2 as const
@@ -115,9 +117,21 @@ function validateRaftLab(state: TraceRaftLabSnapshot): void {
       `${peer.storeId} last log index must be non-negative`,
     )
     invariant(
-      Number.isSafeInteger(peer.lastLogTerm) && peer.lastLogTerm > 0,
-      `${peer.storeId} last log term must be positive`,
+      Number.isSafeInteger(peer.lastLogTerm) &&
+        (peer.lastLogIndex === 0 ? peer.lastLogTerm === 0 : peer.lastLogTerm > 0) &&
+        peer.lastLogTerm <= peer.currentTerm,
+      `${peer.storeId} last log term must match an empty/non-empty log and not exceed current term`,
     )
+    for (const [name, index] of [
+      ['commit', peer.commitIndex],
+      ['applied', peer.appliedIndex],
+      ['match', peer.matchIndex],
+    ] as const) {
+      invariant(
+        Number.isSafeInteger(index) && index >= 0,
+        `${peer.storeId} ${name} index must be a non-negative integer`,
+      )
+    }
     invariant(
       peer.appliedIndex <= peer.commitIndex &&
         peer.commitIndex <= peer.lastLogIndex &&
@@ -314,12 +328,11 @@ export function createRaftLabState(
         definition.commitIndex <= definition.lastLogIndex,
       `${definition.storeId} initial indexes are inconsistent`,
     )
-    invariant(definition.lastLogTerm > 0, 'initial log term must be positive')
     return {
       ...definition,
       role: definition.storeId === oldLeaderStoreId ? 'leader' : 'follower',
       healthy: true,
-      currentTerm: definition.lastLogTerm,
+      currentTerm: definition.currentTerm ?? Math.max(1, definition.lastLogTerm),
       votedFor: null,
       matchIndex: definition.lastLogIndex,
     }
@@ -430,7 +443,7 @@ export function reduceRaftLabState(
     const candidate = peerById(state, delta.candidateStoreId)
     const voter = peerById(state, delta.voterStoreId)
     invariant(candidate.healthy && voter.healthy, 'only live voters can pre-vote')
-    const nextTerm = Math.max(...peers.map((peer) => peer.currentTerm)) + 1
+    const nextTerm = candidate.currentTerm + 1
     invariant(delta.prospectiveTerm === nextTerm, 'pre-vote must probe the next term')
     if (delta.action === 'start') {
       invariant(election.phase === 'timeout', 'pre-vote must follow election timeout')
@@ -450,6 +463,12 @@ export function reduceRaftLabState(
       }
     } else {
       invariant(election.phase === 'pre_vote', 'pre-vote grant requires pre-vote phase')
+      invariant(
+        delta.prospectiveTerm >= voter.currentTerm &&
+          (delta.prospectiveTerm > voter.currentTerm ||
+            voter.votedFor === null || voter.votedFor === candidate.storeId),
+        'a voter cannot grant a stale-term pre-vote or contradict its current-term vote',
+      )
       invariant(
         !election.preVotesGranted.includes(delta.voterStoreId),
         `${delta.voterStoreId} already pre-voted`,
@@ -479,7 +498,7 @@ export function reduceRaftLabState(
         'candidate must cast its own first vote',
       )
       invariant(
-        delta.term === Math.max(...peers.map((peer) => peer.currentTerm)) + 1,
+        delta.term === candidate.currentTerm + 1,
         'candidate term must advance monotonically',
       )
       peers = replacePeer(peers, delta.candidateStoreId, (peer) => ({
@@ -500,6 +519,7 @@ export function reduceRaftLabState(
         delta.term === candidate.currentTerm,
         'voter and candidate must agree on the election term',
       )
+      invariant(delta.term >= voter.currentTerm, 'a vote cannot decrease the voter current term')
       invariant(
         voter.votedFor === null || voter.currentTerm < delta.term,
         `${voter.storeId} already voted in this term`,
@@ -567,7 +587,6 @@ export function reduceRaftLabState(
       ...peer,
       lastLogIndex: delta.index,
       lastLogTerm: delta.term ?? peer.lastLogTerm,
-      matchIndex: delta.index,
     }))
     phase = 'confirming'
     log = {
@@ -590,6 +609,10 @@ export function reduceRaftLabState(
     for (const storeId of delta.storeIds) {
       const peer = peerById({ ...state, peers } as TraceRaftLabSnapshot, storeId)
       invariant(peer.healthy, `${storeId} cannot persist while down`)
+      invariant(
+        peer.commitIndex < delta.index || log.persistedStoreIds.includes(storeId),
+        `${storeId} cannot replace an entry in its committed prefix`,
+      )
       peers = replacePeer(peers, storeId, (candidate) => ({
         ...candidate,
         lastLogIndex: delta.index,
@@ -599,7 +622,7 @@ export function reduceRaftLabState(
     }
     log = {
       ...log,
-      persistedStoreIds: [...delta.storeIds],
+      persistedStoreIds: [...new Set([...log.persistedStoreIds, ...delta.storeIds])],
     }
   } else if (delta.kind === 'raft_commit') {
     invariant(
@@ -658,9 +681,8 @@ export function reduceRaftLabState(
     )
     if (delta.action === 'observe_leader') {
       invariant(
-        leaderStoreId !== null &&
-          log.appliedStoreIds.includes(leaderStoreId),
-        'PD observation follows new-leader confirmation',
+        leaderStoreId !== null && election.phase === 'elected',
+        'PD observation requires an elected leader, independently of no-op apply',
       )
       pd = { ...pd, observedLeaderStoreId: delta.leaderStoreId }
     } else {
@@ -734,9 +756,8 @@ export function reduceRaftLabState(
           request.cacheState === 'refreshed' &&
           delta.attempt === 2 &&
           delta.targetStoreId === leaderStoreId &&
-          leaderStoreId !== null &&
-          log.appliedStoreIds.includes(leaderStoreId),
-        'attempt 2 requires a confirmed elected leader and refreshed cache',
+          leaderStoreId !== null,
+        'attempt 2 requires an elected leader and refreshed cache',
       )
       request = { ...request, attempt: 2, status: 'retrying' }
       phase = 'serving'

@@ -42,8 +42,8 @@ import type { TiFlashMppLab } from './tiflash-mpp-lab'
 import { createCityGeometry } from './geometry'
 import type { BoxInstance } from './geometry'
 import { addBuildingDetails } from './building-detail'
-import { SQL_TOWERS } from './sql-architecture'
-import { addStorageArchitecture } from './storage-architecture'
+import { SQL_TOWERS, SQL_TERRACE_HEIGHT } from './sql-architecture'
+import { addStorageArchitecture, TIKV_SERVICE_STAIR } from './storage-architecture'
 import { createRegionPeers } from './region-peers'
 
 export type CityComponentKind =
@@ -447,8 +447,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       const part = building.tiers[tier]
       const center = position(part)
       addBox(group, part.size, center, materials.darkStructure, `sql:tier:${tier}`, true)
-      addBox(group, [part.size[0] + 1.6, 0.8, part.size[2] + 1.6],
-        [center[0], center[1] + part.size[1] / 2 + 0.4, center[2]],
+      addBox(group, [part.size[0] + 1.6, SQL_TERRACE_HEIGHT, part.size[2] + 1.6],
+        [center[0], center[1] + part.size[1] / 2 + SQL_TERRACE_HEIGHT / 2, center[2]],
         materials.structure, `sql:terrace:${tier}`)
     }
     for (let unit = 0; unit < building.roofPlant.length; unit++) {
@@ -605,6 +605,15 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       [anchor[0], (TIKV_ARCHITECTURE.deckTop + 1.1) / 2, anchor[2]],
       [100, TIKV_ARCHITECTURE.deckTop - 1.1, 100],
     )
+    const stairTop = TIKV_ARCHITECTURE.deckTop + 1.2
+    addCollider(
+      colliders,
+      `tikv.${store}.service-stair`,
+      [anchor[0] + TIKV_SERVICE_STAIR.centerX, (stairTop + TIKV_SERVICE_STAIR.groundY) / 2,
+        anchor[2] + (TIKV_SERVICE_STAIR.bottomZ + TIKV_SERVICE_STAIR.topZ) / 2],
+      [TIKV_SERVICE_STAIR.width + 1, stairTop - TIKV_SERVICE_STAIR.groundY,
+        TIKV_SERVICE_STAIR.bottomZ - TIKV_SERVICE_STAIR.topZ + 8],
+    )
   }
 
   const regionPeers = createRegionPeers(registry, materials)
@@ -715,6 +724,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     COMPONENT_ANCHORS['tiflash.0'],
   )
   addCollider(colliders, 'tiflash.0', [230, 25, 216], [86, 50, 68])
+  // Front entry extends beyond the hall's footprint and above walk eye level.
+  addCollider(colliders, 'tiflash.0.entry', [230, 1.42, 179.095], [16, 1.44, 5.81])
   addBuildingDetails(root, materials)
   batchStaticMeshes(root)
 

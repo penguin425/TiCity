@@ -273,7 +273,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-8')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-9')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))

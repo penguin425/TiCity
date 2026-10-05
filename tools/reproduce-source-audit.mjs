@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // TiCity changes Copyright 2026 TiCity contributors.
 
-// Observe the source-audit fixtures; --verify checks the corrected model-8 flows.
+// Observe the source-audit fixtures; --verify checks the corrected model-9 flows.
 // This observes the educational model; it neither executes SQL nor uses a network.
 import assert from 'node:assert/strict'
 import { build } from 'esbuild'
@@ -163,7 +163,7 @@ findings.push({
 
 if (process.argv.includes('--verify')) {
   const byId = Object.fromEntries(findings.map((finding) => [finding.id, finding]))
-  assert.equal(TIDB_MODEL_VERSION, 'tidb-v8.5-model-8')
+  assert.equal(TIDB_MODEL_VERSION, 'tidb-v8.5-model-9')
   assert.equal(byId.F1.readOutcome, 'succeeded')
   assert.equal(byId.F1.writeOutcome, 'committed')
   assert.equal(byId.F1.staggeredElection, 'allowed')

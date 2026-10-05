@@ -2,6 +2,7 @@
 
 import type { ScenarioId, TraceEvent } from '../model/types'
 import type { Locale } from '../ui/catalog'
+import { traceEventCopy } from '../ui/event-copy'
 import type { DiagnoseCursor } from './cursor'
 
 interface DiagnosePageCopy {
@@ -257,6 +258,8 @@ const TIFLASH_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
     '2本のPassThrough streamが結果blockをTiDBへ送信',
   tiflash_mpp_gather_decoded:
     'TiDB MPPGatherがresult chunkをdecode',
+  tiflash_mpp_gather_progress:
+    'TiDBが残りのroot streamを消費',
   tiflash_client_columns_sent:
     'TiDBがresult column metadataを送信',
   tiflash_client_rows_streamed:
@@ -358,7 +361,7 @@ export function diagnoseEventName(locale: Locale, event: TraceEvent): string {
       protocolEventNameJa(event.label) ??
       gcEventNameJa(event.label) ??
       tiflashEventNameJa(event) ??
-      event.label
+      traceEventCopy(event, locale).label
     : event.label
 }
 

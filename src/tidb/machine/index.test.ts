@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { installTestDom } from '../../../test/dom'
 import { createTiDBSimulation } from '../model'
@@ -226,6 +226,48 @@ describe('TiCity Machine replay', () => {
     expect(root.textContent).toContain('現在のイベント')
   })
 
+  it('preserves presentation fences separately and seeks causal neighbors through the shared inspector', () => {
+    const dom = installTestDom()
+    const root = dom.mount('machine-inspector')
+    const receipt = Object.freeze({
+      id: 'inspector-parallel',
+      events: Object.freeze([
+        Object.freeze({ id: 'root', domain: 'tso', kind: 'snapshot_ts', path: 'critical' }),
+        Object.freeze({ id: 'left', domain: 'raft', kind: 'raft_commit', dependsOn: Object.freeze(['root']) }),
+        Object.freeze({ id: 'right', domain: 'kv', kind: 'mvcc_apply', dependsOn: Object.freeze(['root']), presentationAfter: 'left', path: 'background' }),
+        Object.freeze({ id: 'join', domain: 'return', kind: 'return', dependsOn: Object.freeze(['left', 'right']) }),
+      ]),
+    })
+    const before = JSON.stringify(receipt)
+    const adapted = adaptTraceReceipt(receipt)
+    expect(adapted.events[2].presentationAfter).toBe('left')
+    expect(adapted.events[2].dependsOn).toEqual(['root'])
+    const selected: string[] = []
+    mountMachine(root as unknown as HTMLElement, {
+      receipt,
+      locale: 'en',
+      initialEventId: 'right',
+      onSeek: (event) => { if (event) selected.push(event.id) },
+    })
+    const inspector = root.querySelector('[data-trace-inspector]')
+    expect(inspector?.dataset.inspectorEventId).toBe('right')
+    expect(inspector?.querySelector('[data-inspector-path="background"]')?.textContent).toContain('background')
+    expect(inspector?.querySelectorAll('[data-inspector-relation="parent"]')).toHaveLength(1)
+    expect(inspector?.querySelector('[data-inspector-relation="fence"]')?.dataset.inspectorSelect).toBe('left')
+    expect(root.querySelector('.tidb-machine__detail [data-trace-inspector]')).toBeNull()
+    inspector?.querySelector('[data-inspector-relation="child"]')?.click()
+    expect(selected).toEqual(['right', 'join'])
+    expect(root.querySelector('[data-trace-inspector]')?.dataset.inspectorEventId).toBe('join')
+    expect((globalThis.document as unknown as { activeElement: unknown }).activeElement)
+      .toBe(root.querySelector('.tidb-machine__inspector-slot summary'))
+    expect(root.querySelector('[data-event-id="join"]')?.getAttribute('aria-current')).toBe('step')
+    const folded = root.querySelector('[data-trace-inspector]')
+    folded?.removeAttribute('open')
+    folded?.querySelector('[data-inspector-select="left"]')?.click()
+    expect(root.querySelector('[data-trace-inspector]')?.getAttribute('open')).toBeNull()
+    expect(JSON.stringify(receipt)).toBe(before)
+  })
+
   it('uses keyed bilingual scenario labels and includes the Lock Lab route', () => {
     expect(MACHINE_SCENARIOS).toContain('lock-deadlock')
     expect(resolveMachineScenario('?scenario=lock-deadlock')).toBe('lock-deadlock')
@@ -238,6 +280,41 @@ describe('TiCity Machine replay', () => {
     }
     expect(MACHINE_PAGE_COPY.en.names['lock-deadlock']).toContain('deadlock')
     expect(MACHINE_PAGE_COPY.ja.names['lock-deadlock']).toContain('デッドロック')
+  })
+
+  it('pauses autoplay when keyboard focus enters the inspector and keeps the focused projection', () => {
+    vi.useFakeTimers()
+    try {
+      const dom = installTestDom()
+      const root = dom.mount('machine-inspector-focus')
+      mountMachine(root as unknown as HTMLElement, {
+        locale: 'en',
+        autoplay: true,
+        stepIntervalMs: 1_000,
+        receipt: {
+          id: 'focus-replay',
+          events: [
+            { id: 'first', domain: 'tso', kind: 'snapshot_ts' },
+            { id: 'second', domain: 'kv', kind: 'mvcc_apply', dependsOn: ['first'] },
+            { id: 'third', domain: 'return', kind: 'return', dependsOn: ['second'] },
+          ],
+        },
+      })
+      vi.advanceTimersByTime(1_000)
+      expect(root.querySelector('[data-inspector-event-id]')?.dataset.inspectorEventId).toBe('second')
+      const summary = root.querySelector('.tidb-machine__inspector-slot summary')
+      summary?.focus()
+      // The lightweight DOM has no bubbling; deliver the native focusin at
+      // its registered listener after assigning the focused descendant.
+      root.querySelector('.tidb-machine__inspector-slot')?.dispatchEvent(new Event('focusin'))
+      expect(root.querySelector('[data-action="play"]')?.getAttribute('aria-pressed')).toBe('false')
+      vi.advanceTimersByTime(5_000)
+      expect(root.querySelector('[data-inspector-event-id]')?.dataset.inspectorEventId).toBe('second')
+      expect(root.querySelector('.tidb-machine__inspector-slot summary')).toBe(summary)
+      expect((globalThis.document as unknown as { activeElement: unknown }).activeElement).toBe(summary)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('preserves canonical parallel order and resolves an event cursor after adaptation', () => {
@@ -1198,7 +1275,7 @@ describe('TiCity Machine replay', () => {
     expect(slot.children).toHaveLength(0)
   })
 
-  it('renders the exact model-8 TiFlash learner and MPP topology at event 37', () => {
+  it('renders the exact model-9 TiFlash learner and MPP topology at event 37', () => {
     const dom = installTestDom()
     const root = dom.mount('machine')
     const receipt = createTiDBSimulation({ seed: 425 })
@@ -1217,7 +1294,7 @@ describe('TiCity Machine replay', () => {
 
     const lab = root.querySelector('[data-tiflash-mpp-machine-state="true"]')
     expect(lab?.getAttribute('data-tiflash-mpp-event-id')).toBe(event.id)
-    expect(lab?.getAttribute('data-tiflash-mpp-model')).toBe('model-8')
+    expect(lab?.getAttribute('data-tiflash-mpp-model')).toBe('model-9')
     expect(root.querySelectorAll('[data-tiflash-learner-region]')).toHaveLength(3)
     expect(root.querySelectorAll('[data-mpp-fragment]')).toHaveLength(2)
     expect(root.querySelectorAll('[data-mpp-task]')).toHaveLength(4)

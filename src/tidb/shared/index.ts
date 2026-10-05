@@ -11,6 +11,7 @@ export type {
   ReplaySpec,
   SqlAnalysis,
   SqlAggregateShape,
+  SqlPredicateShape,
   TiCityState,
   TiDBControls,
   TiDBSimulationApi,

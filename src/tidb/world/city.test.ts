@@ -217,6 +217,19 @@ describe('TiCity scene graph', () => {
     city.dispose()
   })
 
+  it('blocks the raised entry and service stairs while keeping adjacent walks open', () => {
+    const city = createTiDBSceneGraph()
+    const collision = createCollisionMap(city.colliders)
+    expect(collision.contains(230, 180.5, 0.58)).toBe(true)
+    expect(collision.contains(219, 180.5, 0.58)).toBe(false)
+    for (let store = 0; store < TICITY_LAYOUT.tikvCount; store++) {
+      const anchor = COMPONENT_ANCHORS[`tikv.${store}` as 'tikv.0' | 'tikv.1' | 'tikv.2']
+      expect(collision.contains(anchor[0] + 53.1, anchor[2], 0.58)).toBe(true)
+      expect(collision.contains(anchor[0] + 60, anchor[2], 0.58)).toBe(false)
+    }
+    city.dispose()
+  })
+
   it('selects each store through its lower service machinery while leaving rack roofs reachable', () => {
     const city = createTiDBSceneGraph()
     city.root.updateMatrixWorld(true)

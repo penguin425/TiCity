@@ -23,6 +23,7 @@ import { element, svgElement } from '../ui/dom'
 import { traceEndpointLabel, traceEventCopy } from '../ui/event-copy'
 import { createModelBadge } from '../ui/legal'
 import { installCityUiStyles } from '../ui/styles'
+import { buildTraceInspectionIndex, createTraceInspector } from '../ui/trace-inspector'
 import { installMachineStyles } from './styles'
 
 export {
@@ -49,6 +50,8 @@ export interface MachineEvent {
   status?: string
   /** Explicit causal parents. Legacy receipts fall back to the prior event. */
   dependsOn?: readonly string[]
+  /** Display serialization only; never a causal dependency. */
+  presentationAfter?: string
   /** False marks work that continues after the client critical path. */
   criticalPath?: boolean
   regionId?: number
@@ -3657,7 +3660,7 @@ function renderGcState(
       'data-gc-event-kind': event.kind ?? '',
       'data-gc-phase': gcLab.phase,
       'data-gc-round': String(gcLab.round),
-      'data-gc-model': 'model-8',
+      'data-gc-model': 'model-9',
     },
   },
   element('header', { className: 'tidb-machine__gc-head' },
@@ -3929,7 +3932,7 @@ function renderTiFlashMppState(
       'data-tiflash-mpp-event-id': event.id,
       'data-tiflash-mpp-event-kind': event.kind ?? '',
       'data-tiflash-mpp-phase': lab.phase,
-      'data-tiflash-mpp-model': 'model-8',
+      'data-tiflash-mpp-model': 'model-9',
     },
   },
   element('header', { className: 'tidb-machine__tiflash-head' },
@@ -4014,6 +4017,7 @@ export function adaptTraceReceipt(source: unknown): MachineReceipt {
       target: asString(raw.target) || undefined,
       status: asString(raw.status) || undefined,
       dependsOn: asStringArray(raw.dependsOn),
+      presentationAfter: asString(raw.presentationAfter) || undefined,
       criticalPath: typeof raw.criticalPath === 'boolean'
         ? raw.criticalPath
         : raw.path === 'background'
@@ -4511,6 +4515,11 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     play.textContent = CATALOG[locale].play
     play.setAttribute('aria-pressed', 'false')
   }
+  const inspectionIndex = buildTraceInspectionIndex(receipt.events)
+  const inspectorSlot = element('div', { className: 'tidb-machine__inspector-slot' })
+  // Seeking rebuilds the selected-event projection. Pause while a keyboard
+  // reader is inside it so the timer cannot remove the focused control.
+  inspectorSlot.addEventListener('focusin', stop)
   const sync = () => {
     frame.replaceChildren(renderTimeline(receipt, locale, current))
     const event = current >= 0 ? receipt.events[current] : null
@@ -4603,6 +4612,16 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
       detail.removeAttribute('data-current-event-branch')
       detail.replaceChildren(element('p', { className: 'tidb-machine__empty', text: CATALOG[locale].emptyTrace }))
     }
+    const priorInspector = inspectorSlot.querySelector('details')
+    const inspectorOpen = priorInspector === null || priorInspector.getAttribute('open') !== null
+    inspectorSlot.replaceChildren(createTraceInspector(receipt, event, locale, (eventId) => {
+      const selectedIndex = receipt.events.findIndex((entry) => entry.id === eventId)
+      if (selectedIndex < 0) return
+      current = selectedIndex
+      stop()
+      sync()
+      inspectorSlot.querySelector<HTMLElement>('summary')?.focus()
+    }, { index: inspectionIndex, open: inspectorOpen }))
     if (hasLockSnapshots) {
       const lockState = event ? renderLockState(event, locale) : null
       lockSlot.hidden = lockState === null
@@ -4721,6 +4740,7 @@ export function mountMachine(root: HTMLElement, options: MachineOptions): void {
     ...(hasGcSnapshots ? [gcSlot] : []),
     ...(hasTiFlashMppSnapshots ? [tiflashMppSlot] : []),
     detail,
+    inspectorSlot,
     element('p', { className: 'tidb-machine__note', text: CATALOG[locale].simulatedTiming }),
   )
   sync()

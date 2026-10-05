@@ -7,12 +7,13 @@ import * as THREE from 'three'
 import { COMPONENT_ANCHORS } from './layout'
 import type { Point3 } from './layout'
 import type { CityMaterials } from './palette'
-import { SQL_TOWERS } from './sql-architecture'
+import { SQL_TERRACE_HEIGHT, SQL_TOWERS } from './sql-architecture'
 import type { SqlTowerTier } from './sql-architecture'
 
 export { SQL_TOWER_HEIGHTS } from './sql-architecture'
 
 type DetailMaterial = 'structure' | 'darkStructure' | 'trim' | 'glass' | 'window' | 'tiflash'
+type PanelMaterial = 'glass' | 'window'
 
 interface BoxDetail {
   readonly position: Point3
@@ -26,7 +27,7 @@ interface BoxDetail {
  * The site coordinates come from layout; offsets below are building dimensions.
  * Anchor Y denotes a semantic focus point, so fittings use the common floor.
  *
- * The caller owns the shared unit-box geometry through its normal root
+ * The caller owns the shared box and front-panel geometries through its root
  * traversal. Materials remain owned by CityMaterials. There is no update loop,
  * picking target, or additional disposal lifecycle. Structural and mechanical
  * batches cast one shared shadow silhouette each; glass panes stay receive-only
@@ -41,10 +42,21 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     window: [],
     tiflash: [],
   }
+  const panels: Record<PanelMaterial, BoxDetail[]> = { glass: [], window: [] }
   const at = (anchor: Point3, x: number, y: number, z: number): Point3 =>
     [anchor[0] + x, y, anchor[2] + z]
   const box = (material: DetailMaterial, position: Point3, size: Point3, angle = 0): void => {
     batches[material].push({
+      position, size,
+      rotation: angle === 0 ? undefined : new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle),
+    })
+  }
+  // A glazed bay's back is buried in its opaque core, and its tiny thickness
+  // sits behind the surrounding mullions. Preserve the exact outward surface
+  // of the box, including UVs and normals, without drawing ten hidden triangles.
+  // Galleries, entrance panes and exposed lights retain their full box edges.
+  const panel = (material: PanelMaterial, position: Point3, size: Point3, angle = 0): void => {
+    panels[material].push({
       position, size,
       rotation: angle === 0 ? undefined : new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle),
     })
@@ -87,7 +99,7 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
         const x = -span / 2 + 0.6 + (column + 0.5) * bayWidth
         for (let floor = 0; floor < tier.floors; floor++) {
           const lit = (floor * 7 + column * 11 + face * 3 + seed * 17) % 13 < 3
-          box(lit ? 'window' : 'glass', point(x, bottom + (floor + 0.5) * floorHeight, 0.12),
+          panel(lit ? 'window' : 'glass', point(x, bottom + (floor + 0.5) * floorHeight, 0.12),
             [bayWidth - 0.28, floorHeight - 0.58, 0.22], angle)
         }
       }
@@ -158,8 +170,9 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
       const roof = y + height / 2
       // A low rectangular parapet makes each exposed roof a usable ledge.
       for (const side of [-1, 1]) {
-        box('trim', at(anchor, x + side * (width / 2 - 0.25), roof + 0.65, z), [0.28, 0.7, depth - 0.5])
-        box('trim', at(anchor, x, roof + 0.65, z + side * (depth / 2 - 0.25)), [width - 0.5, 0.7, 0.28])
+        const railY = roof + SQL_TERRACE_HEIGHT + 0.35
+        box('trim', at(anchor, x + side * (width / 2 - 0.25), railY, z), [0.28, 0.7, depth - 0.5])
+        box('trim', at(anchor, x, railY, z + side * (depth / 2 - 0.25)), [width - 0.5, 0.7, 0.28])
       }
       // The broadest working floor gets projecting horizontal sun shelves.
       // Their spacing differs across the three buildings while remaining fixed.
@@ -186,14 +199,22 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
       const [width, height, depth] = plant.size
       const [x, y, z] = plant.position
       const roof = y + height / 2
+      // Feet bear directly on the shared roof datum. The broad curb seals the
+      // machinery to that slab rather than leaving an unsupported dark box.
+      box('structure', at(anchor, x, y - height / 2 + 0.14, z), [width + 0.7, 0.28, depth + 0.7])
       box('trim', at(anchor, x, roof - 0.08, z), [width + 0.3, 0.16, depth + 0.3])
       for (let grille = 0; grille < 4; grille++) {
         const grilleZ = z - depth / 2 + 0.65 + grille * (depth - 1.3) / 3
         box('darkStructure', at(anchor, x, roof - 0.06, grilleZ), [width - 0.75, 0.08, 0.55])
       }
-      for (let louver = 0; louver < 3; louver++) {
-        box('trim', at(anchor, x, y - height * 0.24 + louver * height * 0.24, z + depth / 2 + 0.1),
-          [width - 0.6, 0.22, 0.3])
+      for (const side of [-1, 1]) {
+        for (let louver = 0; louver < 3; louver++) {
+          const louverY = y - height * 0.24 + louver * height * 0.24
+          box('trim', at(anchor, x, louverY, z + side * (depth / 2 + 0.1)),
+            [width - 0.6, 0.18, 0.3])
+          box('trim', at(anchor, x + side * (width / 2 + 0.1), louverY, z),
+            [0.3, 0.18, depth - 0.6])
+        }
       }
     }
   }
@@ -206,13 +227,13 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     const radial = (radius: number, y: number): Point3 =>
       at(pd, Math.sin(angle) * radius, y, Math.cos(angle) * radius)
     for (let floor = 0; floor < 4; floor++) {
-      box((bay + floor * 5) % 11 === 0 ? 'window' : 'glass', radial(19.16, 5.75 + floor * 4.15),
+      panel((bay + floor * 5) % 11 === 0 ? 'window' : 'glass', radial(19.16, 5.75 + floor * 4.15),
         [4.6, 3.35, 0.24], angle)
     }
     box('trim', radial(19.35, 13.1), [0.22, 17.6, 0.45], angle)
     if (bay % 2 === 0) {
       for (let floor = 0; floor < 4; floor++) {
-        box((bay + floor) % 7 === 0 ? 'window' : 'glass', radial(12.16, 25.1 + floor * 4),
+        panel((bay + floor) % 7 === 0 ? 'window' : 'glass', radial(12.16, 25.1 + floor * 4),
           [5.65, 3.2, 0.22], angle)
       }
       box('structure', radial(12.45, 31.2), [0.42, 17.1, 0.55], angle)
@@ -261,12 +282,17 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
       for (let floor = 0; floor < 7; floor++) {
         const floorHeight = (height - 2) / 7
         const y = baseY + 1 + floorHeight * (floor + 0.5)
-        box((floor + column * 3) % 8 === 0 ? 'window' : 'glass',
-          at(flash, x, y, side * 19.13), [6.5, floorHeight - 0.4, 0.22])
+        panel((floor + column * 3) % 8 === 0 ? 'window' : 'glass',
+          at(flash, x, y, side * 19.13), [6.5, floorHeight - 0.4, 0.22], side > 0 ? 0 : Math.PI)
         box('trim', at(flash, x, y - floorHeight / 2, side * 19.3), [7, 0.17, 0.4])
       }
       box('structure', at(flash, x + side * 3.65, baseY + height / 2, 19.3), [0.65, height, 0.6])
       box('structure', at(flash, x + side * 3.65, baseY + height / 2, -19.3), [0.65, height, 0.6])
+      // Visible steel crossheads carry the tall glazing between the end piers.
+      // They share the working-floor datum across the alternating-height halls.
+      for (const y of [baseY + 0.55, baseY + 10.2, baseY + 20.4]) {
+        box('structure', at(flash, x, y, side * 19.4), [7.5, 0.65, 0.75])
+      }
       // An inset blue service rail is an identity accent, not a status meter.
       box('tiflash', at(flash, x + side * 4.35, baseY + height / 2, 19.7), [0.8, height + 0.3, 0.9])
     }
@@ -287,18 +313,31 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
       beam('trim', at(flash, x, 10, side * 19.9), at(flash, x + 14, 28, side * 19.9), 0.8)
       box('darkStructure', at(flash, x + 7, 9, side * 20), [14, 1.4, 1.2])
     }
-    box('trim', at(flash, side * 40, 10.2, 0), [1.2, 1.4, 43])
+    box('trim', at(flash, side * 40, 10.2, 0), [1.2, 1.4, 56])
+    for (const z of [-24, 0, 24]) {
+      box('structure', at(flash, side * 40, 8.95, z), [1.8, 1.1, 1.8])
+    }
   }
-  box('darkStructure', at(flash, 0, 10.3, 25), [73, 1.8, 5.8])
-  box('trim', at(flash, 0, 13.6, 27.6), [73, 0.5, 0.5])
-  for (let post = 0; post < 11; post++) {
-    box('trim', at(flash, -35 + post * 7, 12, 27.6), [0.4, 3.2, 0.4])
+  box('darkStructure', at(flash, 0, 10.3, 25), [82, 1.8, 5.8])
+  for (const x of [-34, -20, -6, 8, 22, 36]) {
+    box('structure', at(flash, x, 8.95, 25), [2.2, 1.1, 2.2])
+    box('darkStructure', at(flash, x, 9.8, 21), [2.1, 0.8, 6])
+  }
+  box('trim', at(flash, 0, 12.4, 27.6), [80, 0.2, 0.2])
+  box('trim', at(flash, 0, 11.8, 27.6), [80, 0.15, 0.15])
+  for (let post = 0; post <= 12; post++) {
+    box('trim', at(flash, -40 + post * 80 / 12, 11.8, 27.6), [0.16, 1.2, 0.16])
   }
   box('structure', at(flash, 0, 7, -30), [16, 12, 8])
   box('glass', at(flash, 0, 6.5, -34.15), [12, 8.5, 0.25])
   box('trim', at(flash, 0, 6.5, -34.4), [0.4, 9, 0.3])
   box('structure', at(flash, 0, 13.5, -32), [20, 1, 10])
   box('window', at(flash, 0, 12.95, -36.6), [15, 0.28, 0.4])
+  for (let step = 0; step < 4; step++) {
+    box('structure', at(flash, 0, 0.85 + step * 0.19, -39.4 + step * 0.72),
+      [16, 0.3 + step * 0.38, 0.82])
+  }
+  box('structure', at(flash, 0, 1.42, -35.5), [16, 1.44, 2.8])
   for (const side of [-1, 1]) {
     beam('trim', at(flash, side * 13, 10, 25), at(flash, side * 3.6, 34, 32), 1.2)
     box('darkStructure', at(flash, side * 4.35, 25, 32), [1, 18, 3.2])
@@ -331,15 +370,20 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
   box('window', at(gc, 0, 23.7, 38.2), [23, 0.4, 0.4])
 
   const geometry = new THREE.BoxGeometry(1, 1, 1)
+  const panelGeometry = new THREE.PlaneGeometry(1, 1).translate(0, 0, 0.5)
   const matrix = new THREE.Matrix4()
   const position = new THREE.Vector3()
   const scale = new THREE.Vector3()
   const identity = new THREE.Quaternion()
-  for (const material of Object.keys(batches) as DetailMaterial[]) {
-    const instances = batches[material]
-    if (instances.length === 0) continue
-    const mesh = new THREE.InstancedMesh(geometry, materials[material], instances.length)
-    mesh.name = `architecture:${material}`
+  const addBatch = (
+    material: DetailMaterial,
+    instances: readonly BoxDetail[],
+    sharedGeometry: THREE.BufferGeometry,
+    name: string,
+  ): void => {
+    if (instances.length === 0) return
+    const mesh = new THREE.InstancedMesh(sharedGeometry, materials[material], instances.length)
+    mesh.name = name
     mesh.castShadow = material === 'structure'
       || material === 'darkStructure'
       || material === 'trim'
@@ -356,5 +400,11 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     mesh.computeBoundingBox()
     mesh.computeBoundingSphere()
     parent.add(mesh)
+  }
+  for (const material of Object.keys(batches) as DetailMaterial[]) {
+    addBatch(material, batches[material], geometry, `architecture:${material}`)
+  }
+  for (const material of Object.keys(panels) as PanelMaterial[]) {
+    addBatch(material, panels[material], panelGeometry, `architecture:${material}-panels`)
   }
 }

@@ -51,6 +51,74 @@ function invariant(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`Protocol Lab invariant: ${message}`)
 }
 
+function assertSuccessfulOptimizationTimestamp(
+  lane: TraceProtocolLaneSnapshot,
+  timestamp: number,
+): void {
+  // TiKV rejects final_min_commit_ts > max_commit_ts, not equality. A zero
+  // optimization response and its normal-2PC fallback are outside these lanes.
+  // tikv a2c58c94, storage/txn/actions/prewrite.rs:815-853.
+  invariant(
+    lane.requestMinCommitTs !== null && timestamp >= lane.requestMinCommitTs,
+    `${lane.id} successful optimization timestamp is below its request floor`,
+  )
+  invariant(
+    lane.maxCommitTs !== null && timestamp <= lane.maxCommitTs,
+    `${lane.id} successful optimization timestamp exceeds max_commit_ts; fallback is not modeled in this fixture`,
+  )
+}
+
+function validateLaneTransition(
+  lane: TraceProtocolLaneSnapshot,
+  next: TraceProtocolLaneSnapshot['stage'],
+): void {
+  const transitions: Partial<Record<TraceProtocolLaneSnapshot['stage'], readonly TraceProtocolLaneSnapshot['stage'][]>> = {
+    idle: ['requested'],
+    requested: ['started'],
+    started: ['candidates_checked'],
+    candidates_checked: ['latest_ts'],
+    latest_ts: lane.protocol === '1pc' ? ['prewriting'] : ['selected'],
+    selected: ['prewriting'],
+    prewriting: lane.protocol === '1pc' ? ['committing'] : ['prewritten'],
+    prewritten: lane.protocol === 'async_commit' ? ['client_acknowledged'] : ['commit_ts'],
+    commit_ts: ['committing'],
+    committing: ['client_acknowledged'],
+    client_acknowledged: lane.protocol === '1pc' ? ['complete'] : ['background'],
+    background: ['complete'],
+  }
+  invariant(
+    transitions[lane.stage]?.includes(next),
+    `${lane.id} cannot advance directly from ${lane.stage} to ${next}`,
+  )
+  if (next === 'started') {
+    invariant(lane.startTs !== null, `${lane.id} cannot start without start_ts`)
+  }
+  if (next === 'latest_ts') {
+    invariant(
+      lane.latestTs !== null && lane.requestMinCommitTs !== null && lane.maxCommitTs !== null,
+      `${lane.id} must prepare candidate timestamp bounds before batching`,
+    )
+  }
+  if (next === 'prewriting') {
+    invariant(
+      lane.startTs !== null && lane.requestMinCommitTs !== null && lane.maxCommitTs !== null,
+      `${lane.id} cannot prewrite before timestamp preparation`,
+    )
+  }
+  if (next === 'prewritten') {
+    invariant(
+      lane.regions.every((region) => region.mvcc.lockCf === 'prewrite'),
+      `${lane.id} cannot finish prewrite before every Region applies its lock`,
+    )
+  }
+  if (next === 'committing' || next === 'commit_ts') {
+    invariant(lane.commitTs !== null, `${lane.id} cannot commit without commit_ts`)
+  }
+  if (next === 'client_acknowledged') {
+    invariant(lane.clientResponded, `${lane.id} cannot acknowledge a pending client`)
+  }
+}
+
 function freezeRegion(
   region: TraceProtocolRegionSnapshot,
 ): TraceProtocolRegionSnapshot {
@@ -166,11 +234,26 @@ function validateEligibility(lane: TraceProtocolLaneSnapshot): void {
     `${lane.id} mutation count disagrees`,
   )
   invariant(
+    Number.isSafeInteger(eligibility.totalKeyBytes) && eligibility.totalKeyBytes >= 0,
+    `${lane.id} total key bytes must be a non-negative safe integer`,
+  )
+  invariant(
     eligibility.asyncKeyCountLimit === 256 &&
       eligibility.asyncTotalKeyBytesLimit === 4096,
     'the comparison is pinned to TiDB v8.5 client defaults',
   )
   invariant(!eligibility.runtimeFallback, 'the comparison has no runtime fallback')
+  if (eligibility.asyncCommitEligible) {
+    invariant(
+      eligibility.mutationCount <= eligibility.asyncKeyCountLimit &&
+        eligibility.totalKeyBytes <= eligibility.asyncTotalKeyBytesLimit,
+      `${lane.id} Async Commit exceeds the client precheck limits`,
+    )
+  }
+  invariant(
+    lane.regions.filter((region) => region.role === 'primary').length === 1,
+    `${lane.id} must have exactly one primary Region`,
+  )
 
   if (lane.id === 'one_pc') {
     invariant(lane.protocol === '1pc', 'one_pc lane must select 1PC')
@@ -213,6 +296,10 @@ function validateRegion(
   lane: TraceProtocolLaneSnapshot,
   region: TraceProtocolRegionSnapshot,
 ): void {
+  invariant(
+    Number.isSafeInteger(region.mutationCount) && region.mutationCount > 0,
+    `Region ${region.regionId} mutation count must be a positive safe integer`,
+  )
   invariant(
     new Set(region.voterStoreIds).size === 3,
     `Region ${region.regionId} requires three distinct voters`,
@@ -290,6 +377,7 @@ function validateRegion(
         region.mvcc.defaultCf === 'value',
       `Region ${region.regionId} returned min_commit_ts before prewrite apply`,
     )
+    assertSuccessfulOptimizationTimestamp(lane, region.returnedMinCommitTs)
   }
 }
 
@@ -347,7 +435,7 @@ function validateProtocolLab(state: TraceProtocolLabSnapshot): void {
     if (lane.maxCommitTs !== null) {
       invariant(
         lane.requestMinCommitTs !== null &&
-          lane.maxCommitTs > lane.requestMinCommitTs,
+          lane.maxCommitTs >= lane.requestMinCommitTs,
         `${lane.id} max_commit_ts bound is invalid`,
       )
     }
@@ -357,6 +445,19 @@ function validateProtocolLab(state: TraceProtocolLabSnapshot): void {
         `${lane.id} commit_ts must be greater than start_ts`,
       )
       invariant(lane.commitTsSource !== null, `${lane.id} commit_ts needs a source`)
+      invariant(
+        lane.requestMinCommitTs !== null && lane.commitTs >= lane.requestMinCommitTs,
+        `${lane.id} commit_ts must respect its prepared request floor`,
+      )
+      invariant(
+        lane.commitTsSource === (lane.protocol === '1pc'
+          ? 'tikv_one_pc_result'
+          : lane.protocol === 'async_commit'
+            ? 'max_prewrite_min_commit_ts'
+            : 'pd_tso_after_prewrite'),
+        `${lane.id} commit timestamp authority disagrees with its protocol`,
+      )
+      if (lane.protocol !== '2pc') assertSuccessfulOptimizationTimestamp(lane, lane.commitTs)
     } else {
       invariant(lane.commitTsSource === null, `${lane.id} has a source without commit_ts`)
     }
@@ -514,19 +615,27 @@ export function reduceProtocolLabState(
         lane.stage === delta.from,
         `${lane.id} stage is ${lane.stage}, expected ${delta.from}`,
       )
+      validateLaneTransition(lane, delta.to)
       return { ...lane, stage: delta.to }
     })
   } else if (delta.kind === 'protocol_timestamp') {
     next = replaceLane(current, delta.laneId, (lane) => {
+      invariant(
+        Number.isSafeInteger(delta.timestamp) && delta.timestamp > 0,
+        `${lane.id} timestamp must be a positive safe integer`,
+      )
       if (delta.purpose === 'start_ts') {
         invariant(delta.source === 'pd', 'start_ts must come from PD')
+        invariant(lane.startTs === null, `${lane.id} cannot replace start_ts`)
         return { ...lane, startTs: delta.timestamp }
       }
       if (delta.purpose === 'latest_ts') {
         invariant(delta.source === 'pd', 'latest_ts must come from PD')
+        invariant(lane.latestTs === null, `${lane.id} cannot replace latest_ts`)
         return { ...lane, latestTs: delta.timestamp }
       }
       if (delta.purpose === 'request_min_commit_ts') {
+        invariant(lane.requestMinCommitTs === null, `${lane.id} cannot replace its request floor`)
         invariant(
           delta.source === 'tidb_model_bound',
           'request min_commit_ts is a modeled TiDB floor',
@@ -534,6 +643,7 @@ export function reduceProtocolLabState(
         return { ...lane, requestMinCommitTs: delta.timestamp }
       }
       if (delta.purpose === 'max_commit_ts') {
+        invariant(lane.maxCommitTs === null, `${lane.id} cannot replace max_commit_ts`)
         invariant(
           delta.source === 'tidb_model_bound',
           'max_commit_ts is a modeled safe-window bound',
@@ -543,6 +653,8 @@ export function reduceProtocolLabState(
       if (delta.purpose === 'returned_min_commit_ts') {
         invariant(delta.source === 'tikv', 'returned min_commit_ts comes from TiKV')
         invariant(delta.regionId !== undefined, 'returned min_commit_ts needs a Region')
+        const region = regionById(lane, delta.regionId)
+        invariant(region.returnedMinCommitTs === null, `Region ${region.regionId} cannot replace its prewrite result`)
         return replaceRegion(lane, delta.regionId, (region) => ({
           ...region,
           returnedMinCommitTs: delta.timestamp,
@@ -556,9 +668,32 @@ export function reduceProtocolLabState(
       )
       if (delta.purpose === 'commit_ts') {
         invariant(delta.source === 'pd', 'regular 2PC commit_ts must come from PD')
+        invariant(lane.protocol === '2pc', 'PD commit_ts belongs only to regular 2PC')
+        invariant(
+          lane.regions.every((region) => region.mvcc.lockCf === 'prewrite'),
+          'regular 2PC must finish all prewrites before commit_ts allocation',
+        )
       } else {
         invariant(delta.source === 'tikv', `${delta.purpose} must come from TiKV`)
+        if (delta.purpose === 'one_pc_commit_ts') {
+          invariant(lane.protocol === '1pc', 'one_pc_commit_ts belongs only to 1PC')
+          invariant(
+            lane.regions.every((region) => region.mvcc.writeCf === 'commit'),
+            '1PC timestamp result requires atomic commit apply',
+          )
+        } else {
+          invariant(lane.protocol === 'async_commit', 'async_commit_ts belongs only to Async Commit')
+          invariant(
+            lane.regions.every((region) => region.returnedMinCommitTs !== null),
+            'Async commit decision requires every Region prewrite result',
+          )
+          invariant(
+            delta.timestamp === Math.max(...lane.regions.map((region) => region.returnedMinCommitTs!)),
+            'Async commit_ts must equal the maximum returned min_commit_ts',
+          )
+        }
       }
+      invariant(lane.commitTs === null, `${lane.id} cannot replace commit_ts`)
       return {
         ...lane,
         commitTs: delta.timestamp,
@@ -578,6 +713,40 @@ export function reduceProtocolLabState(
               region.raft.stage === 'applied',
             `Region ${region.regionId} cannot replace an unfinished Raft entry`,
           )
+          invariant(
+            Number.isSafeInteger(delta.index) && delta.index > (region.raft.index ?? 0),
+            `Region ${region.regionId} proposal index must advance`,
+          )
+          if (delta.operation === 'prewrite' || delta.operation === 'one_pc_prewrite') {
+            invariant(
+              lane.stage === 'prewriting' && lane.startTs !== null &&
+                lane.requestMinCommitTs !== null && lane.maxCommitTs !== null,
+              'Prewrite proposal requires the prepared transaction dispatch',
+            )
+            invariant(
+              (delta.operation === 'one_pc_prewrite') === (lane.protocol === '1pc'),
+              'Prewrite operation must match its selected protocol',
+            )
+            invariant(
+              region.mvcc.defaultCf === 'empty' && region.mvcc.lockCf === 'empty' && region.mvcc.writeCf === 'empty',
+              'This happy-path fixture cannot prewrite an already applied mutation',
+            )
+          } else {
+            invariant(lane.commitTs !== null, 'Commit proposal requires the established commit timestamp')
+            invariant(region.mvcc.lockCf === 'prewrite', 'Commit requires an applied prewrite lock')
+            invariant(
+              (delta.operation === 'commit_async' && lane.protocol === 'async_commit') ||
+              (delta.operation === 'commit_primary' && lane.protocol === '2pc' && region.role === 'primary') ||
+              (delta.operation === 'commit_secondary' && lane.protocol === '2pc' && region.role === 'secondary'),
+              'Commit operation must match its protocol and primary/secondary role',
+            )
+            if (delta.operation === 'commit_secondary') {
+              invariant(
+                lane.regions.find((candidate) => candidate.role === 'primary')?.mvcc.writeCf === 'commit',
+                'Secondary Commit must follow the primary decision',
+              )
+            }
+          }
           return {
             ...region,
             raft: {

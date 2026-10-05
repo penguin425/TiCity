@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity v0.11.0 model-8 targets the **TiDB v8.5 LTS** line and pins mechanism
+TiCity v0.12.0 model-9 targets the **TiDB v8.5 LTS** line and pins mechanism
 details to TiDB v8.5.0 source commit
 `d13e52ed6e22cc5789bed7c64c861578cd2ed55b`, TiKV v8.5.0 source commit
 `a2c58c94f89cbb410e66d8f85c236308d6fc64f0`, client-go commit
@@ -13,6 +13,20 @@ visible claims are architectural, which values are deliberately
 representative, and which capabilities are not implemented. TiCity is a
 deterministic educational model, not a TiDB emulator or a live-cluster
 observation tool.
+
+## v0.12 precision and inspection
+
+The [refinement review](REFINEMENT.md) records pinned implementation anchors,
+added invariants and intentional omissions. SQL plans are structural route
+models for a built-in demo schema with clustered primary keys; they do not run
+TiDB's optimizer. Unsupported grammar and key coercions are rejected.
+Normal SQL requests preserve the live cluster state after a guided scenario;
+only an explicit guided rerun resets the independent fixture.
+
+`dependsOn` records causality. `presentationAfter` records only a teaching
+clock fence and is never counted as a causal parent. The common inspector
+shows these separately and links a mechanism's fixed reference implementation,
+without claiming each synthetic event represents a single upstream line.
 
 ## Claims represented directly
 
@@ -75,7 +89,7 @@ table-level replica and lets the cost-based optimizer choose TiKV, TiFlash, or
 both; an aggregate is not automatically a TiFlash query.
 
 The default city topology still has one overview TiFlash building. The
-model-8 TiFlash/MPP Lab is a separate, scenario-local two-Store teaching
+model-9 TiFlash/MPP Lab is a separate, scenario-local two-Store teaching
 fixture so it can show Store-address grouping with opaque Store tokens and a
 real all-to-all HashPartition shape. Its three Region assignments, two
 fragments, four tasks, six tunnels, synthetic indexes, row/block/packet
@@ -232,7 +246,7 @@ over that receipt; they do not resend the request, rerun the election, or
 choose a different winner. The snapshots retain no SQL text, literal, key,
 value, or result row and have `MODEL / SIMULATED` provenance.
 
-The model-8 `commit-protocols` scenario is a fourth mechanism-level vertical
+The model-9 `commit-protocols` scenario is a fourth mechanism-level vertical
 slice. Its single immutable 75-event receipt contains three independent,
 representative optimistic global transactions in a fixed teaching order. The
 lanes compare protocol message and state-transition shape; they are not three
@@ -300,7 +314,7 @@ identifiers, and modeled timestamps. It contains no SQL text, literal, real
 key, secondary-key list, value, result row, digest, packet, or live-cluster
 observation.
 
-The model-8 `gc-safe-point` scenario is a fifth mechanism-level vertical
+The model-9 `gc-safe-point` scenario is a fifth mechanism-level vertical
 slice. Its single immutable 45-event receipt contains two
 deterministic coordinator and storage rounds. It is not a trace captured from
 a cluster, a full GC-worker emulator, a timing benchmark, or an execution of
@@ -378,13 +392,14 @@ and visibly synthetic transaction, lock, range, chain, and version IDs. It
 contains no SQL text, literal, real or encoded key, key range, row value,
 result row, packet, SST content, or live-cluster observation.
 
-The model-8 `tiflash-mpp` scenario is a sixth mechanism-level vertical slice.
-Its immutable 56-event receipt deliberately begins with a fixed steady-state
+The model-9 `tiflash-mpp` scenario is a sixth mechanism-level vertical slice.
+Its immutable 57-event receipt deliberately begins with a fixed steady-state
 learner backlog, not a client write and not initial replica creation. Three
 TiKV Region commits are forwarded through the proxy as ordinary learner
 commands. Region 24 applies its command before the analytical query begins;
-Regions 25 and 26 remain behind until their per-Region learner-read gates
-require the missing indexes. The three learner entries are one scheduled
+Regions 25 and 26 begin behind. Persistent replication continues independently
+while query gates wait for missing indexes. Display fences keep the teaching
+sequence legible without making replication depend on the query. The three learner entries are one scheduled
 replica projection per selected query Region; unselected learners and the
 table's complete replica inventory are outside this receipt.
 
@@ -415,6 +430,14 @@ ephemeral aggregate blocks to two final tasks. Two PassThrough streams carry
 the final-task blocks to TiDB's root gather. HashPartition is not broadcast,
 PassThrough is not broadcast, and no Exchange event mutates a learner index,
 Raft state, or persistent MVCC data.
+
+TiDB can expose the first decoded chunk while another root stream is pending.
+This receipt declares a first packet large enough to supply that chunk; it
+continues decoding the second stream, then records both EOFs before completing
+the client response. Real chunk filling can wait for more packets. The fixture
+freezes concurrent writes while demonstrating ReadIndex; it does not implement
+ReadIndex capture during a changing leader log. DeltaMerge committed write here
+means storage/MVCC visibility, not a disk fsync or an SST compaction boundary.
 
 The baseline records `retryCount=0` and `fallbackToTiKV=false`; it models no
 failure or recovery branch. That does not imply that every MPP failure is
@@ -449,7 +472,7 @@ GC/storage, or TiFlash/MPP projection depth of these six vertical slices.
 
 ## SQL boundary
 
-Model-8 preserves scalar/grouped aggregate shape in both analysis and ReplaySpec
+Model-9 preserves scalar/grouped aggregate shape in both analysis and ReplaySpec
 without retaining SQL or literals. Ordinary scalar COUNT uses representative
 TiFlash partial aggregation and a TiDB final aggregate; grouped aggregation
 can use the fixed HashPartition MPP fixture. Only grouped queries select that
@@ -476,4 +499,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.11.0.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.12.0.

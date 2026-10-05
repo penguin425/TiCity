@@ -133,7 +133,7 @@ const COPY: Readonly<Record<Locale, TiFlashMppLabCopy>> = {
     leaderCommit: 'leader commit',
     received: 'learner receive',
     raftCommand: 'Raft command',
-    deltaMergeFlushed: 'Delta Merge flush',
+    deltaMergeFlushed: 'DM committed write',
     applied: 'learner apply',
     requiredReadIndex: 'required ReadIndex',
     readGate: 'snapshot gate',
@@ -259,7 +259,7 @@ const COPY: Readonly<Record<Locale, TiFlashMppLabCopy>> = {
     leaderCommit: 'Leader commit',
     received: 'Learner received',
     raftCommand: 'Raft command',
-    deltaMergeFlushed: 'Delta Merge flushed',
+    deltaMergeFlushed: 'DM committed write',
     applied: 'Learner applied',
     requiredReadIndex: 'Required ReadIndex',
     readGate: 'Snapshot gate',
@@ -874,7 +874,7 @@ export function createTiFlashMppLabPanel(
     root,
     update(event): void {
       /*
-       * Deliberately retain only the synthetic model-8 snapshot. Event labels,
+       * Deliberately retain only the synthetic model-9 snapshot. Event labels,
        * details, metadata, SQL, and active-event payloads never enter this UI.
        */
       currentSnapshot = event?.snapshot?.tiflashMppLab

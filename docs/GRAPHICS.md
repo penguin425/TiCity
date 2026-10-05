@@ -29,6 +29,24 @@ same authored dimensions. A vertical dial gives the PD drum a recognizable
 clock silhouette. The lower camera exposes more of the buildings' sides;
 lower, wider side scenery gives the main facilities more prominence.
 
+The v0.12 refinement gives each deck a supported service stair, bridge landing,
+handrails and continuous cooling headers. Fans and guards use their authored
+world dimensions, without inheriting the cabinet's nonuniform scale. Small fan
+guards share a dedicated smooth-normal mesh sized for the part, saving 6,912
+triangles while preserving the existing rendering budgets. Another 9,740
+triangles are removed from backs and sides of 974 panes hidden by their opaque
+cores and window frames. Their visible fronts retain position, UVs, normals,
+reflection and emission; exposed entrance and gallery glass retain box geometry.
+SQL roof plants sit
+on the terrace deck, inside its parapet. TiFlash gains grounded supports,
+continuous service galleries and a front entry. Local colliders cover the new
+stair footprints, and instancing keeps construction details batched.
+
+The shared event inspector begins folded in City. Expanding it shows causal
+parents/children, the separate display fence and fixed reference sources.
+Keyboard focus pauses trace presentation so the selected explanation remains
+stable. Mobile keeps one full-width column and scrolls only the expanded details.
+
 The earlier Region racks were mostly buried in their decks and rendered black.
 The deck top, rack footing, roof and route ports now share authored height
 constants. Instanced colours no longer depend on a missing vertex-colour
@@ -61,9 +79,10 @@ not separate objects per window or rack.
 ![Curtain walls and mechanical crowns](graphics/architecture-detail.png)
 
 The [2× nighttime close-up](graphics/architecture-night-2x.png) was captured at a
-1200 × 800 CSS viewport with a verified 2400 × 1600 rendering buffer. Resizing
-that same session to compact and back also verified the 1.25×/2× pixel-ratio and
-2048px/4096px shadow transitions without runtime errors.
+1440 × 1000 CSS viewport with a 2880 × 2000 rendering buffer. Desktop and compact
+policies retain the 2×/1.25× pixel-ratio caps and 4096px/2048px shadow maps.
+
+![TiFlash entrance, bracing and service galleries](graphics/tiflash-detail.png)
 
 World-scale stone paving, asphalt grain and turf replace the ground grid.
 Raised planting islands, multilobed trees, hedges, timber benches/pergolas and
@@ -110,13 +129,19 @@ ratio and contact shading in both themes. Compact displays use direct rendering,
 colour remains full-size and multisampled. Diagram lines retain depth testing
 but do not write depth, so faint topology does not become a solid AO occluder.
 Renderer counters include the complete frame, including postprocessing.
+The shell's `renderedFrames` counts completed presentation renders, including
+a compositor's multiple passes as one frame. Browser checks and image capture
+wait on this counter; Three.js `renderer.info.render.frame` counts individual
+render calls and is unsuitable for that wait.
 After a frame takes more than 100 milliseconds of main-thread work, the renderer
 leaves a short input-processing window before submitting the next one (at most
 100 milliseconds). Normal frames have no extra delay. This does not change the
 resolution, materials, lighting or deterministic model steps.
 
 At a 1440 × 1000 Chromium software-WebGL viewport, the reviewed daytime overview
-uses 165 draw calls, about 120,000 triangles and 64 uploaded geometries. The
+uses 173 draw calls, 125,351 triangles and 66 uploaded geometries. The
+preceding v0.11 overview used 165 calls, about 120,000 triangles and 64
+geometries. The
 preceding surface/reflection version used 159 calls, about 115,000 triangles
 and 58 geometries. Before
 the outdoor-reflection/surface correction, it used 159 calls and about 112,000

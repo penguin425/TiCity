@@ -39,6 +39,8 @@ export interface CityShellOptions {
 
 export interface CityShell {
   readonly renderer: THREE.WebGLRenderer
+  /** Completed logical City frames; excludes postprocessing pass counts. */
+  readonly renderedFrames: number
   readonly scene: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   readonly city: TiDBSceneGraph
@@ -369,6 +371,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
 
   return {
     renderer,
+    get renderedFrames(): number { return rendering.renderedFrames },
     scene,
     camera,
     city,

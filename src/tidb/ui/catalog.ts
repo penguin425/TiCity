@@ -423,6 +423,34 @@ export function message<K extends keyof Messages>(locale: Locale, key: K): Messa
 /** Classifier messages are stable, literal-free model metadata. The view
  * translates them without modifying the receipt or retaining SQL input. */
 const SQL_EXPLANATION_COPY: Readonly<Record<string, { ja: string; en: string }>> = {
+  'Primary-key literals must match the demo integer or string key type without coercion.': {
+    ja: '主キーのリテラルは、demo の整数型または文字列型に一致する必要があります。型変換が必要な値は未対応です。',
+    en: 'Primary-key literals must match the demo integer or string key type without coercion.',
+  },
+  'Executable comments and optimizer hints are outside the current route model.': {
+    ja: '実行可能コメントと optimizer hint は、この経路モデルの対応範囲外です。',
+    en: 'Executable comments and optimizer hints are outside the current route model.',
+  },
+  'Only the built-in demo tables in the demo schema are modeled.': {
+    ja: '対応範囲は demo schema に定義した学習用テーブルです。他の schema や未定義テーブルは未対応です。',
+    en: 'Only the built-in demo tables in the demo schema are modeled.',
+  },
+  'Only column, wildcard, and simple aggregate projections are modeled.': {
+    ja: 'SELECT の対応範囲は列、ワイルドカード、単純な集約です。複雑な式や出力先指定は未対応です。',
+    en: 'Only column, wildcard, and simple aggregate projections are modeled.',
+  },
+  'ORDER BY, LIMIT, and extra statement clauses are outside the current route model.': {
+    ja: 'ORDER BY、LIMIT、追加の statement clause は、この経路モデルの対応範囲外です。',
+    en: 'ORDER BY, LIMIT, and extra statement clauses are outside the current route model.',
+  },
+  'Only simple non-primary-key UPDATE assignments are modeled.': {
+    ja: 'UPDATE の対応範囲は、主キー以外の列への単純な代入です。主キー移動や複雑な式は未対応です。',
+    en: 'Only simple non-primary-key UPDATE assignments are modeled.',
+  },
+  'Only plain EXPLAIN around one supported DML statement is modeled.': {
+    ja: '対応範囲は、対応する 1 つの DML statement に対する通常の EXPLAIN です。追加オプションは未対応です。',
+    en: 'Only plain EXPLAIN around one supported DML statement is modeled.',
+  },
   'Only one FROM table with an optional alias is modeled.': {
     ja: '対応範囲は、1 つのテーブルと任意の alias です。複数テーブルの FROM は未対応です。',
     en: 'Only one FROM table with an optional alias is modeled.',
