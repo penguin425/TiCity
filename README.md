@@ -19,11 +19,17 @@ See the [day/night graphics and rendering design](docs/GRAPHICS.md), including
 close-up and mobile views and the reproducible screenshot command.
 
 > [!IMPORTANT]
-> TiCity v0.11.0 targets the TiDB v8.5 LTS
-> line as a static, offline model and includes the model-8 TiFlash/MPP Lab.
+> TiCity v0.12.0 targets the TiDB v8.5 LTS
+> line as a static, offline model and includes the model-9 TiFlash/MPP Lab.
 > TiCity does not execute SQL or return real data or invented result rows. A
 > single SQL statement entered by the user is classified entirely in the
 > browser, and only a modeled route and explanation are generated.
+
+The v0.12 refinement tightens SQL syntax and primary-key routing, live quorum
+failures, GC compaction decisions and streaming MPP results. City, Machine and
+Diagnose share an expandable inspector for direct causal links, display ordering
+and pinned reference implementations. See [Refinement](docs/REFINEMENT.md) for
+source evidence and the boundaries of these teaching fixtures.
 
 ## What you can inspect
 
@@ -56,7 +62,7 @@ close-up and mobile views and the reproducible screenshot command.
 - Client-response boundaries that leave no 1PC cleanup, both Async Commit
   Regions for background commit-record resolution, and the regular 2PC
   secondary for background commit
-- A model-8 GC/Storage Lab that expands one 45-event immutable
+- A model-9 GC/Storage Lab that expands one 45-event immutable
   receipt into two GC rounds: an active transaction first caps the candidate
   at global `minStartTS - 1`, then an explicit fixture boundary completes that
   transaction and lets the second candidate advance
@@ -68,7 +74,7 @@ close-up and mobile views and the reproducible screenshot command.
   the default Compaction Filter path with retained Put anchors
 - Logical MVCC chains counted once rather than multiplied by three replicas,
   including a Delete-chain example and long-value cleanup in DEFAULT CF
-- A model-8 TiFlash/MPP Lab that expands one 56-event immutable receipt from
+- A model-9 TiFlash/MPP Lab that expands one 57-event immutable receipt from
   persistent Region learner replication through per-Region snapshot gates and
   ephemeral MPP Exchange to the distinct TiDB root
 - Three selected learner projections for Regions 24–26 across two
@@ -218,11 +224,11 @@ line-level references.
 
 ![TiCity GC/Storage Lab at the first-round Compaction Filter event](docs/gc-storage-lab.png)
 
-Open the TiFlash/MPP Lab at the same exact model-8 event in
+Open the TiFlash/MPP Lab at the same exact model-9 event in
 [City](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37),
 [Machine](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37),
 or [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37).
-Its immutable 56-event receipt begins with a fixed steady-state learner
+Its immutable 57-event receipt begins with a fixed steady-state learner
 backlog. It does not model a client write or initial replica creation. The
 three selected learner projections cover Regions 24–26 across two
 scenario-local TiFlash Stores; they are a bounded teaching fixture, not every
@@ -272,7 +278,7 @@ failure-boundary qualifications.
 6. A sequential-key hotspot and Region split
 7. A TiKV failure and leader election
 8. A two-round, 45-event long-running transaction and GC/storage trace
-9. A 56-event TiFlash learner-replication, snapshot-gating, and MPP Exchange trace
+9. A 57-event TiFlash learner-replication, snapshot-gating, and MPP Exchange trace
 
 ## Local development
 
@@ -323,7 +329,7 @@ src/tidb/
   separately from the model's deterministic 13-tick elapsed value and
   candidate policy. PD is observer/routing-only, and the retry remains inside
   TiDB as the same logical Region request with no application retry.
-- In the model-8 Protocol Lab, 1PC, Async Commit, and regular 2PC are three
+- In the model-9 Protocol Lab, 1PC, Async Commit, and regular 2PC are three
   independent representative fixtures. Their event durations and sequential
   display order are not a latency comparison. `start_ts` and `latest_ts` come
   from modeled PD TSO calls, the 1PC timestamp comes from the TiKV result, the
@@ -333,7 +339,7 @@ src/tidb/
   per-Region Raft mutation chains. Each chain independently shows propose,
   two-voter persistence, 2-of-3 commit, and apply before its conceptual MVCC
   state changes.
-- In the model-8 GC/Storage Lab, all 45 events carry one deeply
+- In the model-9 GC/Storage Lab, all 45 events carry one deeply
   frozen `gcLab` post-event snapshot. City, Machine, and Diagnose project that
   same selected snapshot. The first safe point is capped to
   `globalMinStartTS - 1`; service-point selection, `mysql.tidb` staging,
@@ -343,7 +349,7 @@ src/tidb/
   classic raftstore-v1 fixture. ResolveLock's internal Raft detail, raftstore-v2
   Delete Range behavior, compaction scheduling/timing, actual SST layout,
   physical bytes, and Raft log GC are not modeled.
-- In the model-8 TiFlash/MPP Lab, all 56 events carry one deeply frozen
+- In the model-9 TiFlash/MPP Lab, all 57 events carry one deeply frozen
   `tiflashMppLab` post-event snapshot. The three selected Region learners span
   two scenario-local TiFlash Stores. Persistent learner replication remains
   separate from six ephemeral Exchange tunnels; two fragments and four

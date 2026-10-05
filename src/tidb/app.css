@@ -2098,7 +2098,8 @@ a {
     "heading controls"
     "current controls"
     "rail controls"
-    "progress controls";
+    "progress controls"
+    "inspector inspector";
   grid-template-columns: minmax(0, 1fr) 11.5rem;
   gap: 0.42rem 0.75rem;
   overflow: hidden;
@@ -2138,9 +2139,74 @@ a {
   content: "";
 }
 
+.tidb-trace-playback__inspector {
+  grid-area: inspector;
+  min-width: 0;
+  max-height: min(42vh, 24rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tidb-trace-playback__inspector .tidb-trace-inspector {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  color: var(--city-text);
+  background: var(--city-panel-solid);
+  border-color: var(--city-line);
+  font-size: 0.75rem;
+}
+
 .tidb-layout[data-panel="open"] .tidb-trace-playback {
   left: calc((100% - 25rem) / 2);
   width: min(38rem, calc(100vw - 27rem));
+}
+
+@media (min-width: 1200px) {
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback {
+    left: auto;
+    right: max(0.8rem, env(safe-area-inset-right));
+    width: min(42rem, calc(100% - 49rem));
+    transform: none;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1199px) {
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback {
+    left: auto;
+    right: max(0.8rem, env(safe-area-inset-right));
+    width: 23rem;
+    grid-template-areas:
+      "heading"
+      "current"
+      "rail"
+      "progress"
+      "controls"
+      "inspector";
+    grid-template-columns: minmax(0, 1fr);
+    transform: none;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__eyebrow {
+    display: none;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__controls {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__control {
+    min-height: 2.75rem;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__control.is-loop {
+    min-height: 2.75rem;
+    grid-column: auto;
+  }
 }
 
 .tidb-layout[data-camera-view="orbit"][data-trace-state="playing"] .tidb-scene-hint,
@@ -2423,7 +2489,8 @@ a {
       "current"
       "rail"
       "progress"
-      "controls";
+      "controls"
+      "inspector";
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -2738,11 +2805,18 @@ a {
   .tidb-gc-storage-lab,
   .tidb-tiflash-mpp-lab {
     right: max(0.5rem, env(safe-area-inset-right));
-    bottom: calc(10.5rem + env(safe-area-inset-bottom));
+    bottom: calc(14rem + env(safe-area-inset-bottom));
     left: max(0.5rem, env(safe-area-inset-left));
     width: auto;
     max-width: none;
     max-height: none;
+  }
+
+  .tidb-layout:has(.tidb-trace-inspector[open]) :is(
+    .tidb-transaction-lab, .tidb-lock-lab, .tidb-raft-lab,
+    .tidb-protocol-lab, .tidb-gc-storage-lab, .tidb-tiflash-mpp-lab
+  ) {
+    bottom: calc(12rem + min(32svh, 18rem) + env(safe-area-inset-bottom));
   }
 
   .tidb-protocol-lab__lane-list {
@@ -2766,7 +2840,8 @@ a {
       "current"
       "rail"
       "progress"
-      "controls";
+      "controls"
+      "inspector";
     grid-template-columns: minmax(0, 1fr);
     gap: 0.34rem;
     padding: 0.58rem;
@@ -2774,6 +2849,10 @@ a {
 
   .tidb-trace-playback__controls {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .tidb-trace-playback__inspector {
+    max-height: min(32svh, 18rem);
   }
 
   .tidb-trace-playback__control {

@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Pure model-8 TiFlash learner replication and MPP state. The fixed fixture
+ * Pure model-9 TiFlash learner replication and MPP state. The fixed fixture
  * uses synthetic identifiers, indexes, timestamps, and aggregate counters.
  */
 
@@ -363,6 +363,7 @@ function validResultTransition(
     (from === 'idle' && to === 'chunks_decoded') ||
     (from === 'chunks_decoded' && to === 'columns_sent') ||
     (from === 'columns_sent' && to === 'rows_streaming') ||
+    (from === 'rows_streaming' && to === 'rows_streaming') ||
     (from === 'rows_streaming' && to === 'streams_eof') ||
     (from === 'streams_eof' && to === 'client_complete')
   )
@@ -399,6 +400,10 @@ function validateTiFlashMppLab(state: TraceTiFlashMppLabSnapshot): void {
     'the success fixture cannot contain retry or fallback state',
   )
   invariant(state.stores.length === 2, 'the fixture requires two TiFlash stores')
+  invariant(
+    new Set(state.stores.map((store) => store.storeId)).size === 2,
+    'participating TiFlash store identities must be unique',
+  )
   invariant(state.learners.length === 3, 'the fixture requires three learners')
   invariant(
     new Set(state.learners.map((learner) => learner.regionId)).size === 3,
@@ -466,12 +471,44 @@ function validateTiFlashMppLab(state: TraceTiFlashMppLabSnapshot): void {
   invariant(state.tunnels.length <= 6, 'tunnel capacity exceeded')
   if (state.fragments.length > 0) {
     invariant(state.fragments.length === 2, 'both fragments are built together')
+    invariant(
+      new Set(state.fragments.map((fragment) => fragment.id)).size === 2,
+      'MPP fragment identities must be unique',
+    )
   }
   if (state.tasks.length > 0) {
     invariant(
       state.fragments.length === 2 && state.tasks.length === 4,
       'four tasks require two fragments',
     )
+    invariant(
+      new Set(state.tasks.map((task) => task.id)).size === state.tasks.length,
+      'MPP task identities must be unique',
+    )
+    for (const fragment of state.fragments) {
+      invariant(
+        fragment.taskIds.length === 2 &&
+          new Set(fragment.taskIds).size === 2 &&
+          fragment.taskIds.every((taskId) =>
+            taskById(state, taskId).fragmentId === fragment.id),
+        `${fragment.id} must name its two participating tasks`,
+      )
+    }
+    for (const store of state.stores) {
+      const scan = taskById(state, store.scanTaskId)
+      const final = taskById(state, store.finalTaskId)
+      invariant(
+        scan.fragmentId === 'fragment-scan' &&
+          final.fragmentId === 'fragment-final' &&
+          scan.storeId === store.storeId &&
+          final.storeId === store.storeId &&
+          JSON.stringify([...scan.regionIds].sort()) ===
+            JSON.stringify([...store.regionIds].sort()) &&
+          scan.regionIds.every((regionId) =>
+            learnerByRegion(state, regionId).learnerStoreId === store.storeId),
+        `${store.storeId} task placement must match its selected learner Regions`,
+      )
+    }
     const scanRegions = state.tasks
       .filter((task) => task.fragmentId === 'fragment-scan')
       .flatMap((task) => task.regionIds)
@@ -530,6 +567,8 @@ function validateTiFlashMppLab(state: TraceTiFlashMppLabSnapshot): void {
           : taskById(state, tunnel.targetTaskId)
         invariant(
           target !== null &&
+            source.fragmentId === 'fragment-scan' &&
+            target.fragmentId === 'fragment-final' &&
             tunnel.locality ===
               (source.storeId === target.storeId ? 'local' : 'remote'),
           `${tunnel.id} HashPartition cannot target TiDB`,
@@ -542,6 +581,23 @@ function validateTiFlashMppLab(state: TraceTiFlashMppLabSnapshot): void {
         `${tunnel.id} aggregate packet projection is inconsistent`,
       )
     }
+    invariant(
+      new Set(state.tunnels.map((tunnel) => tunnel.id)).size === state.tunnels.length,
+      'MPP tunnel identities must be unique',
+    )
+    const hashLinks = state.tunnels.filter((tunnel) => tunnel.exchangeType === 'hash_partition')
+    invariant(
+      new Set(hashLinks.map((tunnel) =>
+        `${tunnel.sourceTaskId}:${tunnel.targetTaskId}`)).size === 4,
+      'HashPartition requires each scan-to-final task pair exactly once',
+    )
+    const rootLinks = state.tunnels.filter((tunnel) => tunnel.exchangeType === 'pass_through')
+    invariant(
+      new Set(rootLinks.map((tunnel) => tunnel.sourceTaskId)).size === 2 &&
+        rootLinks.every((tunnel) =>
+          taskById(state, tunnel.sourceTaskId).feedsTiDBRoot),
+      'PassThrough requires one root stream from each final task',
+    )
   }
   invariant(
     state.result.taskId === 'tidb-root' &&
@@ -841,6 +897,34 @@ export function reduceTiFlashMppLabState(
         `${task.id} preparation requires its registered server tunnels`,
       )
     }
+    if (delta.to === 'scanning') {
+      // Learner read / lock resolution precedes storage reader construction.
+      // TiFlash checks the Regions owned by this task, not a node-global TSO.
+      invariant(
+        task.regionIds.length > 0 && task.regionIds.every((regionId) =>
+          learnerByRegion(state, regionId).readGate === 'mvcc_checked'),
+        `${task.id} storage readers require every owned Region MVCC gate`,
+      )
+    }
+    if (delta.to === 'partial_aggregated') {
+      // validateQueryInfo follows storage reader construction and precedes
+      // exposing blocks from potentially changed Region ranges to the DAG.
+      invariant(
+        task.regionIds.every((regionId) =>
+          learnerByRegion(state, regionId).postReadValidated),
+        `${task.id} aggregation requires post-read Region validation`,
+      )
+    }
+    if (delta.to === 'final_aggregated') {
+      // This bounded fixture closes its two input partitions before recording
+      // completed final aggregation; one sender cannot stand in for the other.
+      const incoming = tunnels.filter((tunnel) => tunnel.targetTaskId === task.id)
+      invariant(
+        incoming.length === 2 && incoming.every((tunnel) =>
+          tunnel.exchangeType === 'hash_partition' && tunnel.status === 'received'),
+        `${task.id} final aggregation requires both received input partitions`,
+      )
+    }
     tasks = replaceTask(tasks, delta.taskId, (candidate) => ({
       ...candidate,
       stage: delta.to,
@@ -927,7 +1011,8 @@ export function reduceTiFlashMppLabState(
       }))
     } else if (delta.action === 'ready_read_index') {
       invariant(
-        learner.readGate === 'waiting_applied' &&
+        (learner.readGate === 'read_index_returned' ||
+          learner.readGate === 'waiting_applied') &&
           learner.requiredReadIndex !== null &&
           learner.learnerAppliedIndex >= learner.requiredReadIndex,
         'ReadIndex gate cannot release before learner apply',
@@ -1011,11 +1096,28 @@ export function reduceTiFlashMppLabState(
       `invalid result ${delta.from} -> ${delta.to} transition`,
     )
     if (delta.to === 'chunks_decoded') {
+      const rootStreams = state.tunnels.filter((tunnel) =>
+        tunnel.exchangeType === 'pass_through')
       invariant(
-        state.tunnels
-          .filter((tunnel) => tunnel.exchangeType === 'pass_through')
-          .every((tunnel) => tunnel.status === 'received'),
-        'MPP gather cannot decode before both root streams are received',
+        rootStreams.length === 2 &&
+          rootStreams.some((tunnel) => tunnel.status === 'received') &&
+          delta.chunksDecoded > 0,
+        'MPP gather requires a received root packet before its first decoded chunk',
+      )
+    }
+    const receivedRootCount = state.tunnels.filter((tunnel) =>
+      tunnel.exchangeType === 'pass_through' && tunnel.status === 'received').length
+    invariant(
+      delta.rootStreamCount === receivedRootCount,
+      'result root-stream count must describe the packets received so far',
+    )
+    if (delta.to === 'streams_eof') {
+      invariant(receivedRootCount === 2, 'root EOF requires both fixture streams to be consumed')
+    }
+    if (delta.from === 'rows_streaming' && delta.to === 'rows_streaming') {
+      invariant(
+        delta.chunksDecoded > result.chunksDecoded,
+        'continued row streaming requires another decoded chunk',
       )
     }
     invariant(

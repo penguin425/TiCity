@@ -17,6 +17,7 @@ const ANALYSIS = {
   table: 'accounts',
   accessPath: 'point_get',
   aggregateShape: null,
+  predicateShape: 'none',
   readOnly: true,
   plan: [],
   warnings: [],
@@ -74,6 +75,7 @@ function receipt(): TraceReceipt {
         table: 'accounts',
         accessPath: 'point_get',
         aggregateShape: null,
+  predicateShape: 'none',
       },
       transactionMode: 'pessimistic',
       commitProtocol: null,
@@ -196,6 +198,70 @@ describe('trace playback dock', () => {
     loop.click()
     expect(calls).toEqual(['previous', 'toggle', 'next', 'replay', 'loop'])
     expect(dock.root.childNodes).toHaveLength(0)
+  })
+
+  it.each(['focusin', 'pointerdown', 'click'])(
+    'pauses on Inspector %s without replacing the focused projection, and detaches on dispose',
+    (eventType) => {
+      const dom = installTestDom()
+      const trace = receipt()
+      let inspections = 0
+      const dock = createTracePlaybackDock('en', {
+        ...noActions(),
+        onInspect: () => {
+          inspections += 1
+          dock.update(playback(trace, { phase: 'paused', currentIndex: 1 }), trace)
+        },
+      })
+      dock.update(playback(trace, { phase: 'playing', currentIndex: 1 }), trace)
+      const slot = dock.root.querySelector<HTMLElement>('.tidb-trace-playback__inspector')!
+      const inspector = slot.querySelector<HTMLElement>('[data-trace-inspector]')!
+      const summary = inspector.querySelector<HTMLElement>('summary')!
+      summary.focus()
+      // The lightweight DOM has no bubbling or native focus events; deliver
+      // the event at the parent where the browser's descendant event arrives.
+      // Click/pointerdown also cover interaction while focus is already here.
+      slot.dispatchEvent(new Event(eventType))
+
+      expect(inspections).toBe(1)
+      expect(dock.root.dataset.phase).toBe('paused')
+      expect(slot.querySelector('[data-trace-inspector]')).toBe(inspector)
+      expect(dom.document.activeElement).toBe(summary)
+
+      dock.dispose()
+      dock.dispose()
+      slot.dispatchEvent(new Event(eventType))
+      expect(inspections).toBe(1)
+    },
+  )
+
+  it('keeps transport actions and causal seeking separate from Inspector pause intent', () => {
+    installTestDom()
+    const base = receipt()
+    const trace: TraceReceipt = {
+      ...base,
+      events: base.events.map((event, index) =>
+        index === 1 ? { ...event, dependsOn: ['submit'] } : event),
+    }
+    const calls: string[] = []
+    const dock = createTracePlaybackDock('en', {
+      ...noActions(),
+      onTogglePause: () => calls.push('toggle'),
+      onInspect: () => calls.push('inspect'),
+      onSelectEvent: (eventId) => calls.push(`select:${eventId}`),
+    })
+    dock.update(playback(trace, { phase: 'playing', currentIndex: 1 }), trace)
+    const slot = dock.root.querySelector<HTMLElement>('.tidb-trace-playback__inspector')!
+    dock.root.querySelector<HTMLButtonElement>('[data-action="trace-toggle"]')!.click()
+    slot.dispatchEvent(new Event('pointermove'))
+    expect(calls).toEqual(['toggle'])
+
+    slot.querySelector<HTMLButtonElement>('[data-inspector-relation="parent"]')!.click()
+    // FakeDOM does not bubble this button click; send the corresponding
+    // delegated click independently to preserve the native event order.
+    slot.dispatchEvent(new Event('click'))
+    expect(calls).toEqual(['toggle', 'select:submit', 'inspect'])
+    dock.dispose()
   })
 
   it('updates all chrome and rail descriptions when the locale changes', () => {

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { createTiDBSimulation } from '../model'
+import { createTiDBSimulation, TIDB_SCENARIOS } from '../model'
 import type { TraceEvent } from '../model/types'
 import type { DiagnoseCursor } from './cursor'
 import {
@@ -25,6 +25,41 @@ const event: TraceEvent = Object.freeze({
 })
 
 describe('Diagnose page copy', () => {
+  it('keeps all nine scenario option labels localized through the shared fallback', () => {
+    expect(TIDB_SCENARIOS).toHaveLength(9)
+    for (const { id } of TIDB_SCENARIOS) {
+      const events = createTiDBSimulation({ seed: 425 }).runScenario(id).events
+      for (const [index, candidate] of events.entries()) {
+        const cursor: DiagnoseCursor = {
+          event: candidate,
+          snapshot: candidate.snapshot ?? null,
+          snapshotEvent: candidate.snapshot ? candidate : null,
+          resolution: candidate.snapshot ? 'exact' : 'scenario-start',
+        }
+        expect(diagnoseEventName('ja', candidate), `${id}: ${candidate.kind}`)
+          .not.toBe(candidate.label)
+        expect(diagnoseEventOptionLabel('ja', candidate, index, cursor))
+          .toContain(diagnoseEventName('ja', candidate))
+      }
+    }
+  })
+
+  it('uses shared event-kind copy for new generic events without revealing unknown raw prose', () => {
+    const optimistic = createTiDBSimulation({ seed: 425 }).runScenario('optimistic-conflict')
+      .events.find((candidate) => candidate.kind === 'optimistic_prewrite_check')
+    if (!optimistic) throw new Error('Expected optimistic Prewrite check')
+    expect(diagnoseEventName('ja', optimistic)).toBe('楽観的prewriteのMVCC検査')
+    const unknown: TraceEvent = {
+      ...event,
+      kind: 'unknown-source-event',
+      label: 'SELECT secret FROM private_table',
+      detail: 'untrusted raw detail',
+      metadata: { sql: 'SELECT secret FROM private_table' },
+    }
+    expect(diagnoseEventName('ja', unknown)).not.toContain('private_table')
+    expect(diagnoseEventName('ja', unknown)).not.toContain('SELECT')
+  })
+
   it('localizes Lock Lab event labels in Japanese and preserves English', () => {
     expect(diagnoseEventName('ja', event)).toBe('クラスタ全体のdetectorがcycleを検出')
     expect(diagnoseEventName('en', event)).toBe(event.label)
@@ -96,11 +131,11 @@ describe('Diagnose page copy', () => {
     expect(diagnoseEventName('ja', completed)).toContain('GC-key taskがDelete markerを削除')
   })
 
-  it('localizes every model-7 TiFlash/MPP event without changing English', () => {
+  it('localizes every model-9 TiFlash/MPP event including incremental gather progress', () => {
     const events = createTiDBSimulation({ seed: 425 })
       .runScenario('tiflash-mpp')
       .events
-    expect(events).toHaveLength(56)
+    expect(events).toHaveLength(57)
     for (const candidate of events) {
       expect(diagnoseEventName('en', candidate)).toBe(candidate.label)
       expect(diagnoseEventName('ja', candidate)).not.toBe(candidate.label)
@@ -110,6 +145,14 @@ describe('Diagnose page copy', () => {
     expect(applied?.kind).toBe('tiflash_learner_applied_advance')
     expect(applied && diagnoseEventName('ja', applied))
       .toBe('Region 26 learnerのapplied indexが前進')
+    const progress = events.find((candidate) => candidate.kind === 'tiflash_mpp_gather_progress')
+    const streamed = events.find((candidate) => candidate.kind === 'tiflash_client_rows_streamed')
+    expect(progress && diagnoseEventName('ja', progress)).toBe('TiDBが残りのroot streamを消費')
+    expect(progress?.dependsOn).toEqual([streamed?.id])
+    const independentApply = events.find((candidate) =>
+      candidate.kind === 'tiflash_learner_apply_command' && candidate.presentationAfter)
+    expect(independentApply?.presentationAfter).toBeDefined()
+    expect(independentApply?.dependsOn).not.toContain(independentApply?.presentationAfter)
   })
 
   it('marks snapshotless event options and explains the cursor rule visibly', () => {

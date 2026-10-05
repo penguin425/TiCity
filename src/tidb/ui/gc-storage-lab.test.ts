@@ -33,6 +33,7 @@ function detailedSnapshot(): TraceGcLabSnapshot {
   return {
     phase: 'compacting',
     round: 2,
+    compactionFilterApplied: true,
     configuration: {
       gcEnabled: true,
       runIntervalSeconds: 600,

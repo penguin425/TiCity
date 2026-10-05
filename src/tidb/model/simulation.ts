@@ -32,6 +32,7 @@ import {
   createGcLabState,
   freezeGcLabSnapshot,
   isGcLabDelta,
+  planGcCompaction,
   reduceGcLabState,
 } from './gc-lab'
 import {
@@ -304,6 +305,9 @@ class TraceBuilder {
       ...(options.regionId !== undefined ? { regionId: options.regionId } : {}),
       ...(options.transactionId ? { transactionId: options.transactionId } : {}),
       dependsOn: Object.freeze(dependsOn),
+      ...(options.presentationAfter
+        ? { presentationAfter: options.presentationAfter }
+        : {}),
       path: options.path ?? 'critical',
       ...(options.branchId ? { branchId: options.branchId } : {}),
       ...(options.snapshot ? { snapshot: options.snapshot } : {}),
@@ -577,6 +581,7 @@ export function createTiDBSimulation(
   }
 
   function applyRaftWithoutTrace(region: RegionState): boolean {
+    if (!ensureLeader(region)) return false
     const leader = region.peers.find((peer) => peer.storeId === region.leaderStoreId)
     if (!leader?.healthy) return false
     const nextIndex = region.commitIndex + 1
@@ -731,7 +736,7 @@ export function createTiDBSimulation(
   function replicateRaft(
     region: RegionState,
     operation: string,
-    transactionId: string,
+    transactionId: string | undefined,
     builder: TraceBuilder,
     path: TracePath = 'critical',
   ): boolean {
@@ -839,6 +844,8 @@ export function createTiDBSimulation(
     const oldEnd = region.endKey
     const midpoint = Math.floor((region.startKey + oldEnd) / 2)
     if (midpoint <= region.startKey || midpoint >= oldEnd) return
+    // Split is a replicated admin command; range and epoch change on apply.
+    if (!replicateRaft(region, 'region_split', undefined, builder)) return
     const nextId = Math.max(...state.regions.map((candidate) => candidate.id)) + 1
     const halfSize = region.sizeMiB / 2
     region.startKey = midpoint
@@ -966,6 +973,7 @@ export function createTiDBSimulation(
         table: analysisSnapshot.table,
         accessPath: analysisSnapshot.accessPath,
         aggregateShape: analysisSnapshot.aggregateShape,
+        predicateShape: analysisSnapshot.predicateShape,
       }),
       transactionMode: state.controls.transactionMode,
       commitProtocol: protocol,
@@ -1060,12 +1068,19 @@ export function createTiDBSimulation(
           metadata: { regionCount: regions.length, snapshotTs: startTs },
         },
       )
+      // No per-Region self_safe_ts proof is retained in this compact model.
+      // Confirm the voter quorum for each fresh ReadIndex.
+      const failedRegions = regions.filter((region) => !ensureLeader(region, builder))
+      for (const region of failedRegions) {
+        warnings.push(`Region ${region.id} cannot confirm the TiFlash snapshot ReadIndex.`)
+      }
       builder.add(
         'tiflash',
         'learner_snapshot_gate',
         'Gate the TiFlash snapshot per Region',
-        'After task dispatch, TiFlash checks each Region self safe-ts or ReadIndex plus local applied-index readiness. This compact successful fixture summarizes those gates without advancing a node-global resolved-ts to start_ts.',
+        'This compact path retains no self safe-ts proof. After dispatch, every Region needs a live voter quorum for ReadIndex. Local learner apply is collapsed, and a missing quorum fails the query without advancing node-global resolved-ts.',
         {
+          status: failedRegions.length ? 'failed' : 'success',
           source: 'tiflash-1',
           target: 'tiflash-1',
           durationMs: Math.max(
@@ -1076,6 +1091,10 @@ export function createTiDBSimulation(
             regionCount: regions.length,
             snapshotTs: startTs,
             correctnessScope: 'per_region',
+            gateMethod: 'read_index',
+            snapshotReady: failedRegions.length === 0,
+            failedRegionCount: failedRegions.length,
+            learnerApplyCollapsed: true,
             nodeGlobalResolvedTsAdvanced: false,
             staleRead: false,
           },
@@ -1161,7 +1180,7 @@ export function createTiDBSimulation(
   }
 
   /**
-   * Model-8 fixed TiFlash/MPP vertical slice. Region Raft learner replication
+   * Model-9 fixed TiFlash/MPP vertical slice. Region Raft learner replication
    * is persistent storage state; MPP tunnels carry ephemeral aggregate blocks.
    */
   function traceDetailedTiFlashMpp(
@@ -1813,10 +1832,8 @@ export function createTiDBSimulation(
           source: 'tiflash-proxy',
           target: storeId,
           regionId,
-          dependsOn: [waiting.id, received.id],
-          ...(presentationFence
-            ? { presentationAfter: presentationFence }
-            : {}),
+          dependsOn: [received.id],
+          presentationAfter: presentationFence ?? waiting.id,
           branchId: `region-${regionId}`,
           deltas: [{
             kind: 'tiflash_replica_apply',
@@ -2212,7 +2229,7 @@ export function createTiDBSimulation(
       'return',
       'tiflash_mpp_gather_decoded',
       'TiDB MPPGather decoded result chunks',
-      'TiDB consumed both root streams and decoded aggregate packets into internal chunks.',
+      'The first root packet supplies a complete chunk in this fixture; other streams may still be pending.',
       {
         source: 'tidb-root',
         target: 'tidb-1',
@@ -2226,24 +2243,17 @@ export function createTiDBSimulation(
             bytesBucket: 'small',
           },
           {
-            kind: 'tiflash_mpp_tunnel_data',
-            tunnelId: 'tunnel-root-2',
-            action: 'receive',
-            packetCount: 1,
-            bytesBucket: 'small',
-          },
-          {
             kind: 'tiflash_mpp_result_stage',
             from: 'idle',
             to: 'chunks_decoded',
-            rootStreamCount: 2,
-            chunksDecoded: 2,
+            rootStreamCount: 1,
+            chunksDecoded: 1,
             rowsBucket: 'none',
           },
         ],
         metadata: {
-          rootStreamCount: 2,
-          chunksDecoded: 2,
+          rootStreamCount: 1,
+          chunksDecoded: 1,
         },
       },
     )
@@ -2260,8 +2270,8 @@ export function createTiDBSimulation(
           kind: 'tiflash_mpp_result_stage',
           from: 'chunks_decoded',
           to: 'columns_sent',
-          rootStreamCount: 2,
-          chunksDecoded: 2,
+          rootStreamCount: 1,
+          chunksDecoded: 1,
           rowsBucket: 'none',
         }],
         metadata: {
@@ -2282,14 +2292,43 @@ export function createTiDBSimulation(
           kind: 'tiflash_mpp_result_stage',
           from: 'columns_sent',
           to: 'rows_streaming',
-          rootStreamCount: 2,
-          chunksDecoded: 2,
+          rootStreamCount: 1,
+          chunksDecoded: 1,
           rowsBucket: 'small',
         }],
         metadata: {
           rowsBucket: 'small',
           exactValuesRetained: false,
         },
+      },
+    )
+    const gatherProgress = addTiFlashMppEvent(
+      'return',
+      'tiflash_mpp_gather_progress',
+      'TiDB consumed the remaining root stream',
+      'The second root packet extends streaming output after the first chunk has crossed the client boundary.',
+      {
+        source: 'tidb-root',
+        target: 'tidb-1',
+        dependsOn: [rowsStreamed.id],
+        deltas: [
+          {
+            kind: 'tiflash_mpp_tunnel_data',
+            tunnelId: 'tunnel-root-2',
+            action: 'receive',
+            packetCount: 1,
+            bytesBucket: 'small',
+          },
+          {
+            kind: 'tiflash_mpp_result_stage',
+            from: 'rows_streaming',
+            to: 'rows_streaming',
+            rootStreamCount: 2,
+            chunksDecoded: 2,
+            rowsBucket: 'small',
+          },
+        ],
+        metadata: { rootStreamCount: 2, chunksDecoded: 2 },
       },
     )
     const streamsEof = addTiFlashMppEvent(
@@ -2300,7 +2339,7 @@ export function createTiDBSimulation(
       {
         source: 'tidb-root',
         target: 'tidb-1',
-        dependsOn: [rowsStreamed.id],
+        dependsOn: [gatherProgress.id],
         deltas: [{
           kind: 'tiflash_mpp_result_stage',
           from: 'rows_streaming',
@@ -7286,10 +7325,11 @@ export function createTiDBSimulation(
       round: 1 | 2,
       safePoint: number,
       detections: readonly TraceEvent[],
-      filteredVersionIds: readonly string[],
-      retainedAnchorIds: readonly string[],
       finishPhase: 'between_rounds' | 'complete',
     ): TraceEvent {
+      // Capture the complete-chain compaction INPUT once. Its own removals
+      // cannot make a kept Delete eligible for GcKeys in this same pass.
+      const plan = planGcCompaction(gcLab.keyChains, safePoint)
       const started = addGcEvent(
         'gc_compaction_filter_start',
         'RocksDB bottommost compaction opened GC filters',
@@ -7333,19 +7373,19 @@ export function createTiDBSimulation(
           deltas: [{
             kind: 'gc_compaction_filter',
             safePoint,
-            filteredVersionIds,
-            retainedAnchorIds,
+            filteredVersionIds: plan.filteredVersionIds,
+            retainedAnchorIds: plan.retainedAnchorIds,
           }],
           metadata: {
-            filteredVersionsThisRound: filteredVersionIds.length,
-            retainedAnchors: retainedAnchorIds.length,
+            filteredVersionsThisRound: plan.filteredVersionIds.length,
+            retainedAnchors: plan.retainedAnchorIds.length,
             safePointInclusiveInPinnedSource: true,
             logicalProjectionOnly: true,
           },
         },
       )
       let filterDropParent = filtered
-      if (round === 2) {
+      if (plan.eligibleDeleteMarkerIds.length > 0) {
         filterDropParent = addGcEvent(
           'gc_delete_marker_cleanup_scheduled',
           'The second compaction scheduled a Delete-marker GC-key task',
@@ -7355,7 +7395,8 @@ export function createTiDBSimulation(
             target: storeIds[0],
             dependsOn: [filtered.id],
             path: 'background',
-            deltas: [{ kind: 'gc_key_cleanup', safePoint, action: 'schedule', versionIds: ['b-v2'] }],
+            deltas: [{ kind: 'gc_key_cleanup', safePoint, action: 'schedule',
+              versionIds: plan.eligibleDeleteMarkerIds }],
             metadata: {
               task: 'GcTask::GcKeys',
               scheduledBy: 'compaction_filter_drop',
@@ -7388,7 +7429,7 @@ export function createTiDBSimulation(
         },
       )
       let completionParent = storageComplete
-      if (round === 2) {
+      if (plan.eligibleDeleteMarkerIds.length > 0) {
         completionParent = addGcEvent(
           'gc_delete_marker_cleanup_complete',
           'The GC-key task removed the retained Delete marker',
@@ -7400,11 +7441,12 @@ export function createTiDBSimulation(
             path: 'background',
             deltas: [
               { kind: 'gc_phase', round, from: 'compacting', to: 'cleaning_delete_markers' },
-              { kind: 'gc_key_cleanup', safePoint, action: 'delete', versionIds: ['b-v2'] },
+              { kind: 'gc_key_cleanup', safePoint, action: 'delete',
+                versionIds: plan.eligibleDeleteMarkerIds },
             ],
             metadata: {
               task: 'GcTask::GcKeys',
-              deletedMarkers: 1,
+              deletedMarkers: plan.eligibleDeleteMarkerIds.length,
               compactionFilterRemoval: false,
               executionOrder: 'after_compaction_completion_model_fixture',
             },
@@ -7427,7 +7469,7 @@ export function createTiDBSimulation(
           deltas: [{
             kind: 'gc_phase',
             round,
-            from: round === 2 ? 'cleaning_delete_markers' : 'compacting',
+            from: plan.eligibleDeleteMarkerIds.length > 0 ? 'cleaning_delete_markers' : 'compacting',
             to: finishPhase,
           }],
           metadata: {
@@ -7452,8 +7494,6 @@ export function createTiDBSimulation(
       1,
       blockedSafePoint,
       roundOneDetections,
-      ['a-v1', 'b-v1', 'd-v1'],
-      ['a-v2', 'd-v2'],
       'between_rounds',
     )
     const blockerComplete = addGcEvent(
@@ -7721,8 +7761,6 @@ export function createTiDBSimulation(
       2,
       releasedCandidate,
       roundTwoDetections,
-      ['a-v2', 'c-v1'],
-      ['a-v3', 'c-v2', 'd-v2'],
       'complete',
     )
 
@@ -7808,7 +7846,7 @@ export function createTiDBSimulation(
       regionIds: regions.map((region) => region.id),
       primaryRegionId: regions[0].id,
       phase: 'active',
-      conflict: Boolean(request.forceConflict),
+      conflict: false,
     }
     state.transactions.push(transaction)
     trimTransactions()
@@ -7890,7 +7928,24 @@ export function createTiDBSimulation(
     }
 
     if (request.forceConflict) {
+      if (!ensureLeader(regions[0], builder)) {
+        failTransaction(transaction, builder, tidbId, warnings,
+          `Region ${regions[0].id} is unavailable before optimistic prewrite.`)
+        addReturn(builder, false, tidbId)
+        state.metrics.statements++
+        state.metrics.writes++
+        return recordReceipt(id, scenarioId, analysis, startTs, null,
+          'rolled_back', protocol, builder, warnings)
+      }
       transaction.phase = 'prewriting'
+      builder.add('txn2pc', 'optimistic_prewrite_check', 'Check optimistic prewrite',
+        'The live leader checks the optimistic start_ts against MVCC before any Raft proposal.', {
+          source: tidbId,
+          target: regions[0].leaderStoreId,
+          regionId: regions[0].id,
+          transactionId: transaction.id,
+          metadata: { replicated: false, conflictCheckBeforeRaft: true },
+        })
       transaction.conflict = true
       builder.add(
         'txn2pc',
@@ -8222,10 +8277,18 @@ export function createTiDBSimulation(
     )
   }
 
-  function requestTrace(request: TraceRequest): TraceReceipt | null {
+  function executeTrace(
+    request: TraceRequest,
+    isolatedScenario = false,
+  ): TraceReceipt | null {
     const { analysis } = request
     if (analysis.status !== 'supported') return null
-    const scenarioId = request.scenarioId ?? state.scenario
+    if (request.forceConflict && (
+      state.controls.transactionMode !== 'optimistic' || analysis.readOnly
+    )) return null
+    // Workbench requests operate on the current cluster and never inherit a
+    // teaching fixture. Only runScenario resets and creates an isolated slice.
+    const scenarioId = request.scenarioId ?? null
     const id = `trace-${++receiptCounter}`
     const builder = new TraceBuilder(id, state.controls.networkLatencyMs)
     const warnings: string[] = []
@@ -8235,6 +8298,7 @@ export function createTiDBSimulation(
       .map((regionId) => state.regions.find((region) => region.id === regionId))
       .filter((region): region is RegionState => Boolean(region))
     if (
+      isolatedScenario &&
       (scenarioId === 'cross-region-transaction' || scenarioId === 'lock-deadlock') &&
       regions.length > 0
     ) {
@@ -8265,7 +8329,7 @@ export function createTiDBSimulation(
       return traceExplain(id, analysis, scenarioId, builder, warnings)
     }
     if (
-      scenarioId === 'tikv-failover' &&
+      isolatedScenario && scenarioId === 'tikv-failover' &&
       analysis.readOnly &&
       regions.length === 1
     ) {
@@ -8278,7 +8342,7 @@ export function createTiDBSimulation(
       )
     }
     if (
-      scenarioId === 'tiflash-mpp' &&
+      isolatedScenario && scenarioId === 'tiflash-mpp' &&
       analysis.readOnly &&
       analysis.accessPath === 'tiflash_mpp' &&
       analysis.aggregateShape === 'grouped' &&
@@ -8292,9 +8356,14 @@ export function createTiDBSimulation(
       )
     }
     if (analysis.readOnly) {
+      if (scenarioId === 'tikv-failover' && !isolatedScenario) {
+        // An explicit compact failure acts on the live state. It cannot revive
+        // an unavailable Store or restore a fixture's synthetic log baseline.
+        markStoreDown(regions[0].leaderStoreId)
+      }
       return traceRead(id, analysis, scenarioId, regions, builder, warnings)
     }
-    if (scenarioId === 'gc-safe-point') {
+    if (isolatedScenario && scenarioId === 'gc-safe-point') {
       return traceDetailedGcStorage(
         id,
         analysis,
@@ -8302,7 +8371,7 @@ export function createTiDBSimulation(
         warnings,
       )
     }
-    if (scenarioId === 'commit-protocols') {
+    if (isolatedScenario && scenarioId === 'commit-protocols') {
       return traceDetailedCommitProtocols(
         id,
         analysis,
@@ -8311,7 +8380,7 @@ export function createTiDBSimulation(
       )
     }
     if (
-      scenarioId === 'lock-deadlock' &&
+      isolatedScenario && scenarioId === 'lock-deadlock' &&
       regions.length === 2 &&
       state.controls.transactionMode === 'pessimistic'
     ) {
@@ -8324,7 +8393,7 @@ export function createTiDBSimulation(
       )
     }
     if (
-      scenarioId === 'cross-region-transaction' &&
+      isolatedScenario && scenarioId === 'cross-region-transaction' &&
       regions.length === 2 &&
       state.controls.transactionMode === 'pessimistic' &&
       (request.forceProtocol ?? state.controls.commitProtocol) === '2pc'
@@ -8338,6 +8407,10 @@ export function createTiDBSimulation(
       )
     }
     return traceWrite(id, request, scenarioId, regions, builder, warnings)
+  }
+
+  function requestTrace(request: TraceRequest): TraceReceipt | null {
+    return executeTrace(request)
   }
 
   function submitSql(sql: string): SqlSubmission {
@@ -8404,13 +8477,13 @@ export function createTiDBSimulation(
     }
 
     const analysis = analyzeSql(scenario.sql)
-    const receipt = requestTrace({
+    const receipt = executeTrace({
       analysis,
       scenarioId: id,
       regionIds: scenario.regionIds,
       forceProtocol: scenario.forceProtocol,
       forceConflict: scenario.forceConflict,
-    })
+    }, true)
     if (!receipt) throw new Error(`Scenario ${id} contains unsupported SQL.`)
     return receipt
   }

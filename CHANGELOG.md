@@ -6,6 +6,37 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-05
+
+- Refine the pinned TiDB 8.5 teaching model as `tidb-v8.5-model-9`, with
+  independent tests of legal interleavings, failure boundaries and live state
+  continuity after guided scenarios.
+- Validate SQL comments, projections, assignments, clauses, demo schema and
+  primary-key literal types. Preserve clustered key-prefix range scans and
+  residual Selection; label KV writes separately from coprocessor reads.
+- Require a voter quorum before split admin apply and fresh compact TiFlash
+  ReadIndex gates. Recover background writes through leader election without
+  reviving unavailable Stores or replaying a previous detailed fixture.
+- Distinguish Raft voting term, last-log term, proposal, persistence and apply;
+  accumulate independent ACKs and permit PD observation before leader apply.
+- Derive GC filtering and cleanup from complete logical chains, protect every
+  retained MVCC snapshot, enforce one filter pass per round and preserve
+  DEFAULT CF cleanup and separate GcKeys marker deletion.
+- Validate protocol timestamp floors and inclusive optimization bounds, MVCC
+  scan gates, MPP task placement and tunnels. Return the first MPP chunk while
+  another root stream remains pending; keep replication independent of query
+  waits and distinguish causal edges from display fences.
+- Add a bilingual, keyboard-accessible shared inspector on City, Machine and
+  Diagnose for causal navigation, critical/background paths, implementation
+  references and explicit model scope.
+- Give raised TiKV decks supported service stairs and correctly sized cooling
+  machinery, seat SQL roof plants on their terraces, and complete TiFlash
+  supports, service galleries and front entry. Preserve selectable Regions
+  and the existing rendering budgets.
+- Publish the refinement evidence and refreshed graphics in the static archive.
+- Count complete rendered presentation frames during verification, independently
+  of the multiple WebGL passes submitted by postprocessing.
+
 ## [0.11.0] — 2026-10-05
 
 - Correct eight source-audited flow families against the pinned TiDB v8.5.0,

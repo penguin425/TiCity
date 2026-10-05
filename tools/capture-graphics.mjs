@@ -30,10 +30,10 @@ try {
   })
   async function settle() {
     await page.evaluate(() => new Promise((done) => {
-      const renderer = window.TICITY.world.shell.renderer
-      const targetFrame = renderer.info.render.frame + 5
+      const shell = window.TICITY.world.shell
+      const targetFrame = shell.renderedFrames + 5
       function frame() {
-        if (renderer.info.render.frame >= targetFrame) done()
+        if (shell.renderedFrames >= targetFrame) done()
         else requestAnimationFrame(frame)
       }
       requestAnimationFrame(frame)
@@ -59,9 +59,9 @@ try {
       await page.evaluate(() => window.TICITY.world.shell.start())
     }
     console.log(name, await page.evaluate(() => {
-      const { renderer } = window.TICITY.world.shell
+      const { renderer, renderedFrames } = window.TICITY.world.shell
       return { ...renderer.info.render, ...renderer.info.memory,
-        programs: renderer.info.programs.length, pixelRatio: renderer.getPixelRatio() }
+        renderedFrames, programs: renderer.info.programs.length, pixelRatio: renderer.getPixelRatio() }
     }))
   }
 

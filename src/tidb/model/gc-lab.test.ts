@@ -5,7 +5,6 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  createGcLabState,
   reduceGcLabState,
 } from './gc-lab'
 import { createTiDBSimulation } from './simulation'
@@ -82,7 +81,7 @@ function labAt(
   return lab
 }
 
-describe('model-8 GC/Storage Lab trace', () => {
+describe('model-9 GC/Storage Lab trace', () => {
   it('publishes one deterministic immutable 45-event causal DAG', () => {
     const first = runGcLab()
     const second = runGcLab()
@@ -441,29 +440,11 @@ describe('model-8 GC/Storage Lab trace', () => {
     expect(projection).toContain('logical_chains_counted_once')
   })
 
-  it('rejects invalid filter ids in the pure reducer', () => {
-    const state = createGcLabState({
-      initialSafePoint: 1_000,
-      blockerTransactionId: 'txn-fixture',
-      blockerStartTs: 1_100,
-      storeIds: ['tikv-1', 'tikv-2', 'tikv-3'],
-      locks: [],
-      deleteRanges: [],
-      keyChains: [{
-        id: 'chain-fixture',
-        regionId: 8,
-        versions: [{
-          id: 'version-fixture',
-          commitTs: 1_050,
-          writeType: 'put',
-          valueStorage: 'write_cf_inline',
-        }],
-      }],
-    })
-
+  it('rejects invalid filter ids in a running compaction', () => {
+    const state = labAt(runGcLab(), 21)
     expect(() => reduceGcLabState(state, {
       kind: 'gc_compaction_filter',
-      safePoint: 1_000,
+      safePoint: state.safePoint.published,
       filteredVersionIds: ['unknown-version'],
       retainedAnchorIds: [],
     })).toThrow(/unknown version/)

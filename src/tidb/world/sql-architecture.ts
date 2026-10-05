@@ -30,6 +30,9 @@ export interface SqlTowerSpec {
   }
 }
 
+/** Exposed working-roof slab above each tier's solid core. */
+export const SQL_TERRACE_HEIGHT = 0.8
+
 /**
  * Three independent, stateless SQL buildings share a construction vocabulary,
  * not a stacked-square silhouette. Broad entrance podiums support rectangular
@@ -49,7 +52,7 @@ export const SQL_TOWERS = [
       { size: [18, 8, 18], position: [-9, 51, -5], columns: [4, 4], floors: 2 },
     ],
     roofPlant: [
-      { size: [5.5, 2.5, 10], position: [-12, 56.75, -7] },
+      { size: [5.5, 2.2, 10], position: [-12, 56.9, -7] },
       { size: [7, 2.8, 4], position: [5, 48.7, -8] },
     ],
     entrance: { x: 7, z: 17.1, width: 12 },
@@ -62,8 +65,8 @@ export const SQL_TOWERS = [
       { size: [19, 11, 18], position: [-2, 65.5, -5], columns: [4, 4], floors: 3 },
     ],
     roofPlant: [
-      { size: [6, 4.5, 11], position: [-6, 73.75, -6] },
-      { size: [4.5, 2.5, 8], position: [11, 61.45, -5] },
+      { size: [6, 4.2, 11], position: [-6, 73.9, -6] },
+      { size: [4.5, 2.4, 8], position: [11, 61.5, -5] },
     ],
     entrance: { x: -8, z: 19.1, width: 11 },
   },
@@ -75,8 +78,8 @@ export const SQL_TOWERS = [
       { size: [24, 13, 16], position: [4, 52.5, -3], columns: [5, 3], floors: 3 },
     ],
     roofPlant: [
-      { size: [9, 4.5, 5], position: [7, 61.75, -6] },
-      { size: [4, 2.5, 10], position: [-13, 47.45, -4] },
+      { size: [9, 4.2, 5], position: [7, 61.9, -6] },
+      { size: [4, 2.4, 10], position: [-13, 47.5, -4] },
     ],
     entrance: { x: -7, z: 16.1, width: 13 },
   },

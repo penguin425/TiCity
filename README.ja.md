@@ -18,10 +18,15 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 再現コマンドをまとめています。
 
 > [!IMPORTANT]
-> TiCity v0.11.0はTiDB v8.5 LTS系列を対象にした
-> 静的・オフラインのモデルで、model-8 TiFlash/MPP Labを含みます。SQLを実行せず、
+> TiCity v0.12.0はTiDB v8.5 LTS系列を対象にした
+> 静的・オフラインのモデルで、model-9 TiFlash/MPP Labを含みます。SQLを実行せず、
 > 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
 > モデル上の経路と説明だけを生成します。
+
+v0.12ではSQL構文と主キー経路、通常操作でのquorum不足、GCの削除条件、MPPの
+結果streamingを精密化しました。City・Machine・Diagnoseの展開できる説明欄から、
+直接の因果関係、表示順、固定した参照実装を確認できます。
+[精緻化の根拠とモデル範囲](docs/REFINEMENT.md)も公開しています。
 
 ## 観察できるもの
 
@@ -51,7 +56,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
   Regionで独立した2-of-3 Raft chainを通ります
 - 1PCにはcleanupを残さず、Async Commitでは両Regionのcommit record解決、
   通常2PCではsecondary commitをbackgroundへ残すclient response境界
-- 1つの45 eventの不変なreceiptを2回のGC roundへ展開するmodel-8 GC/Storage
+- 1つの45 eventの不変なreceiptを2回のGC roundへ展開するmodel-9 GC/Storage
   Lab。最初はactive transactionが候補をglobal
   `minStartTS - 1`へ制限し、明示的なfixture境界でtransactionが完了した後、
   2回目の候補が前進します
@@ -64,8 +69,8 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 - 3 replica分へ乗算せず1回だけ数える論理MVCC chain。Deleteによる旧chainの
   除去と、DEFAULT CFの長いvalueのcleanupも含みます
 - 永続的なRegion learner複製からRegion単位のsnapshot gate、一時的なMPP
-  Exchange、独立したTiDB rootまでを、1つの56 eventの不変なreceiptへ展開する
-  model-8 TiFlash/MPP Lab
+  Exchange、独立したTiDB rootまでを、1つの57 eventの不変なreceiptへ展開する
+  model-9 TiFlash/MPP Lab
 - scenario内だけの2つのTiFlash StoreにまたがるRegion 24〜26の3つの選択learner
   projection。learner role、非voter、Leader commit、receive、apply、
   DeltaMerge write、applied indexの状態を表示
@@ -201,11 +206,11 @@ Raft entryを作りません。後のpatch releaseやraftstore-v2では内部経
 
 ![round 1のCompaction Filter eventを表示するTiCity GC/Storage Lab](docs/gc-storage-lab.png)
 
-TiFlash/MPP Labは、model-8の同じexact eventを
+TiFlash/MPP Labは、model-9の同じexact eventを
 [City](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37)、
 [Machine](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37)、
 [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37)
-で開けます。56 eventの不変なreceiptは、固定したsteady-stateのlearner backlog
+で開けます。57 eventの不変なreceiptは、固定したsteady-stateのlearner backlog
 から始まり、client writeや初期replica作成はモデル化しません。選択した3つの
 learner projectionは、scenario内だけの2つのTiFlash Storeに置かれたRegion
 24〜26を対象とします。これは範囲を限定した教育用fixtureであり、cluster内の
@@ -250,7 +255,7 @@ pinとfailure境界の条件は[モデル境界](docs/MODEL_BOUNDARY.md)を参�
 6. 連番キーhotspotとRegion split
 7. TiKV障害とleader election
 8. 2-round、45 eventの長時間transactionとGC／storage trace
-9. 56 eventのTiFlash learner複製、snapshot gate、MPP Exchange trace
+9. 57 eventのTiFlash learner複製、snapshot gate、MPP Exchange trace
 
 ## ローカル実行
 
@@ -299,7 +304,7 @@ src/tidb/
   決定論的な13 tick経過値／candidate policyを分けて表示します。PDは
   observer／routing限定で、retryはapplication retryではなく、同じlogical
   Region requestに対するTiDB内部処理です。
-- model-8 Protocol Labの1PC、Async Commit、通常2PCは、3つの独立した代表的な
+- model-9 Protocol Labの1PC、Async Commit、通常2PCは、3つの独立した代表的な
   fixtureです。event durationと順番に表示するlane順序はlatency比較ではありません。
   `start_ts`と`latest_ts`はモデル上のPD TSO call、1PC timestampはTiKV result、
   Async Commit timestampはTiKVが返した`min_commit_ts`の最大値、通常2PC
@@ -307,7 +312,7 @@ src/tidb/
 - Protocol Labはtransaction commit coordinationと9本のRegion別Raft mutation
   chainを分離します。各chainはconceptual MVCC状態が変わる前に、propose、
   2 voterへのpersist、2-of-3 commit、applyを独立して示します。
-- model-8 GC/Storage Labでは、45 eventすべてがdeep-freezeされた
+- model-9 GC/Storage Labでは、45 eventすべてがdeep-freezeされた
   `gcLab`のevent後snapshotを持ち、City、Machine、Diagnoseが同じ選択snapshotを
   投影します。最初のsafe pointは`globalMinStartTS - 1`へ制限され、service
   point選択、`mysql.tidb`へのstage、Region ScanLock、visibility保存／cache
@@ -317,7 +322,7 @@ src/tidb/
   raftstore-v1 fixtureへ固定しています。ResolveLock内部のRaft詳細、
   raftstore-v2のDelete Range挙動、compactionのschedule／時間、実SST layout、
   physical byte、Raft log GCはモデル化しません。
-- model-8 TiFlash/MPP Labでは、56 eventすべてがdeep-freezeされた
+- model-9 TiFlash/MPP Labでは、57 eventすべてがdeep-freezeされた
   `tiflashMppLab`のevent後snapshotを持ちます。選択した3つのRegion learnerは
   scenario内だけの2つのTiFlash Storeにまたがります。永続的なlearner複製は
   6本の一時的なExchange tunnelと分離され、2 fragmentとTiFlash上の4つの

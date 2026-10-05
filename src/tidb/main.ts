@@ -490,6 +490,13 @@ function boot(): void {
   )
 
   const traceDock = createTracePlaybackDock(locale, {
+    onSelectEvent: (eventId) => {
+      const flows = world?.shell.flows
+      if (!flows?.seek(eventId)) return
+      traceDock.update(flows.playback, currentTrace)
+      traceDock.root.querySelector<HTMLElement>('.tidb-trace-inspector summary')?.focus()
+    },
+    onInspect: () => { world?.shell.flows.setPaused(true) },
     onPrevious: () => {
       world?.shell.flows.step(-1)
     },

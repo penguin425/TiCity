@@ -42,6 +42,7 @@ export {
   createGcLabState,
   freezeGcLabSnapshot,
   isGcLabDelta,
+  planGcCompaction,
   reduceGcLabState,
 } from './gc-lab'
 export type {
@@ -90,6 +91,7 @@ export type {
   SqlAccessPath,
   SqlAnalysis,
   SqlAggregateShape,
+  SqlPredicateShape,
   SqlQueryKind,
   SqlStatus,
   SqlSubmission,

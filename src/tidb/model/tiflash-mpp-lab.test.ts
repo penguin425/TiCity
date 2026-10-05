@@ -49,15 +49,15 @@ function event(
   return found
 }
 
-describe('model-8 TiFlash learner and MPP vertical slice', () => {
+describe('model-9 TiFlash learner and MPP vertical slice', () => {
   it('is deterministic, bounded, fully snapshotted, and versioned', () => {
     const first = run()
     const second = run()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-8')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-9')
     expect(first).toEqual(second)
     expect(first.receipt.succeeded).toBe(true)
-    expect(first.receipt.events).toHaveLength(56)
+    expect(first.receipt.events).toHaveLength(57)
     expect(first.receipt.events.length).toBeLessThanOrEqual(57)
     expect(first.receipt.events.map((candidate, index) => candidate.id))
       .toEqual(first.receipt.events.map((_, index) =>

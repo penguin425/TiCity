@@ -15,6 +15,8 @@ import { CITY_SUN_POSITION, createCityReflections } from './reflections'
 
 /** Owns lighting, offscreen targets and output conversion as one lifecycle. */
 export interface CityRendering {
+  /** Completed City renders, independent of Three.js postprocessing passes. */
+  readonly renderedFrames: number
   setTheme(theme: CityTheme): void
   resize(width: number, height: number, pixelRatio: number): void
   invalidateShadows(): void
@@ -83,6 +85,7 @@ export function createCityRendering(
   let theme: CityTheme = 'day'
   let wideViewport = true
   let disposed = false
+  let renderedFrames = 0
 
   function setTheme(next: CityTheme): void {
     theme = next
@@ -117,6 +120,7 @@ export function createCityRendering(
   setTheme(theme)
 
   return {
+    get renderedFrames(): number { return renderedFrames },
     setTheme,
     resize(width, height, pixelRatio): void {
       wideViewport = width > 900
@@ -141,6 +145,10 @@ export function createCityRendering(
       renderer.info.reset()
       if (wideViewport) composer.render()
       else renderer.render(scene, camera)
+      // WebGLRenderer.info.render.frame increases for each render pass (Three
+      // r185 WebGLRenderer.js), not once for an EffectComposer frame. Count
+      // only after the whole City render completes successfully.
+      renderedFrames += 1
     },
     dispose(): void {
       if (disposed) return

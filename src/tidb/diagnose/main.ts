@@ -10,6 +10,7 @@ import type {
 } from '../model/types'
 import { createNavigation, createWordmark, prepareDocument } from '../page-shell'
 import { resolveLocale } from '../ui/catalog'
+import { createTraceInspector } from '../ui/trace-inspector'
 import { resolveDiagnoseCursor } from './cursor'
 import { mountDiagnose } from './index'
 import {
@@ -157,7 +158,17 @@ function boot(): void {
     ),
   })
 
-  root.replaceChildren(top, controls, content)
+  const inspector = createTraceInspector(receipt, cursor.event, locale, (eventId) => {
+    const url = new URL(location.href)
+    // An Inspector cursor contains model identifiers only.
+    url.search = ''
+    url.hash = ''
+    url.searchParams.set('event', eventId)
+    url.searchParams.set('scenario', scenario)
+    url.searchParams.set('lang', locale)
+    location.assign(url)
+  })
+  root.replaceChildren(top, controls, inspector, content)
   document.body.dataset.ready = 'true'
 }
 

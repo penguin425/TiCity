@@ -722,7 +722,224 @@ function validDefinitions(): readonly [
   ]
 }
 
+function prepareLane(
+  initial: TraceProtocolLabSnapshot,
+  laneId: TraceProtocolLaneId,
+  maxCommitTs = 280,
+): TraceProtocolLabSnapshot {
+  const stages: ProtocolLabDelta[] = [
+    { kind: 'protocol_lab_focus', laneId, phase: 'running' },
+    { kind: 'protocol_lane_stage', laneId, from: 'idle', to: 'requested' },
+    { kind: 'protocol_timestamp', laneId, purpose: 'start_ts', source: 'pd', timestamp: 100 },
+    { kind: 'protocol_lane_stage', laneId, from: 'requested', to: 'started' },
+    { kind: 'protocol_lane_stage', laneId, from: 'started', to: 'candidates_checked' },
+    { kind: 'protocol_timestamp', laneId, purpose: 'latest_ts', source: 'pd', timestamp: 200 },
+    { kind: 'protocol_timestamp', laneId, purpose: 'request_min_commit_ts', source: 'tidb_model_bound', timestamp: 201 },
+    { kind: 'protocol_timestamp', laneId, purpose: 'max_commit_ts', source: 'tidb_model_bound', timestamp: maxCommitTs },
+    { kind: 'protocol_lane_stage', laneId, from: 'candidates_checked', to: 'latest_ts' },
+  ]
+  if (laneId !== 'one_pc') {
+    stages.push({ kind: 'protocol_lane_stage', laneId, from: 'latest_ts', to: 'selected' })
+  }
+  stages.push({
+    kind: 'protocol_lane_stage', laneId,
+    from: laneId === 'one_pc' ? 'latest_ts' : 'selected', to: 'prewriting',
+  })
+  return stages.reduce(reduceProtocolLabState, initial)
+}
+
+function applyRegionEntry(
+  initial: TraceProtocolLabSnapshot,
+  laneId: TraceProtocolLaneId,
+  regionId: number,
+  operation: RaftDelta['operation'],
+  index: number,
+): TraceProtocolLabSnapshot {
+  const entry = { kind: 'protocol_region_raft', laneId, regionId, operation, index } as const
+  return ([
+    { ...entry, action: 'propose' },
+    { ...entry, action: 'persist_quorum', storeIds: ['tikv-1', 'tikv-2'] },
+    { ...entry, action: 'commit' },
+    { ...entry, action: 'apply' },
+  ] satisfies ProtocolLabDelta[]).reduce(reduceProtocolLabState, initial)
+}
+
+function prewriteRegions(
+  initial: TraceProtocolLabSnapshot,
+  laneId: 'async_commit' | 'two_pc',
+): TraceProtocolLabSnapshot {
+  return lane(initial, laneId).regions.reduce(
+    (state, region) => applyRegionEntry(state, laneId, region.regionId, 'prewrite', 1),
+    initial,
+  )
+}
+
 describe('Protocol Lab reducer invariants', () => {
+  it('keeps the fixed eligible Async profile inside inclusive client key limits with one primary', () => {
+    const definitions = validDefinitions()
+    const atLimits: ProtocolLabLaneDefinition = {
+      ...definitions[1],
+      eligibility: { ...definitions[1].eligibility, mutationCount: 256, totalKeyBytes: 4096 },
+      regions: definitions[1].regions.map((region) => ({ ...region, mutationCount: 128 })),
+    }
+    expect(() => createProtocolLabState([definitions[0], atLimits, definitions[2]])).not.toThrow()
+    expect(() => createProtocolLabState([
+      definitions[0],
+      { ...atLimits, eligibility: { ...atLimits.eligibility, totalKeyBytes: 4097 } },
+      definitions[2],
+    ])).toThrow(/exceeds the client precheck limits/)
+    expect(() => createProtocolLabState([
+      definitions[0],
+      {
+        ...atLimits,
+        eligibility: { ...atLimits.eligibility, mutationCount: 257 },
+        regions: atLimits.regions.map((region, index) => ({ ...region, mutationCount: 128 + index })),
+      },
+      definitions[2],
+    ])).toThrow(/exceeds the client precheck limits/)
+    expect(() => createProtocolLabState([
+      definitions[0],
+      { ...atLimits, regions: atLimits.regions.map((region) => ({ ...region, role: 'secondary' })) },
+      definitions[2],
+    ])).toThrow(/exactly one primary Region/)
+  })
+
+  it('accepts the TiKV upper-bound equality and rejects optimized results outside the prepared interval', () => {
+    // TiKV final min=max(request floor, max(start_ts, max_ts, for_update_ts)+1),
+    // and fallback is triggered only when final min > max_commit_ts.
+    const prepared = prepareLane(createProtocolLabState(validDefinitions()), 'one_pc', 201)
+    const applied = applyRegionEntry(prepared, 'one_pc', 101, 'one_pc_prewrite', 1)
+    const result = {
+      kind: 'protocol_timestamp', laneId: 'one_pc', purpose: 'one_pc_commit_ts', source: 'tikv',
+    } as const
+    expect(lane(reduceProtocolLabState(applied, { ...result, timestamp: 201 }), 'one_pc'))
+      .toMatchObject({ commitTs: 201, commitTsSource: 'tikv_one_pc_result' })
+    expect(() => reduceProtocolLabState(applied, { ...result, timestamp: 200 }))
+      .toThrow(/prepared request floor/)
+    expect(() => reduceProtocolLabState(applied, { ...result, timestamp: 202 }))
+      .toThrow(/exceeds max_commit_ts/)
+    expect(lane(applied, 'one_pc').commitTs).toBeNull()
+
+    const async = prewriteRegions(
+      prepareLane(createProtocolLabState(validDefinitions()), 'async_commit', 201), 'async_commit',
+    )
+    const response = {
+      kind: 'protocol_timestamp', laneId: 'async_commit', purpose: 'returned_min_commit_ts',
+      source: 'tikv', regionId: 102,
+    } as const
+    expect(() => reduceProtocolLabState(async, { ...response, timestamp: 200 }))
+      .toThrow(/below its request floor/)
+    expect(() => reduceProtocolLabState(async, { ...response, timestamp: 202 }))
+      .toThrow(/exceeds max_commit_ts/)
+    expect(lane(reduceProtocolLabState(async, { ...response, timestamp: 201 }), 'async_commit')
+      .regions[0].returnedMinCommitTs).toBe(201)
+  })
+
+  it('decides Async Commit from every TiKV response and their exact maximum', () => {
+    let state = prewriteRegions(
+      prepareLane(createProtocolLabState(validDefinitions()), 'async_commit'), 'async_commit',
+    )
+    const response = {
+      kind: 'protocol_timestamp', laneId: 'async_commit', purpose: 'returned_min_commit_ts', source: 'tikv',
+    } as const
+    const decision = {
+      kind: 'protocol_timestamp', laneId: 'async_commit', purpose: 'async_commit_ts', source: 'tikv',
+    } as const
+    state = reduceProtocolLabState(state, { ...response, regionId: 102, timestamp: 202 })
+    expect(() => reduceProtocolLabState(state, { ...decision, timestamp: 202 }))
+      .toThrow(/every Region prewrite result/)
+    state = reduceProtocolLabState(state, { ...response, regionId: 103, timestamp: 205 })
+    for (const timestamp of [202, 206]) {
+      expect(() => reduceProtocolLabState(state, { ...decision, timestamp }))
+        .toThrow(/maximum returned min_commit_ts/)
+    }
+    state = reduceProtocolLabState(state, { ...decision, timestamp: 205 })
+    expect(lane(state, 'async_commit')).toMatchObject({
+      commitTs: 205, commitTsSource: 'max_prewrite_min_commit_ts', clientResponded: false,
+    })
+    expect(() => reduceProtocolLabState(state, { ...response, regionId: 102, timestamp: 203 }))
+      .toThrow(/cannot replace its prewrite result/)
+  })
+
+  it('allocates regular 2PC commit_ts after all prewrites and outside optimization bounds when needed', () => {
+    const prepared = prepareLane(createProtocolLabState(validDefinitions()), 'two_pc', 201)
+    const allocate = {
+      kind: 'protocol_timestamp', laneId: 'two_pc', purpose: 'commit_ts', source: 'pd',
+    } as const
+    expect(() => reduceProtocolLabState(prepared, { ...allocate, timestamp: 300 }))
+      .toThrow(/finish all prewrites/)
+    const onlyPrimary = applyRegionEntry(prepared, 'two_pc', 104, 'prewrite', 1)
+    expect(() => reduceProtocolLabState(onlyPrimary, { ...allocate, timestamp: 300 }))
+      .toThrow(/finish all prewrites/)
+    const prewritten = applyRegionEntry(onlyPrimary, 'two_pc', 105, 'prewrite', 1)
+    expect(() => reduceProtocolLabState(prewritten, { ...allocate, timestamp: 150 }))
+      .toThrow(/prepared request floor/)
+    const committed = reduceProtocolLabState(prewritten, { ...allocate, timestamp: 300 })
+    expect(lane(committed, 'two_pc')).toMatchObject({
+      maxCommitTs: 201, commitTs: 300, commitTsSource: 'pd_tso_after_prewrite',
+    })
+    expect(() => reduceProtocolLabState(committed, { ...allocate, timestamp: 301 }))
+      .toThrow(/cannot replace commit_ts/)
+  })
+
+  it('keeps transaction preparation, primary decision, Region role, and Raft entry order distinct', () => {
+    const initial = createProtocolLabState(validDefinitions())
+    expect(() => reduceProtocolLabState(initial, {
+      kind: 'protocol_lane_stage', laneId: 'one_pc', from: 'idle', to: 'prewriting',
+    })).toThrow(/cannot advance directly/)
+    expect(() => reduceProtocolLabState(initial, {
+      kind: 'protocol_region_raft', laneId: 'one_pc', regionId: 101,
+      operation: 'one_pc_prewrite', action: 'propose', index: 1,
+    })).toThrow(/prepared transaction dispatch/)
+
+    const prewritten = prewriteRegions(prepareLane(initial, 'two_pc'), 'two_pc')
+    const proposal = {
+      kind: 'protocol_region_raft', laneId: 'two_pc', action: 'propose', index: 2,
+    } as const
+    expect(() => reduceProtocolLabState(prewritten, {
+      ...proposal, regionId: 104, operation: 'commit_primary',
+    })).toThrow(/established commit timestamp/)
+    const ready = reduceProtocolLabState(prewritten, {
+      kind: 'protocol_timestamp', laneId: 'two_pc', purpose: 'commit_ts', source: 'pd', timestamp: 220,
+    })
+    expect(() => reduceProtocolLabState(ready, {
+      ...proposal, regionId: 105, operation: 'commit_secondary',
+    })).toThrow(/follow the primary decision/)
+    expect(() => reduceProtocolLabState(ready, {
+      ...proposal, regionId: 105, operation: 'commit_primary',
+    })).toThrow(/primary\/secondary role/)
+    expect(() => reduceProtocolLabState(ready, {
+      ...proposal, regionId: 104, operation: 'commit_primary', index: 1,
+    })).toThrow(/proposal index must advance/)
+    const primaryCommitted = applyRegionEntry(ready, 'two_pc', 104, 'commit_primary', 2)
+    const secondaryProposed = reduceProtocolLabState(primaryCommitted, {
+      ...proposal, regionId: 105, operation: 'commit_secondary',
+    })
+    expect(lane(secondaryProposed, 'two_pc').clientResponded).toBe(false)
+    // client-go starts the secondary goroutine after primary success; the
+    // deterministic UI schedules it after client response, but that is policy.
+    expect(() => reduceProtocolLabState(primaryCommitted, {
+      ...proposal, regionId: 104, operation: 'commit_primary', index: 3,
+    })).toThrow(/applied prewrite lock/)
+    expect(lane(ready, 'two_pc').regions.every((region) => region.mvcc.lockCf === 'prewrite')).toBe(true)
+  })
+
+  it('does not reassign timestamp authorities or accept unsafe numeric timestamps', () => {
+    const prepared = prepareLane(createProtocolLabState(validDefinitions()), 'one_pc')
+    const applied = applyRegionEntry(prepared, 'one_pc', 101, 'one_pc_prewrite', 1)
+    expect(() => reduceProtocolLabState(applied, {
+      kind: 'protocol_timestamp', laneId: 'one_pc', purpose: 'commit_ts', source: 'pd', timestamp: 202,
+    })).toThrow(/only to regular 2PC/)
+    expect(() => reduceProtocolLabState(applied, {
+      kind: 'protocol_timestamp', laneId: 'one_pc', purpose: 'start_ts', source: 'pd', timestamp: 150,
+    })).toThrow(/cannot replace start_ts/)
+    for (const timestamp of [0, 201.5, Number.MAX_SAFE_INTEGER + 1, NaN]) {
+      expect(() => reduceProtocolLabState(applied, {
+        kind: 'protocol_timestamp', laneId: 'one_pc', purpose: 'one_pc_commit_ts', source: 'tikv', timestamp,
+      })).toThrow(/positive safe integer/)
+    }
+  })
+
   it('reduces a 1PC lane immutably to an atomic committed projection', () => {
     const initial = createProtocolLabState(validDefinitions())
     let state = initial
@@ -758,7 +975,7 @@ describe('Protocol Lab reducer invariants', () => {
       kind: 'protocol_lane_stage',
       laneId: 'one_pc',
       from: 'started',
-      to: 'selected',
+      to: 'candidates_checked',
     })
     for (const delta of [
       {
@@ -786,7 +1003,7 @@ describe('Protocol Lab reducer invariants', () => {
     apply({
       kind: 'protocol_lane_stage',
       laneId: 'one_pc',
-      from: 'selected',
+      from: 'candidates_checked',
       to: 'latest_ts',
     })
     apply({
@@ -943,7 +1160,8 @@ describe('Protocol Lab reducer invariants', () => {
       phase: 'complete',
     })).toThrow(/comparison completion/)
 
-    const proposed = reduceProtocolLabState(initial, {
+    const prepared = prepareLane(initial, 'one_pc')
+    const proposed = reduceProtocolLabState(prepared, {
       kind: 'protocol_region_raft',
       laneId: 'one_pc',
       regionId: 101,
