@@ -118,10 +118,24 @@ test('City mobile inspector starts folded, preserves focus on seek, and passes i
   // Resume and focus in one browser task: focusin must pause the playback
   // before a rendered frame can replace the focused Inspector control.
   await page.evaluate(() => {
-    document.querySelector<HTMLElement>('[data-action="trace-toggle"]')!.click()
+    const toggle = document.querySelector<HTMLElement>('[data-action="trace-toggle"]')!
+    // A synthetic click does not transfer focus as a pointer click would.
+    // Move it explicitly so returning to the summary really emits focusin.
+    toggle.focus()
+    toggle.click()
     document.querySelector<HTMLElement>('[data-trace-inspector] summary')!.focus()
   })
   await expect(page.locator('[data-trace-dock]')).toHaveAttribute('data-phase', 'paused')
+  // Touch and accessible activation may leave focus on the summary. Opening
+  // or closing it must still pause, without relying on a new focusin event.
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-action="trace-toggle"]')!.click()
+    document.querySelector<HTMLElement>('[data-trace-inspector] summary')!.click()
+  })
+  await expect(page.locator('[data-trace-dock]')).toHaveAttribute('data-phase', 'paused')
+  await expect(inspector).not.toHaveAttribute('open')
+  await inspector.locator('summary').click()
+  await expect(inspector).toHaveAttribute('open', '')
   await inspector.locator('[data-inspector-relation="fence"]').click()
   await expect(inspector).toHaveAttribute('data-inspector-event-id', FENCE_ID)
   await expect(inspector).toHaveAttribute('open', '')

@@ -376,8 +376,15 @@ export function createTracePlaybackDock(
     loop,
   )
   const inspectorSlot = element('div', { className: 'tidb-trace-playback__inspector' })
-  const onInspectFocus = (): void => { actions.onInspect?.() }
-  inspectorSlot.addEventListener('focusin', onInspectFocus)
+  const onInspectInteraction = (): void => {
+    if (!disposed) actions.onInspect?.()
+  }
+  // Touch and clicks on an already focused summary need not move focus.
+  // Pause on deliberate Inspector interaction as well as keyboard focus,
+  // before playback can replace the control the reader is using.
+  inspectorSlot.addEventListener('focusin', onInspectInteraction)
+  inspectorSlot.addEventListener('pointerdown', onInspectInteraction)
+  inspectorSlot.addEventListener('click', onInspectInteraction)
   const root = element(
     'section',
     {
@@ -669,7 +676,9 @@ export function createTracePlaybackDock(
       next.removeEventListener('click', onNext)
       replay.removeEventListener('click', onReplay)
       loop.removeEventListener('click', onToggleLoop)
-      inspectorSlot.removeEventListener('focusin', onInspectFocus)
+      inspectorSlot.removeEventListener('focusin', onInspectInteraction)
+      inspectorSlot.removeEventListener('pointerdown', onInspectInteraction)
+      inspectorSlot.removeEventListener('click', onInspectInteraction)
       entries = []
       latestPlayback = null
       latestReceipt = null
