@@ -20,7 +20,7 @@ The [refinement review](REFINEMENT.md) records pinned implementation anchors,
 added invariants and intentional omissions. SQL plans are structural route
 models for a built-in demo schema with clustered primary keys; they do not run
 TiDB's optimizer. Unsupported grammar and key coercions are rejected.
-Normal SQL requests preserve the live cluster state after a guided scenario;
+Normal SQL requests preserve the current modeled cluster state after a guided scenario;
 only an explicit guided rerun resets the independent fixture.
 
 `dependsOn` records causality. `presentationAfter` records only a teaching
