@@ -41,8 +41,7 @@ describe('city shell trace replay gate', () => {
     const dz = CITY_ORBIT.homePosition[2] - CITY_ORBIT.target[2]
     const homeDistance = Math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    // A longer architectural lens compresses perspective without cropping the
-    // rear SQL towers; backing away preserves the complete campus framing.
+    // Preserve room around the campus with the lower architectural viewpoint.
     expect(homeDistance).toBeGreaterThan(930)
     expect(homeDistance).toBeLessThan(1_020)
     expect(homeDistance / CITY_ORBIT.maxDistance).toBeLessThanOrEqual(0.45)

@@ -49,12 +49,12 @@ function event(
   return found
 }
 
-describe('model-7 TiFlash learner and MPP vertical slice', () => {
+describe('model-8 TiFlash learner and MPP vertical slice', () => {
   it('is deterministic, bounded, fully snapshotted, and versioned', () => {
     const first = run()
     const second = run()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-7')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-8')
     expect(first).toEqual(second)
     expect(first.receipt.succeeded).toBe(true)
     expect(first.receipt.events).toHaveLength(56)
@@ -114,6 +114,83 @@ describe('model-7 TiFlash learner and MPP vertical slice', () => {
       stage: 'client_complete',
       clientComplete: true,
     })
+  })
+
+  it('plans task links before dispatch and registers server tunnels during prepare', () => {
+    const receipt = run().receipt
+    const planned = event(receipt, 'tiflash_mpp_tunnels_planned')
+    const dispatched = event(receipt, 'tiflash_mpp_dispatch_batch')
+    const prepared = event(receipt, 'tiflash_mpp_tasks_prepared')
+    const plannedLab = planned.snapshot!.tiflashMppLab!
+    const dispatchedLab = dispatched.snapshot!.tiflashMppLab!
+    const preparedLab = prepared.snapshot!.tiflashMppLab!
+
+    expect(plannedLab.tasks.every((task) => task.stage === 'built')).toBe(true)
+    expect(plannedLab.tunnels).toHaveLength(6)
+    expect(plannedLab.tunnels.every((tunnel) => tunnel.status === 'planned')).toBe(true)
+    expect(dispatched.dependsOn).toEqual([planned.id])
+    expect(dispatchedLab.tasks.every((task) => task.stage === 'dispatched')).toBe(true)
+    expect(dispatchedLab.tunnels.every((tunnel) => tunnel.status === 'planned')).toBe(true)
+    expect(prepared.dependsOn).toEqual([dispatched.id])
+    expect(preparedLab.tasks.every((task) => task.stage === 'prepared')).toBe(true)
+    expect(preparedLab.tunnels.every((tunnel) => tunnel.status === 'registered')).toBe(true)
+    expect(prepared.deltas?.[0]).toEqual({
+      kind: 'tiflash_mpp_tunnels_register',
+      tunnelCount: 6,
+    })
+
+    expect(() => reduceTiFlashMppLabState(plannedLab, {
+      kind: 'tiflash_mpp_tunnels_register',
+      tunnelCount: 6,
+    })).toThrow(/after every fixture task is dispatched/)
+    expect(() => reduceTiFlashMppLabState(dispatchedLab, {
+      kind: 'tiflash_mpp_task_stage',
+      taskId: 'task-scan-1',
+      from: 'dispatched',
+      to: 'prepared',
+    })).toThrow(/registered server tunnels/)
+    expect(() => reduceTiFlashMppLabState(preparedLab, {
+      kind: 'tiflash_mpp_tunnels_register',
+      tunnelCount: 6,
+    })).toThrow(/register once/)
+  })
+
+  it('keeps scalar aggregates out of the fixed grouped MPP Lab', () => {
+    const simulation = createTiDBSimulation({ seed: 2026 })
+    simulation.runScenario('tiflash-mpp')
+    const scalar = simulation.submitSql('SELECT COUNT(*) FROM events')
+
+    expect(scalar.analysis.aggregateShape).toBe('scalar')
+    expect(scalar.receipt?.succeeded).toBe(true)
+    expect(scalar.receipt?.events.every((candidate) =>
+      candidate.snapshot?.tiflashMppLab === undefined)).toBe(true)
+    expect(scalar.receipt?.events.some((candidate) =>
+      candidate.kind === 'tiflash_mpp_query_received')).toBe(false)
+  })
+
+  it('gates a compact TiFlash read after dispatch without mutating replication progress', () => {
+    const simulation = createTiDBSimulation({ seed: 2026 })
+    simulation.setControl('qps', 0)
+    simulation.setControl('tiflashLagSeconds', 2)
+    simulation.submitSql('INSERT INTO events (id, account_id) VALUES (1, 7)')
+    const before = {
+      resolvedTs: simulation.state.tiflash.resolvedTs,
+      pendingVersions: simulation.state.tiflash.pendingVersions,
+    }
+    const receipt = simulation.submitSql('SELECT COUNT(*) FROM events').receipt!
+    const dispatched = event(receipt, 'mpp_dispatch')
+    const gated = event(receipt, 'learner_snapshot_gate')
+
+    expect(gated.dependsOn).toEqual([dispatched.id])
+    expect(gated.atMs).toBeGreaterThanOrEqual(dispatched.atMs + dispatched.durationMs)
+    expect(gated.source).toBe('tiflash-1')
+    expect(gated.target).toBe('tiflash-1')
+    expect(gated.metadata).toMatchObject({
+      correctnessScope: 'per_region',
+      regionCount: 3,
+      nodeGlobalResolvedTsAdvanced: false,
+    })
+    expect(simulation.state.tiflash).toMatchObject(before)
   })
 
   it('uses self safe-ts only for Region 24 and ReadIndex plus apply for 25/26', () => {

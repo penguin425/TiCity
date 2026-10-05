@@ -126,11 +126,13 @@ function detailedSnapshot(): TraceGcLabSnapshot {
       chain('chain-c', 20, ['filtered', 'retained_anchor', 'present']),
       chain('chain-d', 20, ['filtered', 'present']),
     ],
+    gcKeyCleanup: { eligibleVersionIds: [], scheduledVersionIds: [], deletedVersionIds: [] },
     storage: {
       representation: 'logical_chains_counted_once',
       compactionLevel: 'bottommost_model_fixture',
       initialVersionCount: 12,
       filteredVersionCount: 5,
+      gcKeyDeletedVersionCount: 0,
       retainedAnchorCount: 2,
       presentVersionCount: 7,
       deletedDefaultCfValues: 4,
@@ -242,7 +244,7 @@ describe('GC/Storage Lab accessible projection', () => {
     expect(summary?.textContent).toContain('Filtered versions5')
     expect(summary?.textContent).toContain('Retained anchors2')
     expect(summary?.textContent).toContain('Raft entries created by compaction0')
-    expect(summary?.textContent).toContain('not a disk-byte gauge')
+    expect(summary?.textContent).toContain('not disk bytes')
   })
 
   it('shows the active start_ts minus one boundary and switches locale', () => {

@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Pure model-6 GC/Storage Lab state. The reducer pins TiDB/TiKV v8.5.0's
+ * Pure model-8 GC/Storage Lab state. The reducer pins TiDB/TiKV v8.5.0's
  * default LEGACY Resolve Locks plus distributed safe-point and Compaction
  * Filter path. All identifiers and counts are synthetic teaching fixtures.
  */
@@ -34,6 +34,7 @@ export type GcLabDelta = Extract<
       | 'gc_store_safe_point'
       | 'gc_compaction_state'
       | 'gc_compaction_filter'
+      | 'gc_key_cleanup'
   }
 >
 
@@ -89,7 +90,8 @@ export function isGcLabDelta(delta: TraceStateDelta): delta is GcLabDelta {
     delta.kind === 'gc_safe_point_publish' ||
     delta.kind === 'gc_store_safe_point' ||
     delta.kind === 'gc_compaction_state' ||
-    delta.kind === 'gc_compaction_filter'
+    delta.kind === 'gc_compaction_filter' ||
+    delta.kind === 'gc_key_cleanup'
 }
 
 function freezeVersion(
@@ -128,6 +130,11 @@ export function freezeGcLabSnapshot(
     stores: Object.freeze(snapshot.stores.map((store) =>
       Object.freeze({ ...store }))),
     keyChains: Object.freeze(snapshot.keyChains.map(freezeChain)),
+    gcKeyCleanup: Object.freeze({
+      eligibleVersionIds: Object.freeze([...snapshot.gcKeyCleanup.eligibleVersionIds]),
+      scheduledVersionIds: Object.freeze([...snapshot.gcKeyCleanup.scheduledVersionIds]),
+      deletedVersionIds: Object.freeze([...snapshot.gcKeyCleanup.deletedVersionIds]),
+    }),
     storage: Object.freeze({ ...snapshot.storage }),
   })
 }
@@ -143,14 +150,16 @@ function storageProjection(
 ): TraceGcLabSnapshot['storage'] {
   const versions = allVersions(keyChains)
   const filtered = versions.filter((version) => version.state === 'filtered')
+  const gcDeleted = versions.filter((version) => version.state === 'gc_deleted')
   return {
     representation: 'logical_chains_counted_once',
     compactionLevel: 'bottommost_model_fixture',
     initialVersionCount: versions.length,
     filteredVersionCount: filtered.length,
+    gcKeyDeletedVersionCount: gcDeleted.length,
     retainedAnchorCount: versions.filter((version) =>
       version.state === 'retained_anchor').length,
-    presentVersionCount: versions.length - filtered.length,
+    presentVersionCount: versions.length - filtered.length - gcDeleted.length,
     deletedDefaultCfValues: filtered.filter((version) =>
       version.writeType === 'put' &&
       version.valueStorage === 'write_and_default_cf').length,
@@ -178,11 +187,14 @@ function validateVersionChains(
         `${chain.id} versions must have increasing positive commit_ts`,
       )
       previousTs = version.commitTs
-      if (version.state === 'filtered') {
+      if (version.state === 'filtered' || version.state === 'gc_deleted') {
         invariant(
           version.commitTs <= publishedSafePoint,
           `${version.id} was filtered beyond the published safe point`,
         )
+      }
+      if (version.state === 'gc_deleted') {
+        invariant(version.writeType === 'delete', `${version.id} key GC is not a Delete marker`)
       }
       if (version.state === 'retained_anchor') {
         invariant(
@@ -279,6 +291,15 @@ function validateGcLab(state: TraceGcLabSnapshot): void {
     )
   }
   validateVersionChains(state.keyChains, state.safePoint.published)
+  invariant(new Set(state.gcKeyCleanup.scheduledVersionIds).size ===
+    state.gcKeyCleanup.scheduledVersionIds.length, 'duplicate scheduled GC-key cleanup')
+  invariant(new Set(state.gcKeyCleanup.deletedVersionIds).size ===
+    state.gcKeyCleanup.deletedVersionIds.length, 'duplicate completed GC-key cleanup')
+  invariant(state.gcKeyCleanup.deletedVersionIds.every((id) =>
+    state.gcKeyCleanup.scheduledVersionIds.includes(id)), 'unscheduled GC-key cleanup completed')
+  invariant(allVersions(state.keyChains).filter((version) => version.state === 'gc_deleted')
+    .every((version) => state.gcKeyCleanup.deletedVersionIds.includes(version.id)),
+  'Delete-marker states disagree with completed GC-key cleanup')
   const storage = storageProjection(state.keyChains)
   invariant(
     JSON.stringify(storage) === JSON.stringify(state.storage),
@@ -384,6 +405,7 @@ export function createGcLabState(
       filterActive: false,
     })),
     keyChains,
+    gcKeyCleanup: { eligibleVersionIds: [], scheduledVersionIds: [], deletedVersionIds: [] },
     storage: storageProjection(keyChains),
   }
   validateGcLab(state)
@@ -621,6 +643,59 @@ export function reduceGcLabState(
         }
       }),
     }
+  } else if (delta.kind === 'gc_key_cleanup') {
+    invariant(delta.safePoint === state.safePoint.published, 'key GC safe point mismatch')
+    if (delta.action === 'schedule') {
+      invariant(state.phase === 'compacting' &&
+        state.stores.every((store) => store.compaction === 'running'),
+      'key GC must be enqueued at filter Drop before compaction completion')
+    } else {
+      invariant(state.phase === 'cleaning_delete_markers', 'key GC requires its separate cleanup phase')
+      invariant(state.stores.every((store) => store.compaction === 'complete'),
+        'this key GC execution fixture requires completed compaction')
+    }
+    const ids = new Set(delta.versionIds)
+    invariant(ids.size === delta.versionIds.length, 'key GC ids must be unique')
+    const knownIds = new Set(allVersions(state.keyChains).map((version) => version.id))
+    invariant([...ids].every((id) => knownIds.has(id)), 'key GC references an unknown version')
+    for (const chain of state.keyChains) {
+      for (const version of chain.versions.filter((version) => ids.has(version.id))) {
+        invariant(state.gcKeyCleanup.eligibleVersionIds.includes(version.id),
+          `${version.id} was not observed without older versions in a later compaction`)
+        invariant(version.writeType === 'delete' && version.state === 'present' &&
+          version.commitTs <= delta.safePoint, `${version.id} is not an eligible Delete marker`)
+        invariant(chain.versions.filter((older) => older.commitTs < version.commitTs)
+          .every((older) => older.state === 'filtered' || older.state === 'gc_deleted'),
+        `${version.id} still overlaps older versions`)
+        invariant(delta.action === 'schedule' ||
+          state.gcKeyCleanup.scheduledVersionIds.includes(version.id),
+        `${version.id} cleanup was not scheduled`)
+        invariant(delta.action !== 'schedule' ||
+          !state.gcKeyCleanup.scheduledVersionIds.includes(version.id),
+        `${version.id} cleanup was already scheduled`)
+      }
+    }
+    next = delta.action === 'schedule'
+      ? {
+        ...state,
+        gcKeyCleanup: {
+          ...state.gcKeyCleanup,
+          scheduledVersionIds: [...state.gcKeyCleanup.scheduledVersionIds, ...ids],
+        },
+      }
+      : {
+        ...state,
+        gcKeyCleanup: {
+          ...state.gcKeyCleanup,
+          deletedVersionIds: [...state.gcKeyCleanup.deletedVersionIds, ...ids],
+        },
+        keyChains: state.keyChains.map((chain) => ({
+          ...chain,
+          versions: chain.versions.map((version) => ids.has(version.id)
+            ? { ...version, state: 'gc_deleted' as const }
+            : version),
+        })),
+      }
   } else {
     invariant(delta.safePoint === state.safePoint.published, 'filter safe point mismatch')
     const filteredIds = new Set(delta.filteredVersionIds)
@@ -639,11 +714,32 @@ export function reduceGcLabState(
       [...filteredIds, ...anchorIds].every((id) => knownIds.has(id)),
       'filter references an unknown version',
     )
+    // Eligibility comes from the input to this compaction, before its older
+    // versions are filtered. A Delete covering an old Put in the first pass
+    // cannot schedule GcKeys until a later pass observes it without overlap.
+    const eligibleVersionIds = state.keyChains.flatMap((chain) => {
+      const newest = [...chain.versions].reverse().find((version) =>
+        version.commitTs <= delta.safePoint &&
+        version.state !== 'filtered' && version.state !== 'gc_deleted' &&
+        (version.writeType === 'put' || version.writeType === 'delete'))
+      return newest?.writeType === 'delete' &&
+        chain.versions.filter((version) => version.commitTs < newest.commitTs)
+          .every((version) => version.state === 'filtered' || version.state === 'gc_deleted')
+        ? [newest.id]
+        : []
+    })
     const keyChains = state.keyChains.map((chain) => ({
       ...chain,
       versions: chain.versions.map((version) => {
         if (filteredIds.has(version.id)) {
-          invariant(version.state !== 'filtered', `${version.id} was already filtered`)
+          const newestEligibleWrite = [...chain.versions].reverse().find((candidate) =>
+            candidate.commitTs <= delta.safePoint &&
+            candidate.state !== 'filtered' && candidate.state !== 'gc_deleted' &&
+            (candidate.writeType === 'put' || candidate.writeType === 'delete'))
+          invariant(newestEligibleWrite?.id !== version.id,
+            `${version.id} is the newest eligible Put/Delete and must be kept by the filter`)
+          invariant(version.state !== 'filtered' && version.state !== 'gc_deleted',
+            `${version.id} was already removed`)
           invariant(
             version.commitTs <= delta.safePoint,
             `${version.id} exceeds the filter safe point`,
@@ -666,6 +762,7 @@ export function reduceGcLabState(
     next = {
       ...state,
       keyChains,
+      gcKeyCleanup: { ...state.gcKeyCleanup, eligibleVersionIds },
       storage: storageProjection(keyChains),
     }
   }

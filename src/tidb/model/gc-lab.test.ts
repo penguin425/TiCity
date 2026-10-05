@@ -57,7 +57,9 @@ const EXPECTED_KINDS = [
   'gc_store_safe_point_detected',
   'gc_compaction_filter_start',
   'gc_compaction_filter_apply',
+  'gc_delete_marker_cleanup_scheduled',
   'gc_compaction_filter_complete',
+  'gc_delete_marker_cleanup_complete',
   'gc_storage_lab_complete',
 ] as const
 
@@ -80,14 +82,14 @@ function labAt(
   return lab
 }
 
-describe('model-6 GC/Storage Lab trace', () => {
-  it('publishes one deterministic immutable 43-event causal DAG', () => {
+describe('model-8 GC/Storage Lab trace', () => {
+  it('publishes one deterministic immutable 45-event causal DAG', () => {
     const first = runGcLab()
     const second = runGcLab()
 
     expect(first).toEqual(second)
     expect(first.id).toBe('trace-1')
-    expect(first.events).toHaveLength(43)
+    expect(first.events).toHaveLength(45)
     expect(first.events.map((event) => event.kind)).toEqual(EXPECTED_KINDS)
     expect(first.events.map((event) => event.id)).toEqual(
       EXPECTED_KINDS.map((_, index) => `trace-1-event-${index + 1}`),
@@ -115,7 +117,7 @@ describe('model-6 GC/Storage Lab trace', () => {
       visited.add(event.id)
     }
     for (const event of first.events) visit(event)
-    expect(visited.size).toBe(43)
+    expect(visited.size).toBe(45)
 
     expect(eventAt(first, 13).dependsOn).toEqual(['trace-1-event-12'])
     expect(eventAt(first, 14).dependsOn).toEqual(['trace-1-event-12'])
@@ -247,7 +249,7 @@ describe('model-6 GC/Storage Lab trace', () => {
   it('uses asynchronous per-store detection and the v8.5.0 Compaction Filter path', () => {
     const receipt = runGcLab()
 
-    for (const number of [18, 19, 20, 21, 22, 23, 24, 37, 38, 39, 40, 41, 42, 43]) {
+    for (const number of [18, 19, 20, 21, 22, 23, 24, 37, 38, 39, 40, 41, 42, 43, 44, 45]) {
       expect(eventAt(receipt, number).path, `event ${number}`).toBe('background')
     }
     expect(labAt(receipt, 20).stores).toEqual([
@@ -278,10 +280,10 @@ describe('model-6 GC/Storage Lab trace', () => {
     expect(labAt(receipt, 23).storage.compactionRaftEntriesCreated).toBe(0)
   })
 
-  it('retains Put anchors, removes a Delete chain, and advances after release', () => {
+  it('retains Put/Delete during compaction and cleans the Delete in a separate GC-key task', () => {
     const receipt = runGcLab()
     const roundOne = labAt(receipt, 22)
-    const final = labAt(receipt, 43)
+    const final = labAt(receipt, 45)
     const version = (
       lab: TraceGcLabSnapshot,
       id: string,
@@ -292,17 +294,19 @@ describe('model-6 GC/Storage Lab trace', () => {
       representation: 'logical_chains_counted_once',
       compactionLevel: 'bottommost_model_fixture',
       initialVersionCount: 12,
-      filteredVersionCount: 4,
+      filteredVersionCount: 3,
+      gcKeyDeletedVersionCount: 0,
       retainedAnchorCount: 2,
-      presentVersionCount: 8,
+      presentVersionCount: 9,
       deletedDefaultCfValues: 2,
       compactionRaftEntriesCreated: 0,
     })
     expect(version(roundOne, 'a-v2')?.state).toBe('retained_anchor')
     expect(version(roundOne, 'd-v2')?.state).toBe('retained_anchor')
     expect(version(roundOne, 'b-v1')?.state).toBe('filtered')
-    expect(version(roundOne, 'b-v2')?.state).toBe('filtered')
+    expect(version(roundOne, 'b-v2')?.state).toBe('present')
     expect(version(roundOne, 'b-v3')?.state).toBe('present')
+    expect(roundOne.gcKeyCleanup.eligibleVersionIds).toEqual([])
 
     expect(final.phase).toBe('complete')
     expect(final.round).toBe(2)
@@ -317,7 +321,8 @@ describe('model-6 GC/Storage Lab trace', () => {
     })
     expect(final.storage).toMatchObject({
       initialVersionCount: 12,
-      filteredVersionCount: 6,
+      filteredVersionCount: 5,
+      gcKeyDeletedVersionCount: 1,
       retainedAnchorCount: 3,
       presentVersionCount: 6,
       deletedDefaultCfValues: 3,
@@ -328,6 +333,95 @@ describe('model-6 GC/Storage Lab trace', () => {
     expect(version(final, 'c-v1')?.state).toBe('filtered')
     expect(version(final, 'c-v2')?.state).toBe('retained_anchor')
     expect(version(final, 'd-v2')?.state).toBe('retained_anchor')
+    expect(version(final, 'b-v2')?.state).toBe('gc_deleted')
+    expect(version(labAt(receipt, 41), 'b-v2')?.state).toBe('present')
+    expect(labAt(receipt, 41).storage.filteredVersionCount).toBe(5)
+    expect(labAt(receipt, 41).storage.gcKeyDeletedVersionCount).toBe(0)
+    expect(labAt(receipt, 41).gcKeyCleanup.eligibleVersionIds).toEqual(['b-v2'])
+    expect(labAt(receipt, 43).gcKeyCleanup).toEqual({
+      eligibleVersionIds: ['b-v2'], scheduledVersionIds: ['b-v2'], deletedVersionIds: [],
+    })
+    expect(final.gcKeyCleanup).toEqual({
+      eligibleVersionIds: ['b-v2'], scheduledVersionIds: ['b-v2'], deletedVersionIds: ['b-v2'],
+    })
+    expect(eventAt(receipt, 42).kind).toBe('gc_delete_marker_cleanup_scheduled')
+    expect(eventAt(receipt, 42).dependsOn).toEqual([eventAt(receipt, 41).id])
+    expect(eventAt(receipt, 42).metadata).toMatchObject({
+      scheduledBy: 'compaction_filter_drop', compactionResultInstalled: false,
+    })
+    expect(labAt(receipt, 42).phase).toBe('compacting')
+    expect(labAt(receipt, 42).stores.every((store) =>
+      store.compaction === 'running' && store.filterActive)).toBe(true)
+    expect(labAt(receipt, 42).gcKeyCleanup.deletedVersionIds).toEqual([])
+    expect(eventAt(receipt, 43).kind).toBe('gc_compaction_filter_complete')
+    expect(labAt(receipt, 43).stores.every((store) =>
+      store.compaction === 'complete' && !store.filterActive)).toBe(true)
+    expect(eventAt(receipt, 43).dependsOn).toEqual([eventAt(receipt, 42).id])
+    expect(eventAt(receipt, 44).dependsOn).toEqual([eventAt(receipt, 43).id])
+    expect(eventAt(receipt, 45).dependsOn).toEqual([eventAt(receipt, 44).id])
+    const scheduledDelta = eventAt(receipt, 42).deltas?.find((delta) =>
+      delta.kind === 'gc_key_cleanup')
+    if (scheduledDelta?.kind !== 'gc_key_cleanup') throw new Error('Missing GC-key cleanup delta')
+    expect(Object.isFrozen(scheduledDelta.versionIds)).toBe(true)
+    expect(Object.isFrozen(final.gcKeyCleanup.deletedVersionIds)).toBe(true)
+  })
+
+  it('rejects inline Delete-marker filtering and unscheduled or overlapping GC-key cleanup', () => {
+    const receipt = runGcLab()
+    const compaction = labAt(receipt, 21)
+    expect(() => reduceGcLabState(compaction, {
+      kind: 'gc_compaction_filter',
+      safePoint: compaction.safePoint.published,
+      filteredVersionIds: ['b-v2'],
+      retainedAnchorIds: [],
+    })).toThrow(/newest eligible Put\/Delete/)
+
+    const scheduled = labAt(receipt, 43)
+    const firstCompactionInput = labAt(receipt, 22)
+    expect(() => reduceGcLabState(firstCompactionInput, {
+      kind: 'gc_key_cleanup',
+      safePoint: firstCompactionInput.safePoint.published,
+      action: 'schedule',
+      versionIds: ['b-v2'],
+    })).toThrow(/not observed without older versions in a later compaction/)
+    const cleanup = {
+      kind: 'gc_key_cleanup' as const,
+      safePoint: scheduled.safePoint.published,
+      action: 'delete' as const,
+      versionIds: ['b-v2'],
+    }
+    expect(() => reduceGcLabState({
+      ...scheduled,
+      phase: 'cleaning_delete_markers',
+      gcKeyCleanup: { eligibleVersionIds: ['b-v2'], scheduledVersionIds: [], deletedVersionIds: [] },
+    }, cleanup)).toThrow(/not scheduled/)
+    expect(() => reduceGcLabState({
+      ...scheduled,
+      phase: 'cleaning_delete_markers',
+      keyChains: scheduled.keyChains.map((chain) => ({
+        ...chain,
+        versions: chain.versions.map((version) => version.id === 'b-v1'
+          ? { ...version, state: 'present' as const }
+          : version),
+      })),
+    }, cleanup)).toThrow(/still overlaps older versions/)
+  })
+
+  it('enqueues GC-key cleanup at filter Drop and keeps later execution as a fixture', () => {
+    const receipt = runGcLab()
+    const installed = labAt(receipt, 43)
+    expect(() => reduceGcLabState(installed, {
+      kind: 'gc_key_cleanup', safePoint: installed.safePoint.published,
+      action: 'schedule', versionIds: ['b-v2'],
+    })).toThrow(/before compaction completion/)
+    const queued = labAt(receipt, 42)
+    expect(() => reduceGcLabState({ ...queued, phase: 'cleaning_delete_markers' }, {
+      kind: 'gc_key_cleanup', safePoint: queued.safePoint.published,
+      action: 'delete', versionIds: ['b-v2'],
+    })).toThrow(/execution fixture requires completed compaction/)
+    expect(eventAt(receipt, 44).metadata).toMatchObject({
+      executionOrder: 'after_compaction_completion_model_fixture',
+    })
   })
 
   it('retains only synthetic aggregate identifiers in event snapshots', () => {

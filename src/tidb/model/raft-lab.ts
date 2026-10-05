@@ -409,12 +409,12 @@ export function reduceRaftLabState(
         delta.candidatePolicy === CANDIDATE_POLICY,
       'timeout and candidate policy must remain the documented teaching contract',
     )
-    const eligible = peers
-      .filter((peer) => peer.healthy)
+    const liveVoters = peers.filter((peer) => peer.healthy)
+    invariant(liveVoters.length >= state.quorum, 'election requires a live quorum')
+    const eligible = liveVoters
       .filter((peer) => !peers.some((other) =>
         other.healthy && compareLog(other, peer) > 0))
       .sort((left, right) => left.storeId.localeCompare(right.storeId))
-    invariant(eligible.length >= state.quorum, 'election requires a live quorum')
     invariant(
       eligible[0]?.storeId === delta.candidateStoreId,
       'candidate must follow the explicit deterministic model policy',
@@ -780,4 +780,3 @@ export function reduceRaftLabState(
   validateRaftLab(next)
   return next
 }
-

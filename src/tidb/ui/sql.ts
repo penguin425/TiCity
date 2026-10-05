@@ -5,18 +5,29 @@ import type {
   SqlAnalysis,
   SqlSubmission,
   TiDBSimulationApi,
+  TraceEvent,
   TraceReceipt,
 } from '../model/types'
-import { message, type Locale } from './catalog'
+import { CATALOG, message, sqlExplanation, type Locale } from './catalog'
 import { element } from './dom'
+import { traceEndpointLabel, traceEventCopy } from './event-copy'
 import { createModelBadge } from './legal'
 
 export const MAX_SQL_BYTES = 64 * 1024
+
+export type SqlRoutePlane = 'data' | 'control' | 'transaction' | 'replication'
+
+export interface SqlRouteGroup {
+  readonly plane: SqlRoutePlane
+  /** Directed receipt hops, kept separate rather than joined into a pipeline. */
+  readonly events: readonly TraceEvent[]
+}
 
 export interface SqlPresentation {
   status: 'supported' | 'unsupported' | 'invalid'
   statement: string
   route: readonly string[]
+  routeGroups?: readonly SqlRouteGroup[]
   plan: readonly string[]
   warning?: string
   explanation?: string
@@ -70,23 +81,52 @@ function flattenPlan(nodes: readonly ModelPlanNode[], depth = 0): string[] {
   return output
 }
 
-function defaultRoute(analysis: SqlAnalysis, receipt: TraceReceipt | null): string[] {
-  if (receipt) {
-    const path: string[] = []
-    for (const event of receipt.events) {
-      for (const stop of [event.source, event.target]) {
-        if (stop && path[path.length - 1] !== stop) path.push(stop)
-      }
-    }
-    if (path.length > 0) return path
-  }
-
+function defaultRoute(analysis: SqlAnalysis): string[] {
   const route = ['Client', 'TiProxy', 'TiDB']
   if (analysis.status !== 'supported') return []
   if (analysis.accessPath === 'tiflash_mpp') route.push('TiFlash MPP')
   else if (analysis.accessPath !== 'none') route.push('TiKV Region leader')
   route.push('Client')
   return route
+}
+
+function routePlane(event: TraceEvent): SqlRoutePlane {
+  if (
+    event.domain === 'tso' ||
+    event.kind === 'locate_regions' ||
+    event.kind === 'locate_region' ||
+    event.kind === 'learner_snapshot_gate' ||
+    event.kind === 'tiflash_read_index_requested' ||
+    event.kind === 'tiflash_read_index_returned'
+  ) return 'control'
+  if (event.domain === 'txn2pc') return 'transaction'
+  if (
+    event.domain === 'raft' ||
+    event.kind === 'tiflash_raft_leader_commit' ||
+    event.kind === 'tiflash_learner_receive' ||
+    event.kind === 'tiflash_learner_apply_command' ||
+    event.kind === 'tiflash_dm_committed_flush' ||
+    event.kind === 'tiflash_learner_applied_advance'
+  ) return 'replication'
+  return 'data'
+}
+
+export function projectSqlRouteGroups(receipt: TraceReceipt): readonly SqlRouteGroup[] {
+  const groups: Record<SqlRoutePlane, TraceEvent[]> = {
+    data: [],
+    control: [],
+    transaction: [],
+    replication: [],
+  }
+  for (const event of receipt.events) {
+    // Local computation is not a network hop. Retain only directed edges that
+    // the receipt actually declares, without creating return or branch links.
+    if (!event.source || !event.target || event.source === event.target) continue
+    groups[routePlane(event)].push(event)
+  }
+  return (Object.keys(groups) as SqlRoutePlane[])
+    .filter((plane) => groups[plane].length > 0)
+    .map((plane) => ({ plane, events: groups[plane] }))
 }
 
 function isSqlSubmission(value: SqlPresentation | SqlSubmission): value is SqlSubmission {
@@ -99,7 +139,8 @@ export function presentSql(value: SqlPresentation | SqlSubmission): SqlPresentat
   return {
     status: analysis.status,
     statement: analysis.kind,
-    route: defaultRoute(analysis, receipt),
+    route: defaultRoute(analysis),
+    routeGroups: receipt ? projectSqlRouteGroups(receipt) : undefined,
     plan: flattenPlan(analysis.plan),
     warning: [...analysis.warnings, ...(receipt?.warnings ?? [])].join(' ') || undefined,
     explanation: analysis.explanation,
@@ -114,6 +155,20 @@ function statusLabel(locale: Locale, status: SqlPresentation['status']): string 
 function outputView(locale: Locale, result: SqlPresentation): HTMLElement {
   const route = element('ol', { className: 'tidb-route' })
   for (const stop of result.route) route.append(element('li', { text: stop }))
+  const routeGroups = result.routeGroups?.map((group) => {
+    const hops = element('ul', { className: 'tidb-route-hops' })
+    for (const event of group.events) {
+      const from = traceEndpointLabel(locale, event.source, event)
+      const to = traceEndpointLabel(locale, event.target, event)
+      hops.append(element('li', {
+        text: `${from} → ${to} · ${traceEventCopy(event, locale).label}`,
+        attrs: { 'data-route-event': event.id },
+      }))
+    }
+    return element('section', {
+      attrs: { 'data-route-plane': group.plane },
+    }, element('h4', { text: CATALOG[locale].routePlanes[group.plane] }), hops)
+  })
 
   const plan = element('ol', { className: 'tidb-plan' })
   for (const node of result.plan) plan.append(element('li', { text: node }))
@@ -125,8 +180,16 @@ function outputView(locale: Locale, result: SqlPresentation): HTMLElement {
       className: `tidb-status tidb-status--${result.status}`,
       text: `${statusLabel(locale, result.status)} · ${result.statement}`,
     }),
-    result.explanation ? element('p', { text: result.explanation }) : null,
-    result.route.length > 0
+    result.explanation ? element('p', {
+      text: sqlExplanation(locale, result.explanation),
+    }) : null,
+    routeGroups && routeGroups.length > 0
+      ? element('section', {},
+          element('h3', { text: message(locale, 'route') }),
+          element('p', { text: message(locale, 'routeHelp') }),
+          ...routeGroups,
+        )
+      : result.route.length > 0
       ? element('section', {}, element('h3', { text: message(locale, 'route') }), route)
       : null,
     result.plan.length > 0

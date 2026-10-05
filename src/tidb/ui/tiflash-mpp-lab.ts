@@ -209,6 +209,7 @@ const COPY: Readonly<Record<Locale, TiFlashMppLabCopy>> = {
       complete: '完了',
     },
     tunnelStatuses: {
+      planned: '計画済み',
       registered: '登録済み',
       sent: '送信済み',
       received: '受信済み',
@@ -334,6 +335,7 @@ const COPY: Readonly<Record<Locale, TiFlashMppLabCopy>> = {
       complete: 'Complete',
     },
     tunnelStatuses: {
+      planned: 'Planned',
       registered: 'Registered',
       sent: 'Sent',
       received: 'Received',
@@ -872,7 +874,7 @@ export function createTiFlashMppLabPanel(
     root,
     update(event): void {
       /*
-       * Deliberately retain only the synthetic model-7 snapshot. Event labels,
+       * Deliberately retain only the synthetic model-8 snapshot. Event labels,
        * details, metadata, SQL, and active-event payloads never enter this UI.
        */
       currentSnapshot = event?.snapshot?.tiflashMppLab

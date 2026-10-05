@@ -16,6 +16,7 @@ const ANALYSIS = {
   statementKind: 'point_read',
   table: 'accounts',
   accessPath: 'point_get',
+  aggregateShape: null,
   readOnly: true,
   plan: [],
   warnings: [],
@@ -72,6 +73,7 @@ function receipt(): TraceReceipt {
         statementKind: 'point_read',
         table: 'accounts',
         accessPath: 'point_get',
+        aggregateShape: null,
       },
       transactionMode: 'pessimistic',
       commitProtocol: null,
@@ -135,7 +137,8 @@ describe('trace playback dock', () => {
     )
     expect(dock.root.querySelector('[data-trace-position]')?.textContent).toBe('3 / 4')
     expect(dock.root.dataset.eventCount).toBe('4')
-    expect(dock.root.querySelector('[data-trace-domain]')?.textContent).toBe('TSO / PD')
+    expect(dock.root.querySelector('[data-trace-domain]')?.textContent)
+      .toBe('TSO / PDメタデータ制御')
     expect(dock.root.querySelector('[data-trace-status]')?.textContent).toBe('注意')
     expect(
       dock.root.querySelector('[data-trace-event-progress]')?.getAttribute('aria-valuenow'),

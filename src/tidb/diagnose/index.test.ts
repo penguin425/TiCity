@@ -512,10 +512,10 @@ describe('TiDB diagnostic projections', () => {
     ).toMatchObject({
       lane: 'two_pc',
       stage: 'client_acknowledged',
-      latestTs: '—',
-      latestTsSource: '—',
-      requestMinCommitTs: '—',
-      maxCommitTs: '—',
+      latestTs: String(twoPcResponse.snapshot!.protocolLab!.lanes[2].latestTs),
+      latestTsSource: 'pd_tso',
+      requestMinCommitTs: String(twoPcResponse.snapshot!.protocolLab!.lanes[2].requestMinCommitTs),
+      maxCommitTs: String(twoPcResponse.snapshot!.protocolLab!.lanes[2].maxCommitTs),
       commitTsSource: 'pd_tso_after_prewrite',
       clientResponded: 'true',
       backgroundState: 'in_progress_after_response',
@@ -690,7 +690,7 @@ describe('TiDB diagnostic projections', () => {
   it('projects the exact GC coordinator, storage, and MVCC state without identifiers', () => {
     const simulation = createTiDBSimulation({ seed: 425 })
     const receipt = simulation.runScenario('gc-safe-point')
-    expect(receipt.events).toHaveLength(43)
+    expect(receipt.events).toHaveLength(45)
 
     const at = (oneBasedIndex: number) => {
       const gcLab = receipt.events[oneBasedIndex - 1]?.snapshot?.gcLab
@@ -789,15 +789,19 @@ describe('TiDB diagnostic projections', () => {
       expect.objectContaining({ compaction: 'running', filterActive: 'true' }),
     ])
     expect(rows(filtered, 'gc-mvcc-chains').map((row) => Number(row.filtered))
-      .reduce((total, count) => total + count, 0)).toBe(4)
+      .reduce((total, count) => total + count, 0)).toBe(3)
 
-    const final = at(43)
+    const final = at(45)
     expect(rows(final, 'gc-safe-point-stores')[0]).toMatchObject({
       blockerStatus: 'completed',
       maxWaitBoundary: 'fixture_completed_not_max_wait_or_kill',
     })
     const finalChains = rows(final, 'gc-mvcc-chains')
     expect(finalChains.map((row) => Number(row.filtered))
+      .reduce((total, count) => total + count, 0)).toBe(5)
+    expect(finalChains.map((row) => Number(row.gcKeyDeleted))
+      .reduce((total, count) => total + count, 0)).toBe(1)
+    expect(finalChains.map((row) => Number(row.present))
       .reduce((total, count) => total + count, 0)).toBe(6)
     expect(finalChains.map((row) => Number(row.anchors))
       .reduce((total, count) => total + count, 0)).toBe(3)

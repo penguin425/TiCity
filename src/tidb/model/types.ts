@@ -5,7 +5,7 @@
  * receive them as projections and must not invent alternate simulation state.
  */
 
-export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-7'
+export const TIDB_MODEL_VERSION = 'tidb-v8.5-model-8'
 
 export type NodeStatus = 'up' | 'down' | 'degraded'
 export type NodeKind = 'tiproxy' | 'tidb' | 'pd' | 'tikv' | 'tiflash'
@@ -346,6 +346,7 @@ export type TraceProtocolLaneStage =
   | 'idle'
   | 'requested'
   | 'started'
+  | 'candidates_checked'
   | 'selected'
   | 'latest_ts'
   | 'prewriting'
@@ -482,6 +483,7 @@ export type TraceGcLabPhase =
   | 'publishing_safe_point'
   | 'tikv_observing'
   | 'compacting'
+  | 'cleaning_delete_markers'
   | 'between_rounds'
   | 'complete'
 
@@ -495,6 +497,7 @@ export type TraceGcVersionState =
   | 'present'
   | 'retained_anchor'
   | 'filtered'
+  | 'gc_deleted'
 
 export interface TraceGcVersionSnapshot {
   /** Synthetic version label only; never a real or encoded TiKV key. */
@@ -542,7 +545,7 @@ export interface TraceGcStoreSnapshot {
 }
 
 /**
- * Model-6 GC/Storage Lab. It pins the TiDB v8.5.0 default Compaction Filter
+ * Model-8 GC/Storage Lab. It pins the TiDB v8.5.0 default Compaction Filter
  * path and projects synthetic aggregate MVCC chains, never real keys/values.
  */
 export interface TraceGcLabSnapshot {
@@ -593,11 +596,18 @@ export interface TraceGcLabSnapshot {
   deleteRanges: readonly TraceGcDeleteRangeSnapshot[]
   stores: readonly TraceGcStoreSnapshot[]
   keyChains: readonly TraceGcKeyChainSnapshot[]
+  gcKeyCleanup: Readonly<{
+    /** Delete markers observed without older versions in this compaction input. */
+    eligibleVersionIds: readonly string[]
+    scheduledVersionIds: readonly string[]
+    deletedVersionIds: readonly string[]
+  }>
   storage: Readonly<{
     representation: 'logical_chains_counted_once'
     compactionLevel: 'bottommost_model_fixture'
     initialVersionCount: number
     filteredVersionCount: number
+    gcKeyDeletedVersionCount: number
     retainedAnchorCount: number
     presentVersionCount: number
     deletedDefaultCfValues: number
@@ -710,13 +720,13 @@ export interface TraceTiFlashMppTunnelSnapshot {
   targetTaskId: TraceTiFlashMppTaskId | 'tidb-root'
   locality: 'local' | 'remote' | 'root'
   persistence: 'ephemeral_query_blocks'
-  status: 'registered' | 'sent' | 'received'
+  status: 'planned' | 'registered' | 'sent' | 'received'
   packetCount: number
   bytesBucket: 'none' | 'small'
 }
 
 /**
- * Model-7 TiFlash learner replication and MPP vertical slice. All identifiers,
+ * Model-8 TiFlash learner replication and MPP vertical slice. All identifiers,
  * counts, timestamps, and indexes are deterministic synthetic teaching data.
  */
 export interface TraceTiFlashMppLabSnapshot {
@@ -876,7 +886,7 @@ export interface TraceStateSnapshot {
   protocolLab?: TraceProtocolLabSnapshot
   /** Present only for the model-6 GC/Storage vertical slice. */
   gcLab?: TraceGcLabSnapshot
-  /** Present only for the model-7 TiFlash learner and MPP vertical slice. */
+  /** Present only for the detailed TiFlash learner and MPP vertical slice. */
   tiflashMppLab?: TraceTiFlashMppLabSnapshot
 }
 
@@ -1185,6 +1195,12 @@ export type TraceStateDelta =
     retainedAnchorIds: readonly string[]
   }>
   | Readonly<{
+    kind: 'gc_key_cleanup'
+    safePoint: number
+    action: 'schedule' | 'delete'
+    versionIds: readonly string[]
+  }>
+  | Readonly<{
     kind: 'tiflash_replica_raft_commit'
     regionId: number
     index: number
@@ -1257,6 +1273,10 @@ export type TraceStateDelta =
     kind: 'tiflash_mpp_tunnels_build'
     hashTunnelCount: 4
     rootTunnelCount: 2
+  }>
+  | Readonly<{
+    kind: 'tiflash_mpp_tunnels_register'
+    tunnelCount: 6
   }>
   | Readonly<{
     kind: 'tiflash_mpp_task_stage'
@@ -1349,6 +1369,8 @@ export interface ModelPlanNode {
   children: readonly ModelPlanNode[]
 }
 
+export type SqlAggregateShape = 'scalar' | 'grouped'
+
 export interface SqlAnalysis {
   status: SqlStatus
   kind: SqlQueryKind
@@ -1356,6 +1378,8 @@ export interface SqlAnalysis {
   statementKind: Exclude<SqlQueryKind, 'explain'>
   table: string | null
   accessPath: SqlAccessPath
+  /** Literal-free aggregate shape; null for non-aggregate statements. */
+  aggregateShape: SqlAggregateShape | null
   readOnly: boolean
   plan: readonly ModelPlanNode[]
   warnings: readonly string[]
@@ -1366,7 +1390,7 @@ export interface ReplaySpec {
   modelVersion: string
   seed: number
   scenarioId: ScenarioId | null
-  query: Pick<SqlAnalysis, 'kind' | 'statementKind' | 'table' | 'accessPath'>
+  query: Pick<SqlAnalysis, 'kind' | 'statementKind' | 'table' | 'accessPath' | 'aggregateShape'>
   transactionMode: TransactionMode
   /** Null for reads and model-only EXPLAIN receipts. */
   commitProtocol: ResolvedCommitProtocol | null

@@ -89,6 +89,7 @@ export type {
   ScenarioId,
   SqlAccessPath,
   SqlAnalysis,
+  SqlAggregateShape,
   SqlQueryKind,
   SqlStatus,
   SqlSubmission,

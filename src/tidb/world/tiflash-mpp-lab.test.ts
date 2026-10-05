@@ -446,7 +446,31 @@ describe('fixed-capacity TiFlash MPP Lab renderer', () => {
     for (const spy of materialSpies) expect(spy).toHaveBeenCalledTimes(1)
   })
 
-  it('hides all MPP exchange rails when tunnels are not registered', () => {
+  it('shows planned task links without sending query packets', () => {
+    const lab = createTiFlashMppLab()
+    const exchangeRails = lab.object.getObjectByName(
+      'tiflash-mpp-lab:mpp-exchange-rails',
+    ) as THREE.InstancedMesh
+    const packets = lab.object.getObjectByName(
+      'tiflash-mpp-lab:mpp-packets',
+    ) as THREE.InstancedMesh
+    const plannedTunnels = ACTIVE_PROJECTION.tunnels.map(
+      (tunnel): TiFlashMppLabTunnelProjection => ({
+        ...tunnel,
+        state: 'planned',
+      }),
+    ) as unknown as TiFlashMppLabProjection['tunnels']
+
+    lab.update({ ...ACTIVE_PROJECTION, tunnels: plannedTunnels })
+
+    for (let index = 0; index < TIFLASH_MPP_LAB_TUNNEL_CAPACITY; index++) {
+      expect(instanceScale(exchangeRails, index).length()).toBeGreaterThan(0)
+      expect(instanceScale(packets, index).length()).toBe(0)
+    }
+    lab.dispose()
+  })
+
+  it('hides all MPP exchange rails when tunnel projections are idle', () => {
     const lab = createTiFlashMppLab()
     const exchangeRails = lab.object.getObjectByName(
       'tiflash-mpp-lab:mpp-exchange-rails',

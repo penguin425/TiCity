@@ -1,6 +1,6 @@
 # TiCity model boundary
 
-TiCity v0.10.2 model-7 targets the **TiDB v8.5 LTS** line and pins mechanism
+TiCity v0.11.0 model-8 targets the **TiDB v8.5 LTS** line and pins mechanism
 details to TiDB v8.5.0 source commit
 `d13e52ed6e22cc5789bed7c64c861578cd2ed55b`, TiKV v8.5.0 source commit
 `a2c58c94f89cbb410e66d8f85c236308d6fc64f0`, client-go commit
@@ -28,12 +28,12 @@ observation tool.
 | TiKV uses a cluster-wide deadlock-detector leader and consults PD to locate it | The detector is shown on the TiKV side; PD participates only in detector-leader lookup and never becomes the detector | [TiKV v8.5 detector implementation](https://github.com/tikv/tikv/blob/v8.5.0/src/server/lock_manager/deadlock.rs#L611-L723) |
 | Optimistic distributed transactions use 2PC | Prewrite precedes commit; a modeled conflict moves the transaction to `rolled_back` without claiming a per-key lock inventory | [Optimistic transaction model](https://docs.pingcap.com/tidb/v8.5/optimistic-transaction) |
 | `tidb_enable_1pc` and `tidb_enable_async_commit` make the optimizations available; TiDB still chooses the suitable commit mode | Both switches are on in Protocol Lab's three isolated fixtures, while each lane records its explicit eligibility decision and has no runtime fallback | [TiDB v8.5 system variables](https://docs.pingcap.com/tidb/v8.5/system-variables/#tidb_enable_1pc), [pinned client eligibility logic](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L1504-L1583) |
-| Default linear consistency obtains a latest TSO for 1PC and Async Commit; causal consistency is a separate opt-in transaction mode | All three Protocol Lab fixtures are explicitly linearizable. The 1PC and Async lanes obtain modeled `latest_ts` from PD before prewrite; Protocol Lab does not model the causal-consistency path | [Transactions](https://docs.pingcap.com/tidb/v8.5/transaction-overview/#causal-consistency-transactions), [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
+| Default linear consistency obtains a latest TSO for 1PC and Async Commit; causal consistency is a separate opt-in transaction mode | All three Protocol Lab fixtures are explicitly linearizable. All optimization candidates obtain modeled `latest_ts` before Region batching and prewrite, including the fixture that ultimately uses 2PC; Protocol Lab does not model the causal-consistency path | [Transactions](https://docs.pingcap.com/tidb/v8.5/transaction-overview/#causal-consistency-transactions), [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown) |
 | 1PC is attempted in a Prewrite request and can return a TiKV-calculated one-phase commit timestamp without a normal Commit phase | The one-Region lane sends `TryOnePc`, crosses that Region's Raft quorum/apply once, records the TiKV-returned `one_pc_commit_ts`, and has no durable lock-CF intermediate or background commit cleanup | [pinned Prewrite flags](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/prewrite.go#L177-L203), [pinned client commit paths](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L1707-L1980), [pinned TiKV v8.5 1PC MVCC path](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/storage/txn/commands/prewrite.rs#L949-L988) |
 | Async Commit establishes the commit timestamp from successful prewrites and performs commit-record resolution asynchronously | Both Region prewrites independently cross Raft apply and return `min_commit_ts`; the lane uses their maximum as `commit_ts`, responds to the client, then shows both Region Commit RPC/apply paths as background work | [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown), [pinned client commit paths](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L1707-L1980), [pinned TiKV v8.5 prewrite path](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/storage/txn/commands/prewrite.rs#L565-L798) |
-| Regular 2PC obtains `commit_ts` after prewrite, commits the primary on the client path, and can commit secondaries in the background | The two Region prewrite branches join before modeled PD TSO allocation; primary Raft apply gates the response, and secondary Commit/Raft apply follows on an explicitly background path | [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown), [pinned primary/secondary client path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L998-L1054) |
+| Regular 2PC obtains `commit_ts` after prewrite, commits the primary on the client path, and can commit secondaries in the background | The two Region prewrite branches join before modeled PD commit_ts allocation; primary Raft apply gates the response, and secondary Commit/Raft apply follows on an explicitly background path | [latency breakdown](https://docs.pingcap.com/tidb/v8.5/latency-breakdown), [pinned primary/secondary client path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/txnkv/transaction/2pc.go#L998-L1054) |
 | The target client source has Async Commit defaults of 256 keys, 4 KiB total key bytes, and a two-second safe window | Protocol Lab pins 256, 4,096, and two seconds as implementation-profile values. They are not a public stable TiDB contract, benchmark, recommendation, or claim about another patch release | [pinned client defaults](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/config/client.go#L123-L167) |
-| Follower Read can offload a Region leader | Read policy changes the selected peer without weakening the model snapshot | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
+| Follower Read can offload a Region leader | Follower service follows quorum-confirmed ReadIndex and local applied-index readiness | [Follower Read](https://docs.pingcap.com/tidb/v8.5/follower-read) |
 | TiFlash is an asynchronously replicated Raft learner for HTAP | Every learner shown for a selected query Region has `role=learner` and `voter=false`; it never counts toward a TiKV voter quorum. The array projects one scheduled learner replica per selected Region and deliberately omits unselected learners, so it is not a complete table or Store replica inventory | [TiFlash overview](https://docs.pingcap.com/tidb/v8.5/tiflash-overview), [pinned proxy observer registration](https://github.com/pingcap/tidb-engine-ext/blob/b877a976997acb7c552db970c01546b4e82bce18/proxy_components/engine_store_ffi/src/observer.rs#L66-L103) |
 | Normal TiFlash catch-up applies forwarded Region Raft commands, writes committed Region data, and only then advances the learner applied index | The replication rail keeps leader commit, learner receive, TiFlash apply, DeltaMerge committed write, and applied-index notification separate; initial snapshot ingestion is outside the happy-path fixture | [pinned proxy command forwarding](https://github.com/pingcap/tidb-engine-ext/blob/b877a976997acb7c552db970c01546b4e82bce18/proxy_components/engine_store_ffi/src/core/forward_raft/command.rs#L332-L405), [pinned TiFlash command apply](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/MultiRaft/RaftCommands.cpp#L460-L516), [snapshot-ingestion design](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/docs/design/2022-09-27-improve-snapshot-ingestion.md#L23-L36) |
 | TiFlash snapshot readiness is decided per Region, not by a node-global `resolved_ts` | A Region whose `start_ts` is no greater than `self_safe_ts` takes the fast path; otherwise TiFlash obtains ReadIndex and waits for the local learner `applied_index` to reach it before lock/MVCC checks and post-read Region validation | [pinned safe-ts fast path](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/LearnerReadWorker.cpp#L108-L160), [pinned ReadIndex request and wait](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/ReadIndex.cpp#L40-L124), [pinned lock/cache handling](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Storages/KVStore/Read/LearnerReadWorker.cpp#L353-L419), [pinned post-read validation](https://github.com/pingcap/tiflash/blob/6e12ba23c70f358f2ffbee837feac24118a3e988/dbms/src/Flash/Coprocessor/DAGStorageInterpreter.cpp#L1028-L1073) |
@@ -53,7 +53,7 @@ observation tool.
 | TiDB v8.5.0's pinned Resolve Locks path traverses Regions, issues ScanLock, checks primary outcome, and resolves old locks | The cutaway expands Regions 8 and 20 with one commit resolution and one rollback resolution. It records the ResolveLock outcome but deliberately does not expand the normal TiKV write command's internal Raft entry | [pinned Region traversal](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L1195-L1231), [pinned Region ScanLock path](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/tikv/gc.go#L167-L265), [pinned TiKV ResolveLock command](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/storage/txn/commands/resolve_lock.rs#L25-L82) |
 | Delete Ranges is distinct from per-key MVCC GC; the classic raftstore-v1 branch sends `UnsafeDestroyRange` to relevant Stores and bypasses Region Raft | Round 1 uses one synthetic dropped range and a three-Store fan-out. Per-Store acknowledgement state and actual key-range boundaries are not retained; round 2 has no pending range. This fixture does not claim raftstore-v2 behavior | [pinned Delete Range branches](https://github.com/pingcap/tidb/blob/d13e52ed6e22cc5789bed7c64c861578cd2ed55b/pkg/store/gcworker/gc_worker.go#L809-L912), [pinned classic bypass contract](https://github.com/tikv/client-go/blob/006dfb024c26859f2e3757172296d84ef36ff585/tikv/gc.go#L303-L367) |
 | With the pinned v8.5.0 default Compaction Filter path enabled, each TiKV detects a greater global safe point asynchronously and does not schedule the legacy per-Region GC round | Each round forks three background Store-detection events, joins them before one representative bottommost-compaction fixture, and records no Compaction Filter Raft entry | [TiKV configuration](https://docs.pingcap.com/tidb/v8.5/tikv-configuration-file), [pinned TiKV polling and legacy-round decision](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/gc_manager.rs#L315-L394) |
-| The Compaction Filter removes obsolete MVCC records, can retain the last eligible Put as a snapshot anchor, can remove an old chain whose last eligible write is Delete, and deletes corresponding long values from DEFAULT CF | The version board contains 12 synthetic versions counted once across four logical chains. Round 1 filters four and retains two Put anchors; the final snapshot filters six, retains three anchors, and counts three deleted DEFAULT CF values | [pinned TiKV Compaction Filter retention and DEFAULT cleanup](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/compaction_filter.rs#L457-L530) |
+| The Compaction Filter retains eligible Put/Delete boundaries and removes older records; bottommost Delete cleanup uses a separately scheduled GC-key task | The version board contains 12 synthetic versions counted once across four logical chains. Round 1 filters three and retains two Put anchors plus the Delete marker; the final snapshot counts five filtered records, one GC-key-deleted marker, three Put anchors, and three deleted DEFAULT CF values | [pinned TiKV Compaction Filter retention and DEFAULT cleanup](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/compaction_filter.rs#L457-L530), [separate GC-key scheduling](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/compaction_filter.rs#L445-L454), [later-pass marker test](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/compaction_filter.rs#L1090-L1100) |
 
 ## Representative values
 
@@ -75,7 +75,7 @@ table-level replica and lets the cost-based optimizer choose TiKV, TiFlash, or
 both; an aggregate is not automatically a TiFlash query.
 
 The default city topology still has one overview TiFlash building. The
-model-7 TiFlash/MPP Lab is a separate, scenario-local two-Store teaching
+model-8 TiFlash/MPP Lab is a separate, scenario-local two-Store teaching
 fixture so it can show Store-address grouping with opaque Store tokens and a
 real all-to-all HashPartition shape. Its three Region assignments, two
 fragments, four tasks, six tunnels, synthetic indexes, row/block/packet
@@ -212,8 +212,10 @@ entry and no modeled result row. This sequence is a deterministic educational
 mechanism contract, not a packet-, byte-, implementation-, or timing-accurate
 emulation of TiKV.
 
-Only after the peers complete election and the leader applies the no-op does PD
-observe the new leader metadata. PD then answers TiDB's routing lookup; it does
+PD can observe the new leader metadata after election; current-term no-op apply
+is a read-readiness gate, not a prerequisite for the heartbeat. This fixed replay
+places the observation after apply using a non-causal presentation fence.
+PD then answers TiDB's routing lookup; it does
 not choose the candidate, grant a Pre-Vote or Vote, or elect the Region leader.
 TiDB refreshes its Region cache and issues attempt 2 with the same synthetic
 logical request ID. This is a TiDB-internal Region-request retry, not an
@@ -230,8 +232,8 @@ over that receipt; they do not resend the request, rerun the election, or
 choose a different winner. The snapshots retain no SQL text, literal, key,
 value, or result row and have `MODEL / SIMULATED` provenance.
 
-The model-5 `commit-protocols` scenario is a fourth mechanism-level vertical
-slice. Its single immutable 74-event receipt contains three independent,
+The model-8 `commit-protocols` scenario is a fourth mechanism-level vertical
+slice. Its single immutable 75-event receipt contains three independent,
 representative optimistic global transactions in a fixed teaching order. The
 lanes compare protocol message and state-transition shape; they are not three
 executions of the displayed SQL, a race, a latency benchmark, or a prediction
@@ -243,7 +245,7 @@ non-causal fence only serializes their replay presentation and is not a
 latency or benchmark claim.
 
 Both optional commit features are enabled for all three fixtures, consistency
-is fixed to linearizable, and TiKV async-apply-prewrite is fixed off. Each
+is fixed to linearizable, and TiKV async-apply-prewrite is fixed off. Global, non-pipelined transactions without binlog or a cached-table commit-timestamp upper-bound callback are the fixed successful profile. Each
 fixture receives a distinct synthetic request/transaction ID and its own
 Region set. No Region is shared across lanes. The model deliberately exercises
 successful, preselected paths with no runtime fallback:
@@ -257,9 +259,9 @@ successful, preselected paths with no runtime fallback:
   `one_pc_commit_ts`, which is the lane's commit timestamp. There is no normal
   Commit RPC, durable lock-CF intermediate, or post-response cleanup.
 - The **Async Commit** fixture has two aggregate mutations in two Regions.
-  Region batching rejects 1PC before a `TryOnePc` RPC. PD supplies `start_ts`
-  and `latest_ts`; TiCity again records representative request and maximum
-  timestamp bounds. The two Prewrite branches run independently, and each
+  PD supplies `start_ts` and `latest_ts` while the optimizations are candidates;
+  TiCity records representative request and maximum timestamp bounds. Region
+  batching then rejects 1PC before a `TryOnePc` RPC. The two Prewrite branches run independently, and each
   reaches its own Region Raft apply before TiKV returns that Region's
   `min_commit_ts`. The maximum returned value becomes `commit_ts`; PD does not
   allocate a separate commit timestamp on this path. Both prewrite locks still
@@ -267,16 +269,17 @@ successful, preselected paths with no runtime fallback:
   independently cross Region Raft and replace the locks with write-CF commit
   records.
 - The **regular 2PC** fixture has 257 aggregate mutations in two Regions.
-  Region batching rejects 1PC, and the 257 count rejects Async Commit at the
-  pinned 256-key client precheck; this is preselection, not a failed TiKV
-  optimization attempt. Both regular Prewrite branches independently cross
+  The 257 count rejects Async Commit at the pinned 256-key client precheck.
+  1PC is initially a candidate, so the linearizable fixture obtains `latest_ts`
+  and derives request bounds before Region batching rejects 1PC. No failed
+  TiKV optimization RPC occurs. Both regular Prewrite branches independently cross
   Region Raft and join. PD then supplies `commit_ts`. The primary Commit and
   its Region Raft apply gate the client response, while the secondary still
   has a prewrite lock. A background secondary Commit/Raft/apply path then
   removes that lock and writes its commit record.
 
-Timestamp authority is therefore explicit: all three `start_ts` values and the
-1PC/Async `latest_ts` values come from modeled PD TSO calls; the request floor
+Timestamp authority is therefore explicit: all three `start_ts` and
+optimization-candidate `latest_ts` values come from modeled PD TSO calls; the request floor
 and maximum bound are labeled TiCity model projections; the 1PC commit
 timestamp comes from TiKV's one-phase result; the Async Commit timestamp is the
 maximum of the two TiKV-returned `min_commit_ts` values; and regular 2PC
@@ -297,8 +300,8 @@ identifiers, and modeled timestamps. It contains no SQL text, literal, real
 key, secondary-key list, value, result row, digest, packet, or live-cluster
 observation.
 
-The model-6 `gc-safe-point` scenario is a fifth mechanism-level vertical
-slice. Its single immutable 43-event receipt contains two
+The model-8 `gc-safe-point` scenario is a fifth mechanism-level vertical
+slice. Its single immutable 45-event receipt contains two
 deterministic coordinator and storage rounds. It is not a trace captured from
 a cluster, a full GC-worker emulator, a timing benchmark, or an execution of
 the displayed SQL.
@@ -346,12 +349,19 @@ Compaction Filter. This boundary must not be read as GC committing, killing,
 or otherwise controlling the application transaction.
 
 The MVCC fixture demonstrates the pinned filter semantics without storing key
-material. At the first filter event, four of 12 synthetic records are
-filtered and two last eligible Puts are retained as anchors. In the final
-snapshot, six records are filtered, three Put anchors remain, one filtered
-Delete demonstrates removal of its older logical history, and three filtered
+material. At the first filter event, three of 12 synthetic records are
+filtered and two last eligible Puts are retained as anchors. The newest
+eligible Delete remains present while its older Put is filtered. The second
+compaction can schedule a separate `GcTask::GcKeys` because the retained Delete
+no longer overlaps an older version in that compaction. The filter Drop enqueues
+the task before the compaction result is installed. This teaching fixture executes
+the background cleanup after compaction completion; that execution timing is a
+model policy. [The pinned Drop ordering](https://github.com/tikv/tikv/blob/a2c58c94f89cbb410e66d8f85c236308d6fc64f0/src/server/gc_worker/compaction_filter.rs#L668-L675) does not require
+waiting until installation to enqueue the task. Cleanup removes that marker. In the final snapshot, five records are filtered,
+one is separately GC-key-deleted, three Put anchors remain, and three filtered
 long Puts count corresponding DEFAULT CF cleanup. These are logical chains
-counted once, not replica-level copies.
+counted once, not replica-level copies. Marker cleanup is not an inline
+Compaction Filter decision.
 
 Every GC/Storage Lab event publishes a deeply frozen `gcLab` post-event
 snapshot and typed deltas. City projects it into a fixed-capacity 3D cutaway
@@ -368,7 +378,7 @@ and visibly synthetic transaction, lock, range, chain, and version IDs. It
 contains no SQL text, literal, real or encoded key, key range, row value,
 result row, packet, SST content, or live-cluster observation.
 
-The model-7 `tiflash-mpp` scenario is a sixth mechanism-level vertical slice.
+The model-8 `tiflash-mpp` scenario is a sixth mechanism-level vertical slice.
 Its immutable 56-event receipt deliberately begins with a fixed steady-state
 learner backlog, not a client write and not initial replica creation. Three
 TiKV Region commits are forwarded through the proxy as ordinary learner
@@ -382,7 +392,9 @@ After TiDB obtains the synthetic query snapshot, `AVAILABLE=true` and
 `PROGRESS=1` are observed as provisioning facts only. The fixture declares an
 MPP access-path choice, builds two fragments, groups scan Regions by two
 scenario-local opaque TiFlash Store tokens, constructs four TiFlash tasks, and
-registers six tunnels to those tasks or the distinct `tidb-root`. This is a
+plans six tunnel links to those tasks or the distinct `tidb-root`. After dispatch,
+TiFlash task preparation registers the server tunnels before storage read gates.
+This is a
 fixed successful optimizer fixture, not a claim that a provisioned TiFlash
 replica is always selected or immediately ready for the requested snapshot.
 
@@ -437,6 +449,21 @@ GC/storage, or TiFlash/MPP projection depth of these six vertical slices.
 
 ## SQL boundary
 
+Model-8 preserves scalar/grouped aggregate shape in both analysis and ReplaySpec
+without retaining SQL or literals. Ordinary scalar COUNT uses representative
+TiFlash partial aggregation and a TiDB final aggregate; grouped aggregation
+can use the fixed HashPartition MPP fixture. Only grouped queries select that
+mechanism Lab. Positive primary-key equalities must be bound to the single
+FROM table or its alias; negation, comma joins, windows, locking reads and
+aggregate DISTINCT/HAVING expressions outside the supported grammar are rejected.
+
+SQL workbench data edges exclude PD. TSO and Region metadata lookup, transaction
+commit, and Raft replication are shown as separately typed directed hops. The
+compact successful Follower Read path obtains ReadIndex and gates service on
+local applied-index readiness; after a compact election, a current-term no-op
+must commit before that barrier can pass. These are teaching projections, not
+live readiness measurements.
+
 The workbench accepts at most one 64 KiB statement. A conservative lexer
 recognizes only a small educational subset: point/range reads, aggregates,
 single-row INSERT with an explicit known primary key, primary-key-constrained
@@ -449,4 +476,4 @@ execute, optimize, contact a cluster, persist SQL literals, or return rows.
 
 - `MODEL / SIMULATED`: generated entirely by TiCity.
 - `REFERENCE`: a link or command that a person could use on a real cluster.
-- `OBSERVED`: reserved for a future read-only adapter and not used in v0.10.2.
+- `OBSERVED`: reserved for a future read-only adapter and not used in v0.11.0.

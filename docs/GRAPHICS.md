@@ -13,6 +13,22 @@ details separate from the state-driven database explanation.
 
 ## What changed
 
+The massing now takes its cues from PGSimCity's large exposed structures and
+recognizable machinery. Three independently supported TiKV decks establish
+the storage district's silhouette. Their open lower service floors expose
+concrete piers, diagonal steel braces, cooling cabinets and fan housings;
+the Region racks stay fully visible on the upper level. Each store retains
+its own selectable group. Deck, rack footing, ports, colliders and selection
+anchors use the same height datums. This architecture represents independent
+storage nodes; it does not introduce a shared buffer pool or new model state.
+
+The three stateless SQL buildings have different rectangular proportions,
+offset upper wings, broad entrance podiums and flat mechanical roofs. Their
+58/76/64-metre roof heights, solid cores and instanced curtain walls use the
+same authored dimensions. A vertical dial gives the PD drum a recognizable
+clock silhouette. The lower camera exposes more of the buildings' sides;
+lower, wider side scenery gives the main facilities more prominence.
+
 The earlier Region racks were mostly buried in their decks and rendered black.
 The deck top, rack footing, roof and route ports now share authored height
 constants. Instanced colours no longer depend on a missing vertex-colour
@@ -21,7 +37,7 @@ Roof triangles identify leaders and crosses identify unavailable voters, while
 status strips retain the separate Raft/KV semantic colours. Hotspot height,
 roof details and selection anchors move together without sinking the footing.
 
-SQL towers have dense curtain-wall bays, inset spandrels, slim mullions, stepped
+SQL towers have dense curtain-wall bays, inset spandrels, slim mullions, offset
 cornices and roof machinery. A fixed subset of windows lights up at night rather
 than making the entire facade emissive. Ivory concrete, charcoal metal, reflective
 teal glass and brushed trim have distinct surface responses. Large masses and
@@ -70,7 +86,9 @@ and resolve small collisions near the building with short leader lines.
   deterministic skyline sites and Region height constants.
 - `world/geometry.ts`: shared primitives and static sibling batches that retain
   their selectable district parents, plus dimension-keyed beveled masses.
-- `world/building-detail.ts`, `world/region-peers.ts`: architectural fittings and
+- `world/sql-architecture.ts`: shared SQL volumes and facade dimensions.
+- `world/building-detail.ts`, `world/storage-architecture.ts`,
+  `world/region-peers.ts`: architectural fittings, open service floors and
   the state-driven rack projection.
 - `world/environment-streets.ts`, `world/environment-skyline.ts`: instanced scenery.
 - `world/environment-surfaces.ts`: deterministic texture maps and world-scale UVs.
@@ -98,7 +116,9 @@ leaves a short input-processing window before submitting the next one (at most
 resolution, materials, lighting or deterministic model steps.
 
 At a 1440 × 1000 Chromium software-WebGL viewport, the reviewed daytime overview
-used 159 draw calls, about 115,000 triangles and 58 uploaded geometries. Before
+uses 165 draw calls, about 120,000 triangles and 64 uploaded geometries. The
+preceding surface/reflection version used 159 calls, about 115,000 triangles
+and 58 geometries. Before
 the outdoor-reflection/surface correction, it used 159 calls and about 112,000
 triangles. The preceding polish used 168 calls, about 60,000 triangles and
 49 geometries; the original overview used 225 calls, about 45,000 triangles
@@ -156,6 +176,9 @@ npm run capture:graphics
 npm run capture:graphics -- --labs
 npm run capture:graphics -- --base-url https://penguin425.github.io/TiCity/
 ```
+
+To use an installed system browser, add
+`--executable-path /usr/bin/chromium` to the capture command.
 
 Captures include campus day/night/detail/mobile and go to the ignored
 `artifacts/graphics/` directory. Use `--base-url` to

@@ -499,7 +499,7 @@ test('Protocol Lab exact Async response stays exclusive and readable on mobile',
   await expect(page.locator('[data-raft-lab]')).toBeHidden()
   await expect(dock).toHaveAttribute('data-phase', 'paused')
   await expect(dock).toHaveAttribute('data-event-index', '31')
-  await expect(dock).toHaveAttribute('data-event-count', '74')
+  await expect(dock).toHaveAttribute('data-event-count', '75')
   await expect(dock).toHaveAttribute('data-looping', 'true')
   await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
     'aria-pressed',
@@ -541,7 +541,7 @@ test('Protocol Lab exact Async response stays exclusive and readable on mobile',
 test('Protocol Lab Machine separates its semantic graph at the regular 2PC boundary', async ({
   page,
 }) => {
-  const eventId = 'trace-1-event-67'
+  const eventId = 'trace-1-event-68'
   await page.goto(
     `/machine/?lang=en&scenario=commit-protocols&event=${eventId}`,
   )
@@ -549,7 +549,7 @@ test('Protocol Lab Machine separates its semantic graph at the regular 2PC bound
   expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
 
   const current = page.locator('[data-event-index][aria-current="step"]')
-  await expect(current).toHaveAttribute('data-event-index', '66')
+  await expect(current).toHaveAttribute('data-event-index', '67')
   await expect(current).toHaveAttribute(
     'data-event-kind',
     'protocol_client_response',
@@ -689,7 +689,7 @@ test('Protocol Lab Diagnose preserves response and final snapshots in English an
     'en',
   )
 
-  const finalEventId = 'trace-1-event-74'
+  const finalEventId = 'trace-1-event-75'
   await page.goto(
     `/diagnose/?lang=en&scenario=${scenario}&event=${finalEventId}`,
   )
@@ -800,7 +800,7 @@ test('GC/Storage Lab exact Compaction Filter cursor stays exclusive and preserve
   await expect(page.locator('[data-protocol-lab]')).toBeHidden()
   await expect(dock).toHaveAttribute('data-phase', 'paused')
   await expect(dock).toHaveAttribute('data-event-index', '21')
-  await expect(dock).toHaveAttribute('data-event-count', '43')
+  await expect(dock).toHaveAttribute('data-event-count', '45')
   await expect(dock).toHaveAttribute('data-looping', 'true')
   await expect(page.locator('[data-action="trace-loop"]')).toHaveAttribute(
     'aria-pressed',
@@ -860,7 +860,7 @@ test('GC/Storage Lab Machine keeps its semantic pipeline beside the causal DAG',
   )
   await expect(state).toHaveAttribute('data-gc-phase', 'compacting')
   await expect(state).toHaveAttribute('data-gc-round', '1')
-  await expect(state).toHaveAttribute('data-gc-model', 'model-6')
+  await expect(state).toHaveAttribute('data-gc-model', 'model-8')
   await expect(pipeline).toBeVisible()
   await expect(pipeline).toHaveAttribute('tabindex', '0')
   await expect(pipeline).toHaveAttribute('data-causal-dag-replaced', 'false')
@@ -1312,7 +1312,7 @@ test('TiFlash/MPP Machine separates the causal DAG from the fragment-task graph'
     'data-tiflash-mpp-phase',
     'snapshot_gating',
   )
-  await expect(state).toHaveAttribute('data-tiflash-mpp-model', 'model-7')
+  await expect(state).toHaveAttribute('data-tiflash-mpp-model', 'model-8')
   await expect(semantic).toBeVisible()
   await expect(semantic).toHaveAttribute('tabindex', '0')
   await expect(semantic).toHaveAttribute(

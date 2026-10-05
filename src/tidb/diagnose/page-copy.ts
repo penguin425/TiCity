@@ -119,6 +119,8 @@ const PROTOCOL_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
   'Check 1PC and Async Commit candidates':
     '1PCとAsync Commitの適格性を判定',
   'Select Async Commit': 'Async Commitを選択',
+  'Select Async Commit after Region batching':
+    'Region batchingの後にAsync Commitを選択',
   'Get latest TSO and calculate the Async floor':
     '最新TSOからAsync Commitのtimestamp下限を算出',
   'All prewrites established Async Commit':
@@ -131,6 +133,10 @@ const PROTOCOL_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
   'PD allocated regular 2PC start_ts': 'PDが通常2PCのstart_tsを採番',
   'Reject optimization candidates before RPC':
     'RPC前にcommit最適化候補を除外',
+  'Check optimization candidates before timestamp preparation':
+    'timestamp準備前にcommit最適化候補を確認',
+  'Prepare the 1PC candidate latest TSO before batching':
+    'batching前に1PC候補の最新TSOを準備',
   'Select regular 2PC': '通常2PCを選択',
   'All regular 2PC prewrites completed': '通常2PCの全Prewriteが完了',
   'PD allocated regular 2PC commit_ts': 'PDが通常2PCのcommit_tsを採番',
@@ -175,6 +181,10 @@ const GC_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
     'Compaction Filterが不要なMVCC recordを削除',
   'All representative store filters completed':
     '全代表Storeのfilterが完了',
+  'The second compaction scheduled a Delete-marker GC-key task':
+    '後続compactionがDelete markerの別GC-key taskを登録',
+  'The GC-key task removed the retained Delete marker':
+    '別GC-key taskがDelete markerを削除',
   'Round 1 completed behind the blocker':
     'blockerに制限されたround 1が完了',
   'The teaching blocker completed': '教材用blockerが完了',
@@ -219,8 +229,8 @@ const TIFLASH_EVENT_LABELS_JA: Readonly<Record<string, string>> = {
     'TiDBがRegionをTiFlash Store別にgroup化',
   tiflash_mpp_tasks_built:
     'TiDBが4つのMPP taskを生成',
-  tiflash_mpp_tunnels_registered:
-    '6本の一時的MPP tunnelを登録',
+  tiflash_mpp_tunnels_planned:
+    'TiDBが6本の一時的MPP tunnelを計画',
   tiflash_mpp_dispatch_batch:
     'TiDBが4つのtaskを並行dispatch',
   tiflash_mpp_tasks_prepared:

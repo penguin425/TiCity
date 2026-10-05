@@ -7,9 +7,10 @@ import * as THREE from 'three'
 import { COMPONENT_ANCHORS } from './layout'
 import type { Point3 } from './layout'
 import type { CityMaterials } from './palette'
+import { SQL_TOWERS } from './sql-architecture'
+import type { SqlTowerTier } from './sql-architecture'
 
-/** Shared massing dimensions for the SQL towers and their attached details. */
-export const SQL_TOWER_HEIGHTS = [36, 48, 40] as const
+export { SQL_TOWER_HEIGHTS } from './sql-architecture'
 
 type DetailMaterial = 'structure' | 'darkStructure' | 'trim' | 'glass' | 'window' | 'tiflash'
 
@@ -62,23 +63,29 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
     })
   }
 
-  // Deep glazing, a dark spandrel gap, and thin aluminium mullions create a
-  // continuous curtain wall. A deterministic minority of occupied bays is lit;
-  // this is architectural ambience and never encodes model measurements.
-  const curtainWall = (anchor: Point3, span: number, bottom: number, top: number,
-    columns: number, floors: number, seed: number): void => {
-    const bayWidth = (span - 1.2) / columns
-    const floorHeight = (top - bottom) / floors
+  // Rectangular curtain walls follow the same offset blocks as the main
+  // masses. Floor joints, projecting ribs and deep reveals create real shadow
+  // lines; the minority of lit bays is fixed architectural ambience.
+  const curtainWall = (anchor: Point3, tier: SqlTowerTier, seed: number): void => {
+    const [width, height, depth] = tier.size
+    const [offsetX, centerY, offsetZ] = tier.position
+    const bottom = centerY - height / 2 + 0.45
+    const top = centerY + height / 2 - 0.45
+    const floorHeight = (top - bottom) / tier.floors
     for (let face = 0; face < 4; face++) {
+      const span = face % 2 === 0 ? width : depth
+      const faceDepth = face % 2 === 0 ? depth : width
+      const columns = tier.columns[face % 2]
+      const bayWidth = (span - 1.2) / columns
       const angle = face * Math.PI / 2
       const sin = Math.sin(angle)
       const cos = Math.cos(angle)
       const point = (horizontal: number, y: number, inset = 0): Point3 =>
-        at(anchor, cos * horizontal + sin * (span / 2 + inset), y,
-          -sin * horizontal + cos * (span / 2 + inset))
+        at(anchor, offsetX + cos * horizontal + sin * (faceDepth / 2 + inset), y,
+          offsetZ - sin * horizontal + cos * (faceDepth / 2 + inset))
       for (let column = 0; column < columns; column++) {
         const x = -span / 2 + 0.6 + (column + 0.5) * bayWidth
-        for (let floor = 0; floor < floors; floor++) {
+        for (let floor = 0; floor < tier.floors; floor++) {
           const lit = (floor * 7 + column * 11 + face * 3 + seed * 17) % 13 < 3
           box(lit ? 'window' : 'glass', point(x, bottom + (floor + 0.5) * floorHeight, 0.12),
             [bayWidth - 0.28, floorHeight - 0.58, 0.22], angle)
@@ -88,10 +95,8 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
         const x = -span / 2 + 0.6 + column * bayWidth
         box('trim', point(x, (bottom + top) / 2, 0.29), [0.2, top - bottom + 0.2, 0.35], angle)
       }
-      for (let floor = 1; floor < floors; floor++) {
+      for (let floor = 1; floor < tier.floors; floor++) {
         const y = bottom + floor * floorHeight
-        // A recessed spandrel behind the joint gives each floor a real shadow
-        // line; the visible mullion remains the thin aluminium trim in front.
         box('darkStructure', point(0, y + 0.03, 0.08), [span - 0.8, 0.2, 0.2], angle)
         box('trim', point(0, y, 0.25), [span - 0.8, 0.13, 0.3], angle)
       }
@@ -99,67 +104,97 @@ export function addBuildingDetails(parent: THREE.Object3D, materials: CityMateri
         box('structure', point(corner * (span / 2 - 0.35), (bottom + top) / 2, 0.15),
           [0.65, top - bottom + 0.3, 0.52], angle)
       }
+      // Full-height paired fins on the long faces read as a working building's
+      // external frame at city scale, instead of relying on tiny window marks.
+      if (face % 2 === 0) {
+        for (const rib of [-1, 1]) {
+          box('structure', point(rib * span * 0.29, (bottom + top) / 2, 0.88),
+            [1, top - bottom + 0.5, 1.75], angle)
+        }
+      }
     }
   }
 
-  for (let server = 0; server < SQL_TOWER_HEIGHTS.length; server++) {
+  for (let server = 0; server < SQL_TOWERS.length; server++) {
     const anchor = COMPONENT_ANCHORS[`tidb.${server}` as 'tidb.0' | 'tidb.1' | 'tidb.2']
-    const height = SQL_TOWER_HEIGHTS[server]
+    const spec = SQL_TOWERS[server]
+    const { podium, entrance } = spec
+    const [podiumWidth, podiumHeight, podiumDepth] = podium.size
+    const podiumTop = podium.position[1] + podiumHeight / 2
+    const canopyZ = Math.min(entrance.z + 0.8, 18)
 
-    // A shallow entrance porch gives the tall shafts a human-scale ground floor.
-    box('darkStructure', at(anchor, 0, 4.6, 15.4), [9.5, 7.4, 1.4])
-    box('glass', at(anchor, 0, 4.6, 16.15), [7.2, 6, 0.22])
-    box('trim', at(anchor, 0, 4.6, 16.32), [0.28, 6.4, 0.24])
-    box('structure', at(anchor, 0, 8.5, 17.3), [14, 0.9, 6.4])
-    box('window', at(anchor, 0, 8.03, 19.9), [10.5, 0.22, 0.35])
-    for (const x of [-6, 6]) box('trim', at(anchor, x, 4.8, 19.8), [0.7, 6.5, 0.7])
+    // Offset entrances and deep canopies give the broad ground-floor wings a
+    // clear address. Their entire footprint stays inside the 44 x 40 envelope.
+    box('darkStructure', at(anchor, entrance.x, 4.1, entrance.z - 0.1), [entrance.width, 5.8, 0.6])
+    box('glass', at(anchor, entrance.x, 4.1, entrance.z + 0.23), [entrance.width - 1.7, 5.3, 0.22])
+    box('trim', at(anchor, entrance.x, 4.1, entrance.z + 0.39), [0.3, 5.6, 0.3])
+    box('structure', at(anchor, entrance.x, podiumTop + 0.15, canopyZ), [entrance.width + 3.5, 0.85, 4])
+    box('window', at(anchor, entrance.x, podiumTop - 0.31, canopyZ + 1.75), [entrance.width + 0.8, 0.2, 0.35])
+    for (const side of [-1, 1]) {
+      box('trim', at(anchor, entrance.x + side * (entrance.width / 2 + 1), 4.2, canopyZ + 1.45),
+        [0.8, 6.8, 0.8])
+    }
     for (let step = 0; step < 3; step++) {
-      box('structure', at(anchor, 0, 0.9 + step * 0.2, 20.8 - step * 1.2), [13, 0.4 + step * 0.4, 1.25])
+      box('structure', at(anchor, entrance.x, 0.9 + step * 0.2, canopyZ + 1.4 - step * 0.9),
+        [entrance.width + 2, 0.4 + step * 0.4, 1.1])
     }
 
-    curtainWall(anchor, 30, 6.4, height + 0.35, 6, Math.round((height - 6) / 3.8), server)
-    curtainWall(anchor, 24, height + 1.2, height + 9.4, 5, 2, server + 3)
-    curtainWall(anchor, 18, height + 10.3, height + 16.55, 4, 2, server + 6)
+    // Glazed podium side galleries and wide piers make the lower wing visibly
+    // separate from the offset office floors above it.
+    for (const side of [-1, 1]) {
+      box('glass', at(anchor, side * (podiumWidth / 2 + 0.12), 4.1, -1), [0.22, 4.7, podiumDepth - 7])
+      box('structure', at(anchor, side * (podiumWidth / 2 + 0.02), 6.9, 0), [0.4, 0.7, podiumDepth])
+      for (let pier = 0; pier < 4; pier++) {
+        const z = -podiumDepth / 2 + 4 + pier * (podiumDepth - 8) / 3
+        box('structure', at(anchor, side * (podiumWidth / 2 + 0.02), 4.05, z), [0.4, 5.6, 0.9])
+      }
+    }
 
-    // A recessed ground-floor arcade gives the curtain wall a defined base.
-    for (const side of [-1, 1]) {
-      box('glass', at(anchor, side * 15.12, 3.65, 0), [0.22, 4.8, 26])
-      box('structure', at(anchor, side * 15.2, 6.1, 0), [0.8, 0.6, 30.8])
-      for (const z of [-12, -4, 4, 12]) {
-        box('trim', at(anchor, side * 15.32, 3.5, z), [0.5, 5.4, 0.45])
+    for (let index = 0; index < spec.tiers.length; index++) {
+      const tier = spec.tiers[index]
+      curtainWall(anchor, tier, server * 3 + index)
+      const [width, height, depth] = tier.size
+      const [x, y, z] = tier.position
+      const roof = y + height / 2
+      // A low rectangular parapet makes each exposed roof a usable ledge.
+      for (const side of [-1, 1]) {
+        box('trim', at(anchor, x + side * (width / 2 - 0.25), roof + 0.65, z), [0.28, 0.7, depth - 0.5])
+        box('trim', at(anchor, x, roof + 0.65, z + side * (depth / 2 - 0.25)), [width - 0.5, 0.7, 0.28])
+      }
+      // The broadest working floor gets projecting horizontal sun shelves.
+      // Their spacing differs across the three buildings while remaining fixed.
+      if (index === 0) {
+        const shelves = server === 1 ? 3 : 2
+        for (let shelf = 1; shelf <= shelves; shelf++) {
+          const shelfY = y - height / 2 + shelf * height / (shelves + 1)
+          box('structure', at(anchor, x, shelfY, z + depth / 2 + 0.8), [width + 0.8, 0.7, 2.2])
+        }
       }
     }
-    // Mechanical services sit on the exposed ledge around the upper tier.
+
+    // A continuous rear service spine and large roof housings suggest air and
+    // power infrastructure, without giving a stateless SQL node storage racks.
+    const main = spec.tiers[0]
+    const spineSide = server === 0 ? 1 : -1
+    const spineX = main.position[0] + spineSide * (main.size[0] / 2 + 0.7)
+    const spineZ = main.position[2] - main.size[2] / 2 + 3.2
+    box('darkStructure', at(anchor, spineX, main.position[1], spineZ), [1.8, main.size[1], 5.5])
     for (const side of [-1, 1]) {
-      box('darkStructure', at(anchor, side * 13.7, height + 1.3, -2), [2.1, 1.7, 14])
-      box('trim', at(anchor, side * 13.7, height + 2.2, -2), [2.3, 0.35, 14.6])
-      for (let vent = 0; vent < 4; vent++) {
-        box('trim', at(anchor, side * 13.7, height + 2.55, -7 + vent * 3.3), [1.7, 0.5, 1.2])
-      }
-      // Small service caps sit between the broad vents.  They are deliberately
-      // repeated in the same trim batch, so the roof reads as equipment rather
-      // than as an unbroken dark slab without adding drawables.
-      for (let unit = 0; unit < 3; unit++) {
-        const z = -8.8 + unit * 5.5
-        box('darkStructure', at(anchor, side * 13.7, height + 3.05, z), [1.3, 0.42, 1.45])
-        box('trim', at(anchor, side * 13.7, height + 3.29, z), [1.55, 0.1, 1.65])
-      }
+      box('trim', at(anchor, spineX + side * 0.72, main.position[1], spineZ), [0.25, main.size[1] + 0.4, 5.8])
     }
-    // Setback terraces have slender parapets and small mechanical housings;
-    // the central crown now reads as roof plant instead of a glowing antenna.
-    for (const side of [-1, 1]) {
-      box('trim', at(anchor, side * 11.7, height + 10.35, 0), [0.28, 1, 23.4])
-      box('trim', at(anchor, 0, height + 10.35, side * 11.7), [23.4, 1, 0.28])
-      box('darkStructure', at(anchor, side * 6.4, height + 18.5, -1), [3.2, 2.4, 10.5])
-      box('trim', at(anchor, side * 6.4, height + 19.82, -1), [3.5, 0.26, 10.9])
-      for (let slat = 0; slat < 5; slat++) {
-        box('darkStructure', at(anchor, side * 6.4, height + 20.04, -5 + slat * 2), [2.7, 0.19, 1.15])
+    for (const plant of spec.roofPlant) {
+      const [width, height, depth] = plant.size
+      const [x, y, z] = plant.position
+      const roof = y + height / 2
+      box('trim', at(anchor, x, roof - 0.08, z), [width + 0.3, 0.16, depth + 0.3])
+      for (let grille = 0; grille < 4; grille++) {
+        const grilleZ = z - depth / 2 + 0.65 + grille * (depth - 1.3) / 3
+        box('darkStructure', at(anchor, x, roof - 0.06, grilleZ), [width - 0.75, 0.08, 0.55])
       }
-    }
-    box('structure', at(anchor, 0, height + 18.1, 6.8), [4.4, 1.7, 3])
-    box('trim', at(anchor, 0, height + 19.12, 6.8), [4.8, 0.35, 3.4])
-    for (let duct = 0; duct < 3; duct++) {
-      box('darkStructure', at(anchor, -1.15 + duct * 1.15, height + 19.75, 6.8), [0.48, 0.78, 2.15])
+      for (let louver = 0; louver < 3; louver++) {
+        box('trim', at(anchor, x, y - height * 0.24 + louver * height * 0.24, z + depth / 2 + 0.1),
+          [width - 0.6, 0.22, 0.3])
+      }
     }
   }
 

@@ -18,8 +18,8 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 再現コマンドをまとめています。
 
 > [!IMPORTANT]
-> TiCity v0.10.2はTiDB v8.5 LTS系列を対象にした
-> 静的・オフラインのモデルで、model-7 TiFlash/MPP Labを含みます。SQLを実行せず、
+> TiCity v0.11.0はTiDB v8.5 LTS系列を対象にした
+> 静的・オフラインのモデルで、model-8 TiFlash/MPP Labを含みます。SQLを実行せず、
 > 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
 > モデル上の経路と説明だけを生成します。
 
@@ -41,7 +41,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 - role、health、term、vote、log、commit、applyを明示した3 voter peer。
   Pre-VoteとVoteはそれぞれ2-of-3へ達し、新Leaderのcurrent-term no-opを
   persist、commit、applyします
-- 1PC、Async Commit、通常2PCを1つの74 eventの不変な比較receiptへ展開する
+- 1PC、Async Commit、通常2PCを1つの75 eventの不変な比較receiptへ展開する
   Protocol Lab
 - 宣言済みfixtureのeligibility outcomeとtimestampの出所を明示した3つの
   独立した代表的な楽観transaction。各laneはprotocolの形を比較するもので、
@@ -51,7 +51,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
   Regionで独立した2-of-3 Raft chainを通ります
 - 1PCにはcleanupを残さず、Async Commitでは両Regionのcommit record解決、
   通常2PCではsecondary commitをbackgroundへ残すclient response境界
-- 1つの43 eventの不変なreceiptを2回のGC roundへ展開するmodel-6 GC/Storage
+- 1つの45 eventの不変なreceiptを2回のGC roundへ展開するmodel-8 GC/Storage
   Lab。最初はactive transactionが候補をglobal
   `minStartTS - 1`へ制限し、明示的なfixture境界でtransactionが完了した後、
   2回目の候補が前進します
@@ -65,7 +65,7 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
   除去と、DEFAULT CFの長いvalueのcleanupも含みます
 - 永続的なRegion learner複製からRegion単位のsnapshot gate、一時的なMPP
   Exchange、独立したTiDB rootまでを、1つの56 eventの不変なreceiptへ展開する
-  model-7 TiFlash/MPP Lab
+  model-8 TiFlash/MPP Lab
 - scenario内だけの2つのTiFlash StoreにまたがるRegion 24〜26の3つの選択learner
   projection。learner role、非voter、Leader commit、receive、apply、
   DeltaMerge write、applied indexの状態を表示
@@ -128,7 +128,7 @@ surviving followerによるno-op applyは応答後のbackground workです。
 ![2-of-3の選出と復旧中のTiCity Raft Failure Lab](docs/raft-lab.png)
 
 [`commit-protocols` scenario](https://penguin425.github.io/TiCity/?scenario=commit-protocols)
-からProtocol Labを直接開けます。74 eventのreceiptに含まれるのは3つの独立した
+からProtocol Labを直接開けます。75 eventのreceiptに含まれるのは3つの独立した
 代表的な楽観transactionで、workbench SQLを3回実行したものでもlatency競争でも
 ありません。
 
@@ -148,7 +148,8 @@ Region Raft／MVCC、client応答、background cleanupは、選択したexact ev
   `commit_ts`はその最大値であって、PDが払い出すcommit timestampではありません。
   両prewriteの後にclientへ応答し、両Regionのcommit record解決はbackgroundで
   続きます。
-- **通常2PC:** PDが`start_ts`を返し、両Regionのprewriteがjoinした後で
+- **通常2PC:** 両optional flagが有効なfixtureでは、PDが`start_ts`と候補用の
+  `latest_ts`を返した後、Region batchingで1PCを外します。両Regionのprewriteがjoinした後で
   `commit_ts`を払い出します。primary commitとそのRegionのRaft applyがclient
   responseを制御し、secondary commitとlock cleanupはbackgroundで続きます。
 
@@ -172,7 +173,7 @@ Machineは正確な因果DAGを置き換えず、2行の意味pipelineを追加�
 論理version、機構境界のrowを表示します。3画面とも同じ選択event後snapshotを
 読み取ります。
 
-43 eventのreceiptは、2回の決定的なroundからなります。round 1ではGC lifetimeが
+45 eventのreceiptは、2回の決定的なroundからなります。round 1ではGC lifetimeが
 候補を作り、報告されたactive transaction状態がglobal `minStartTS - 1`へ制限し、
 このfixtureにはさらに古いexternal service safe pointがありません。TiDBは
 `mysql.tidb`へ`tikv_gc_safe_point`をstageし、代表Regionをscanして2つの合成old
@@ -185,7 +186,8 @@ Compaction Filterの進行を表示します。
 再生せずに完了します。そのためround 2は後の候補を受け入れ、fixture上のlockも
 Delete Range taskも残っていないことを確認し、後の値を公開してStore filterを
 再実行できます。version boardは単一の論理projectionです。最後の対象Putを
-anchorとして残し、1つのold Delete chainを含むobsolete recordを除去し、filterが
+anchorとして残し、初回filterでは最新の対象Deleteも保持します。後のcompactionで
+別のGC-key cleanupをscheduleしてmarkerを除去し、filterとGC-keyの削除数を分けます。filterが
 削除するDEFAULT CFの長いvalueを数えます。3 replica分の複製、disk byte測定、
 latency benchmarkではありません。
 
@@ -199,7 +201,7 @@ Raft entryを作りません。後のpatch releaseやraftstore-v2では内部経
 
 ![round 1のCompaction Filter eventを表示するTiCity GC/Storage Lab](docs/gc-storage-lab.png)
 
-TiFlash/MPP Labは、model-7の同じexact eventを
+TiFlash/MPP Labは、model-8の同じexact eventを
 [City](https://penguin425.github.io/TiCity/?scenario=tiflash-mpp&event=trace-1-event-37)、
 [Machine](https://penguin425.github.io/TiCity/machine/?scenario=tiflash-mpp&event=trace-1-event-37)、
 [Diagnose](https://penguin425.github.io/TiCity/diagnose/?scenario=tiflash-mpp&event=trace-1-event-37)
@@ -219,8 +221,9 @@ lock／MVCC checkとread後のRegion validationへ進みます。`AVAILABLE`と
 すぐ読めることを意味しません。ReadIndexは整合性barrierであって不足dataの
 copy手段ではなく、timeout時は古い結果ではなくerrorになります。
 
-成功することを宣言したMPP fixtureは、2 fragmentとTiFlash上の4つの非root taskを
-作ります。all-to-all HashPartition tunnel 4本がscan／partial-aggregate
+成功することを宣言したgrouped MPP fixtureは、2 fragmentとTiFlash上の4つの非root taskを
+作り、linkを計画した後にdispatchし、TiFlash prepareでserver tunnelを登録します。
+通常のscalar COUNTはTiDB rootで最終集約します。all-to-all HashPartition tunnel 4本がscan／partial-aggregate
 fragmentからfinal-aggregate fragmentへaggregate blockを運び、PassThrough
 stream 2本が独立したTiDBの`tidb-root`へfinal-task blockを送ります。この6本は
 一時的なquery transportです。dataを永続化せず、learner index、Region Raft、
@@ -246,7 +249,7 @@ pinとfailure境界の条件は[モデル境界](docs/MODEL_BOUNDARY.md)を参�
 5. 1PC／Async Commit／通常2PCの比較
 6. 連番キーhotspotとRegion split
 7. TiKV障害とleader election
-8. 2-round、43 eventの長時間transactionとGC／storage trace
+8. 2-round、45 eventの長時間transactionとGC／storage trace
 9. 56 eventのTiFlash learner複製、snapshot gate、MPP Exchange trace
 
 ## ローカル実行
@@ -296,7 +299,7 @@ src/tidb/
   決定論的な13 tick経過値／candidate policyを分けて表示します。PDは
   observer／routing限定で、retryはapplication retryではなく、同じlogical
   Region requestに対するTiDB内部処理です。
-- model-5 Protocol Labの1PC、Async Commit、通常2PCは、3つの独立した代表的な
+- model-8 Protocol Labの1PC、Async Commit、通常2PCは、3つの独立した代表的な
   fixtureです。event durationと順番に表示するlane順序はlatency比較ではありません。
   `start_ts`と`latest_ts`はモデル上のPD TSO call、1PC timestampはTiKV result、
   Async Commit timestampはTiKVが返した`min_commit_ts`の最大値、通常2PC
@@ -304,7 +307,7 @@ src/tidb/
 - Protocol Labはtransaction commit coordinationと9本のRegion別Raft mutation
   chainを分離します。各chainはconceptual MVCC状態が変わる前に、propose、
   2 voterへのpersist、2-of-3 commit、applyを独立して示します。
-- model-6 GC/Storage Labでは、43 eventすべてがdeep-freezeされた
+- model-8 GC/Storage Labでは、45 eventすべてがdeep-freezeされた
   `gcLab`のevent後snapshotを持ち、City、Machine、Diagnoseが同じ選択snapshotを
   投影します。最初のsafe pointは`globalMinStartTS - 1`へ制限され、service
   point選択、`mysql.tidb`へのstage、Region ScanLock、visibility保存／cache
@@ -314,7 +317,7 @@ src/tidb/
   raftstore-v1 fixtureへ固定しています。ResolveLock内部のRaft詳細、
   raftstore-v2のDelete Range挙動、compactionのschedule／時間、実SST layout、
   physical byte、Raft log GCはモデル化しません。
-- model-7 TiFlash/MPP Labでは、56 eventすべてがdeep-freezeされた
+- model-8 TiFlash/MPP Labでは、56 eventすべてがdeep-freezeされた
   `tiflashMppLab`のevent後snapshotを持ちます。選択した3つのRegion learnerは
   scenario内だけの2つのTiFlash Storeにまたがります。永続的なlearner複製は
   6本の一時的なExchange tunnelと分離され、2 fragmentとTiFlash上の4つの

@@ -40,7 +40,8 @@ describe('trace event presentation catalog', () => {
   it('keeps technical domain terms while clarifying client, transaction, and return domains', () => {
     expect(traceDomainLabel('ja', 'client')).toBe('クライアント')
     expect(traceDomainLabel('ja', 'return')).toBe('応答')
-    expect(traceDomainLabel('ja', 'txn2pc')).toBe('トランザクション 2PC')
+    expect(traceDomainLabel('ja', 'txn2pc')).toBe('トランザクション commit')
+    expect(traceDomainLabel('en', 'txn2pc')).toBe('Transaction commit')
     expect(traceDomainLabel('ja', 'raft')).toBe('Region Raft')
     expect(traceDomainLabel('ja', 'kv')).toBe('TiKV / MVCC')
     expect(traceDomainLabel('ja', 'tiflash')).toBe('TiFlash / MPP')

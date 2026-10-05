@@ -102,6 +102,7 @@ interface GcStorageLabCopy {
   readonly bottommostFixture: string
   readonly initialVersions: string
   readonly filteredVersions: string
+  readonly gcKeyDeletedVersions: string
   readonly retainedAnchors: string
   readonly presentVersions: string
   readonly deletedDefaultValues: string
@@ -129,7 +130,7 @@ const COPY: Readonly<Record<Locale, GcStorageLabCopy>> = {
     phase: 'フェーズ',
     round: 'GCラウンド',
     overview:
-      'safe pointの制限、REGION_SCAN_LOCK Resolve Locks、Delete Range、visibility safe pointの保存とPDへの公開、各TiKVの観測、Compaction Filterを、選択したexact event時点の状態で表示します。',
+      'safe pointの制限、REGION_SCAN_LOCK Resolve Locks、visibility safe pointの保存、Delete Range、PDへの公開、各TiKVの観測、Compaction Filterと別GC-key cleanupを、選択したexact event時点の状態で表示します。',
     privacy: 'プライバシー境界',
     privacyNote:
       '合成IDと集計数だけを表示します。SQL文、literal、実key、encoded key、row値、結果行は保持も投影もしません。',
@@ -209,23 +210,25 @@ const COPY: Readonly<Record<Locale, GcStorageLabCopy>> = {
     bottommostFixture: 'bottommost MODEL fixture',
     initialVersions: '初期version',
     filteredVersions: 'filter済みversion',
+    gcKeyDeletedVersions: '別GC-key taskで削除したDelete marker',
     retainedAnchors: '保持anchor',
     presentVersions: '残存version',
     deletedDefaultValues: '削除DEFAULT CF value',
     compactionRaftEntries: 'Compactionが作成したRaft entry',
     boundary: 'Storage境界',
     boundaryNote:
-      'MVCC GCと物理compaction、Raft log GCは別の仕組みです。平たいfilter済みmarkerは、このMODELのbottommost Compaction Filterで除去された論理versionを示し、実disk byte量ではありません。',
+      'MVCC GCと物理compaction、Raft log GCは別の仕組みです。Compaction Filterは最後のDeleteを保持し、後続のGC-key taskが別に掃除します。平たいmarkerは除去済みの論理versionを示し、実disk byte量ではありません。',
     phases: {
       idle: '待機',
       preparing: 'safe point候補を計算',
       safe_point_bounded: 'active transactionで上限を決定',
       resolving_locks: 'REGION_SCAN_LOCK Resolve Locks',
-      caching_safe_point: 'safe pointをstageしvisibility値を保存',
+      caching_safe_point: 'visibility値を保存しcache barrierを確認',
       deleting_ranges: 'Delete Rangeを処理',
       publishing_safe_point: 'safe pointをPDへ公開',
       tikv_observing: 'TiKVがsafe pointを観測',
       compacting: 'Compaction Filterを実行',
+      cleaning_delete_markers: '別GC-key taskでDelete markerを掃除',
       between_rounds: '次ラウンド待機',
       complete: '完了',
     },
@@ -257,6 +260,7 @@ const COPY: Readonly<Record<Locale, GcStorageLabCopy>> = {
       present: '残存',
       retained_anchor: 'safe point以前の最新Putを保持',
       filtered: 'filter済み',
+      gc_deleted: '別GC-key taskで削除済み',
     },
     writeTypes: {
       put: 'Put',
@@ -276,7 +280,7 @@ const COPY: Readonly<Record<Locale, GcStorageLabCopy>> = {
     phase: 'Phase',
     round: 'GC round',
     overview:
-      'Shows the safe-point bound, REGION_SCAN_LOCK Resolve Locks, Delete Range, visibility-safe-point save and PD publication, per-TiKV observation, and Compaction Filter at the selected exact event.',
+      'Shows the safe-point bound, REGION_SCAN_LOCK Resolve Locks, visibility-safe-point save, Delete Range, PD publication, per-TiKV observation, Compaction Filter, and separate GC-key cleanup at the selected exact event.',
     privacy: 'Privacy boundary',
     privacyNote:
       'Only aggregate counts and synthetic IDs are shown. SQL text, literals, real or encoded keys, row values, and result rows are neither retained nor projected.',
@@ -356,23 +360,25 @@ const COPY: Readonly<Record<Locale, GcStorageLabCopy>> = {
     bottommostFixture: 'bottommost MODEL fixture',
     initialVersions: 'Initial versions',
     filteredVersions: 'Filtered versions',
+    gcKeyDeletedVersions: 'Delete markers removed by separate GC-key tasks',
     retainedAnchors: 'Retained anchors',
     presentVersions: 'Present versions',
     deletedDefaultValues: 'Deleted DEFAULT CF values',
     compactionRaftEntries: 'Raft entries created by compaction',
     boundary: 'Storage boundary',
     boundaryNote:
-      'MVCC GC, physical compaction, and Raft log GC are distinct mechanisms. A flat filtered marker means this MODEL removed a logical version through its bottommost Compaction Filter; it is not a disk-byte gauge.',
+      'MVCC GC, physical compaction, and Raft log GC are distinct mechanisms. Compaction Filter keeps the last Delete; a later GC-key task cleans it separately. Flat markers represent removed logical versions, not disk bytes.',
     phases: {
       idle: 'Idle',
       preparing: 'Computing a safe-point candidate',
       safe_point_bounded: 'Applying the active-transaction bound',
       resolving_locks: 'Running REGION_SCAN_LOCK Resolve Locks',
-      caching_safe_point: 'Staging and saving the visibility safe point',
+      caching_safe_point: 'Save visibility safe point / cache barrier',
       deleting_ranges: 'Processing Delete Range',
       publishing_safe_point: 'Publishing the safe point to PD',
       tikv_observing: 'TiKV stores observing the safe point',
       compacting: 'Running Compaction Filters',
+      cleaning_delete_markers: 'Separate Delete-marker GC-key cleanup',
       between_rounds: 'Waiting for the next round',
       complete: 'Complete',
     },
@@ -404,6 +410,7 @@ const COPY: Readonly<Record<Locale, GcStorageLabCopy>> = {
       present: 'Present',
       retained_anchor: 'Newest Put at or before safe point retained',
       filtered: 'Filtered',
+      gc_deleted: 'Deleted by a separate GC-key task',
     },
     writeTypes: {
       put: 'Put',
@@ -842,6 +849,7 @@ function storageSummarySection(
       metric(copy.compactionLevel, copy.bottommostFixture),
       metric(copy.initialVersions, String(storage.initialVersionCount)),
       metric(copy.filteredVersions, String(storage.filteredVersionCount)),
+      metric(copy.gcKeyDeletedVersions, String(storage.gcKeyDeletedVersionCount)),
       metric(copy.retainedAnchors, String(storage.retainedAnchorCount)),
       metric(copy.presentVersions, String(storage.presentVersionCount)),
       metric(

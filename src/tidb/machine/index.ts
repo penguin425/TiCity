@@ -83,7 +83,7 @@ export interface MachineOptions {
 const LANE_LABELS: Record<Locale, Record<MachineLane, string>> = {
   ja: {
     sql: 'SQL / クライアント',
-    tso: 'TSO',
+    tso: 'TSO / メタデータ制御',
     txn2pc: 'トランザクション commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
@@ -91,7 +91,7 @@ const LANE_LABELS: Record<Locale, Record<MachineLane, string>> = {
   },
   en: {
     sql: 'SQL / Client',
-    tso: 'TSO',
+    tso: 'TSO / metadata control',
     txn2pc: 'Transaction commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
@@ -305,7 +305,7 @@ const MACHINE_COPY = {
     nonBenchmark: 'MODEL / SIMULATED：3件は独立した代表transactionです。横方向は意味上の段階であり、protocol間のlatency benchmarkではありません。',
     responseBoundaryNote: 'Client応答はcommit成立後です。Async Commitとregular 2PCのlock cleanupは応答後も続きます。',
     protocolAccessibleMirror: '宣言済みprofile / outcomeとexact-event状態のアクセシブルな比較',
-    selectOnePc: '1PCを選択',
+    selectOnePc: '1PC候補を確認',
     selectAsync: 'Async Commitを選択',
     selectTwoPc: 'regular 2PCを選択',
     fetchLatestTs: 'latest_tsと安全上限',
@@ -515,7 +515,7 @@ const MACHINE_COPY = {
     nonBenchmark: 'MODEL / SIMULATED: these are three independent representative transactions. Horizontal position is a semantic stage, not a latency benchmark between protocols.',
     responseBoundaryNote: 'The client responds after commit is established. Async Commit and regular 2PC lock cleanup can continue after that boundary.',
     protocolAccessibleMirror: 'Accessible comparison of declared profiles / outcomes and exact-event state',
-    selectOnePc: 'Select 1PC',
+    selectOnePc: 'Check the 1PC candidate',
     selectAsync: 'Select Async Commit',
     selectTwoPc: 'Select regular 2PC',
     fetchLatestTs: 'latest_ts and safe bound',
@@ -541,6 +541,7 @@ type GcPipelineStage =
   | 'pd_published'
   | 'tikv_detected'
   | 'compaction_filter'
+  | 'gc_key_cleanup'
 
 type GcPipelineState = 'complete' | 'current' | 'future'
 
@@ -554,6 +555,7 @@ const GC_PIPELINE_STAGES: readonly GcPipelineStage[] = [
   'pd_published',
   'tikv_detected',
   'compaction_filter',
+  'gc_key_cleanup',
 ]
 
 const GC_MACHINE_COPY = {
@@ -577,6 +579,7 @@ const GC_MACHINE_COPY = {
       pd_published: 'PD global公開',
       tikv_detected: '各TiKVが観測',
       compaction_filter: 'Compaction Filter',
+      gc_key_cleanup: 'GcKeys Delete marker cleanup',
     },
     states: {
       complete: '完了',
@@ -638,6 +641,7 @@ const GC_MACHINE_COPY = {
       '論理chainを3 replica分へ乗算しません。合成IDと件数だけを表示し、実key・encoded key・value・SQL literalは保持しません。',
     initialVersions: '初期version',
     filteredVersions: 'filter済み',
+    gcKeyDeletedVersions: '別GC-key taskで削除',
     putAnchors: '保持Put anchor',
     deleteChains: 'Deleteで旧chainを除去',
     defaultDeletes: '長いDEFAULT CF value削除',
@@ -649,6 +653,7 @@ const GC_MACHINE_COPY = {
     present: '残存',
     retainedAnchor: 'Put anchor保持',
     filtered: 'filter済み',
+    gc_deleted: '別GC-key taskで削除済み',
     boundaries: '仕組みの境界',
     compactionBoundary:
       'Compaction FilterはRocksDB compaction中のno-Raft物理storage処理で、Raft entryを作りません。',
@@ -666,6 +671,7 @@ const GC_MACHINE_COPY = {
       publishing_safe_point: 'PD公開',
       tikv_observing: 'TiKV観測',
       compacting: 'Compaction Filter',
+      cleaning_delete_markers: '別GC-key cleanup',
       between_rounds: 'ラウンド間',
       complete: '完了',
     },
@@ -701,6 +707,7 @@ const GC_MACHINE_COPY = {
       pd_published: 'publish global to PD',
       tikv_detected: 'each TiKV detects',
       compaction_filter: 'Compaction Filter',
+      gc_key_cleanup: 'GcKeys Delete marker cleanup',
     },
     states: {
       complete: 'Complete',
@@ -762,6 +769,7 @@ const GC_MACHINE_COPY = {
       'Logical chains are not multiplied by three replicas. Only synthetic IDs and counts are shown; no real or encoded keys, values, or SQL literals are retained.',
     initialVersions: 'Initial versions',
     filteredVersions: 'Filtered',
+    gcKeyDeletedVersions: 'Removed by separate GC-key tasks',
     putAnchors: 'Retained Put anchors',
     deleteChains: 'Old chain removed by Delete',
     defaultDeletes: 'Long DEFAULT CF values deleted',
@@ -773,6 +781,7 @@ const GC_MACHINE_COPY = {
     present: 'Present',
     retainedAnchor: 'Retained Put anchor',
     filtered: 'Filtered',
+    gc_deleted: 'Removed by a separate GC-key task',
     boundaries: 'Mechanism boundaries',
     compactionBoundary:
       'Compaction Filter is no-Raft physical storage work during RocksDB compaction and creates no Raft entry.',
@@ -790,6 +799,7 @@ const GC_MACHINE_COPY = {
       publishing_safe_point: 'PD publication',
       tikv_observing: 'TiKV observation',
       compacting: 'Compaction Filter',
+      cleaning_delete_markers: 'Separate GC-key cleanup',
       between_rounds: 'Between rounds',
       complete: 'Complete',
     },
@@ -1175,6 +1185,7 @@ const PROTOCOL_STAGE_COPY: Readonly<Record<
     idle: '未開始',
     requested: 'request受信',
     started: 'start_ts取得済み',
+    candidates_checked: '最適化候補を確認済み',
     selected: 'protocol選択済み',
     latest_ts: 'latest_ts取得済み',
     prewriting: 'Prewrite進行中',
@@ -1189,6 +1200,7 @@ const PROTOCOL_STAGE_COPY: Readonly<Record<
     idle: 'Not started',
     requested: 'Request received',
     started: 'start_ts allocated',
+    candidates_checked: 'Optimization candidates checked',
     selected: 'Protocol selected',
     latest_ts: 'latest_ts allocated',
     prewriting: 'Prewrite in progress',
@@ -1309,15 +1321,16 @@ const PROTOCOL_STAGE_ORDER: Readonly<Record<
   idle: 0,
   requested: 1,
   started: 2,
-  selected: 3,
+  candidates_checked: 3,
   latest_ts: 4,
-  prewriting: 5,
-  prewritten: 6,
-  commit_ts: 7,
-  committing: 8,
-  client_acknowledged: 9,
-  background: 10,
-  complete: 11,
+  selected: 5,
+  prewriting: 6,
+  prewritten: 7,
+  commit_ts: 8,
+  committing: 9,
+  client_acknowledged: 10,
+  background: 11,
+  complete: 12,
 }
 
 function raftFact(label: string, value: string): HTMLElement {
@@ -1945,7 +1958,7 @@ function protocolFlowEdges(
           protocolAtLeast(lane, 'latest_ts'),
           lane.stage === 'requested' ||
             lane.stage === 'started' ||
-            lane.stage === 'selected',
+            lane.stage === 'candidates_checked',
         ),
       },
       {
@@ -1980,23 +1993,21 @@ function protocolFlowEdges(
   if (lane.id === 'async_commit') {
     return [
       {
-        action: 'select_async_commit',
-        label: copy.selectAsync,
-        path: 'critical',
-        state: protocolEdgeState(
-          protocolAtLeast(lane, 'latest_ts'),
-          lane.stage === 'requested' ||
-            lane.stage === 'started' ||
-            lane.stage === 'selected',
-        ),
-      },
-      {
         action: 'latest_ts_and_bound',
         label: copy.fetchLatestTs,
         path: 'critical',
         state: protocolEdgeState(
+          protocolAtLeast(lane, 'selected'),
+          lane.stage === 'candidates_checked' || lane.stage === 'latest_ts',
+        ),
+      },
+      {
+        action: 'select_async_commit',
+        label: copy.selectAsync,
+        path: 'critical',
+        state: protocolEdgeState(
           protocolAtLeast(lane, 'prewriting'),
-          lane.stage === 'latest_ts',
+          lane.stage === 'selected',
         ),
       },
       {
@@ -2039,14 +2050,21 @@ function protocolFlowEdges(
   }
   return [
     {
+      action: 'latest_ts_and_bound',
+      label: copy.fetchLatestTs,
+      path: 'critical',
+      state: protocolEdgeState(
+        protocolAtLeast(lane, 'selected'),
+        lane.stage === 'candidates_checked' || lane.stage === 'latest_ts',
+      ),
+    },
+    {
       action: 'select_regular_2pc',
       label: copy.selectTwoPc,
       path: 'critical',
       state: protocolEdgeState(
         protocolAtLeast(lane, 'prewriting'),
-        lane.stage === 'requested' ||
-          lane.stage === 'started' ||
-          lane.stage === 'selected',
+        lane.stage === 'selected',
       ),
     },
     {
@@ -2316,7 +2334,7 @@ function renderProtocolTimestamps(
       'pd',
       'PD TSO',
       locale,
-      lane.protocol !== '2pc',
+      true,
     ),
     renderProtocolTimestamp(
       copy.requestMinCommitTs,
@@ -2327,7 +2345,7 @@ function renderProtocolTimestamps(
         ? 'TiDB計算（latest_ts + 1）'
         : 'TiDB calculation (latest_ts + 1)',
       locale,
-      lane.protocol !== '2pc',
+      true,
     ),
     renderProtocolTimestamp(
       copy.maxCommitTs,
@@ -2338,7 +2356,7 @@ function renderProtocolTimestamps(
         ? 'TiCity代表safe-window MODEL bound'
         : 'TiCity representative safe-window MODEL bound',
       locale,
-      lane.protocol !== '2pc',
+      true,
     ),
     renderProtocolTimestamp(
       copy.commitTs,
@@ -2559,19 +2577,19 @@ function protocolTimestampSummary(
       copy.latestTs,
       lane.latestTs,
       lane.latestTs === null ? copy.futurePath : 'PD TSO',
-      lane.protocol !== '2pc',
+      true,
     ),
     value(
       copy.requestMinCommitTs,
       lane.requestMinCommitTs,
       lane.requestMinCommitTs === null ? copy.futurePath : 'TiDB latest_ts + 1',
-      lane.protocol !== '2pc',
+      true,
     ),
     value(
       copy.maxCommitTs,
       lane.maxCommitTs,
       lane.maxCommitTs === null ? copy.futurePath : 'TiCity MODEL bound',
-      lane.protocol !== '2pc',
+      true,
     ),
     value(
       copy.commitTs,
@@ -3139,6 +3157,7 @@ function gcCurrentPipelineStage(
     publishing_safe_point: 'pd_published',
     tikv_observing: 'tikv_detected',
     compacting: 'compaction_filter',
+    cleaning_delete_markers: 'gc_key_cleanup',
   }
   return phaseStage[snapshot.phase] ?? null
 }
@@ -3183,6 +3202,8 @@ function gcPipelineStageValue(
   if (round < snapshot.round) return copy.priorRound
   if (round > snapshot.round) return copy.futureRound
   switch (stage) {
+    case 'gc_key_cleanup':
+      return `${snapshot.gcKeyCleanup.deletedVersionIds.length} / ${snapshot.gcKeyCleanup.scheduledVersionIds.length}`
     case 'candidate':
       return gcTimestamp(snapshot.safePoint.candidate, locale)
     case 'bound':
@@ -3515,7 +3536,7 @@ function renderGcStorage(
     version.state === 'retained_anchor' && version.writeType === 'put')
   const deleteChains = snapshot.keyChains.filter((chain) =>
     chain.versions.some((version) =>
-      version.writeType === 'delete' && version.state === 'filtered'))
+      version.writeType === 'delete' && version.state === 'gc_deleted'))
   const defaultDeletes = versions.filter((version) =>
     version.state === 'filtered' &&
     version.writeType === 'put' &&
@@ -3536,6 +3557,7 @@ function renderGcStorage(
   element('dl', { className: 'tidb-machine__gc-storage-summary' },
     gcFact(copy.initialVersions, String(snapshot.storage.initialVersionCount)),
     gcFact(copy.filteredVersions, String(snapshot.storage.filteredVersionCount)),
+    gcFact(copy.gcKeyDeletedVersions, String(snapshot.storage.gcKeyDeletedVersionCount)),
     gcFact(
       copy.putAnchors,
       anchors.length > 0
@@ -3635,7 +3657,7 @@ function renderGcState(
       'data-gc-event-kind': event.kind ?? '',
       'data-gc-phase': gcLab.phase,
       'data-gc-round': String(gcLab.round),
-      'data-gc-model': 'model-6',
+      'data-gc-model': 'model-8',
     },
   },
   element('header', { className: 'tidb-machine__gc-head' },
@@ -3907,7 +3929,7 @@ function renderTiFlashMppState(
       'data-tiflash-mpp-event-id': event.id,
       'data-tiflash-mpp-event-kind': event.kind ?? '',
       'data-tiflash-mpp-phase': lab.phase,
-      'data-tiflash-mpp-model': 'model-7',
+      'data-tiflash-mpp-model': 'model-8',
     },
   },
   element('header', { className: 'tidb-machine__tiflash-head' },

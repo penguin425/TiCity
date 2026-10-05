@@ -223,6 +223,7 @@ const COPY: Readonly<Record<Locale, ProtocolLabCopy>> = {
       idle: '待機',
       requested: 'request受付',
       started: 'start_ts取得',
+      candidates_checked: '最適化候補を確認',
       selected: '方式選択',
       latest_ts: 'latest_ts取得',
       prewriting: 'Prewrite中',
@@ -366,6 +367,7 @@ const COPY: Readonly<Record<Locale, ProtocolLabCopy>> = {
       idle: 'Idle',
       requested: 'Request received',
       started: 'start_ts allocated',
+      candidates_checked: 'Optimization candidates checked',
       selected: 'Protocol selected',
       latest_ts: 'latest_ts obtained',
       prewriting: 'Prewriting',
@@ -920,21 +922,21 @@ function updateLaneView(
   updateMetric(
     view.latestTs,
     'latest_ts · PD',
-    timestampValue(lane.latestTs, lane.protocol !== '2pc', copy),
+    timestampValue(lane.latestTs, true, copy),
   )
   updateMetric(
     view.requestMinCommitTs,
     'request min_commit_ts',
     timestampValue(
       lane.requestMinCommitTs,
-      lane.protocol !== '2pc',
+      true,
       copy,
     ),
   )
   updateMetric(
     view.maxCommitTs,
     `max_commit_ts · ${copy.modelBound}`,
-    timestampValue(lane.maxCommitTs, lane.protocol !== '2pc', copy),
+    timestampValue(lane.maxCommitTs, true, copy),
   )
   updateMetric(
     view.commitTs,

@@ -1849,7 +1849,8 @@ export const MACHINE_CSS = `
 .tidb-machine__gc-version-list li.is-retained_anchor {
   border-left-color: var(--domain-kv, #64e572);
 }
-.tidb-machine__gc-version-list li.is-filtered {
+.tidb-machine__gc-version-list li.is-filtered,
+.tidb-machine__gc-version-list li.is-gc_deleted {
   border-left-style: dashed;
   border-left-color: var(--tc-red);
   opacity: .68;
@@ -1861,7 +1862,8 @@ export const MACHINE_CSS = `
   color: var(--domain-kv, #64e572);
   text-align: right;
 }
-.tidb-machine__gc-version-list li.is-filtered strong {
+.tidb-machine__gc-version-list li.is-filtered strong,
+.tidb-machine__gc-version-list li.is-gc_deleted strong {
   color: var(--tc-red);
 }
 .tidb-machine__gc-boundaries {

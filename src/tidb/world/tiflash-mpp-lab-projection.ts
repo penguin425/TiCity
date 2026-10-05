@@ -232,6 +232,8 @@ function tunnelState(
   status: TraceTiFlashMppTunnelSnapshot['status'],
 ): TiFlashMppLabTunnelState {
   switch (status) {
+    case 'planned':
+      return 'planned'
     case 'registered':
       return 'registered'
     case 'sent':

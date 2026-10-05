@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Pure model-7 TiFlash learner replication and MPP state. The fixed fixture
+ * Pure model-8 TiFlash learner replication and MPP state. The fixed fixture
  * uses synthetic identifiers, indexes, timestamps, and aggregate counters.
  */
 
@@ -37,6 +37,7 @@ export type TiFlashMppLabDelta = Extract<
       | 'tiflash_mpp_regions_schedule'
       | 'tiflash_mpp_tasks_build'
       | 'tiflash_mpp_tunnels_build'
+      | 'tiflash_mpp_tunnels_register'
       | 'tiflash_mpp_task_stage'
       | 'tiflash_mpp_snapshot_gate'
       | 'tiflash_mpp_tunnel_data'
@@ -188,7 +189,7 @@ const TUNNELS: readonly TraceTiFlashMppTunnelSnapshot[] = [
     targetTaskId: 'task-final-1',
     locality: 'local',
     persistence: 'ephemeral_query_blocks',
-    status: 'registered',
+    status: 'planned',
     packetCount: 0,
     bytesBucket: 'none',
   },
@@ -199,7 +200,7 @@ const TUNNELS: readonly TraceTiFlashMppTunnelSnapshot[] = [
     targetTaskId: 'task-final-2',
     locality: 'remote',
     persistence: 'ephemeral_query_blocks',
-    status: 'registered',
+    status: 'planned',
     packetCount: 0,
     bytesBucket: 'none',
   },
@@ -210,7 +211,7 @@ const TUNNELS: readonly TraceTiFlashMppTunnelSnapshot[] = [
     targetTaskId: 'task-final-1',
     locality: 'remote',
     persistence: 'ephemeral_query_blocks',
-    status: 'registered',
+    status: 'planned',
     packetCount: 0,
     bytesBucket: 'none',
   },
@@ -221,7 +222,7 @@ const TUNNELS: readonly TraceTiFlashMppTunnelSnapshot[] = [
     targetTaskId: 'task-final-2',
     locality: 'local',
     persistence: 'ephemeral_query_blocks',
-    status: 'registered',
+    status: 'planned',
     packetCount: 0,
     bytesBucket: 'none',
   },
@@ -232,7 +233,7 @@ const TUNNELS: readonly TraceTiFlashMppTunnelSnapshot[] = [
     targetTaskId: 'tidb-root',
     locality: 'root',
     persistence: 'ephemeral_query_blocks',
-    status: 'registered',
+    status: 'planned',
     packetCount: 0,
     bytesBucket: 'none',
   },
@@ -243,7 +244,7 @@ const TUNNELS: readonly TraceTiFlashMppTunnelSnapshot[] = [
     targetTaskId: 'tidb-root',
     locality: 'root',
     persistence: 'ephemeral_query_blocks',
-    status: 'registered',
+    status: 'planned',
     packetCount: 0,
     bytesBucket: 'none',
   },
@@ -504,7 +505,16 @@ function validateTiFlashMppLab(state: TraceTiFlashMppLabSnapshot): void {
         tunnel.persistence === 'ephemeral_query_blocks',
         `${tunnel.id} cannot persist MPP data`,
       )
-      taskById(state, tunnel.sourceTaskId)
+      const sourceTask = taskById(state, tunnel.sourceTaskId)
+      invariant(
+        tunnel.status === 'planned' || sourceTask.stage !== 'built',
+        `${tunnel.id} cannot register before its task is dispatched`,
+      )
+      invariant(
+        tunnel.status !== 'planned' ||
+          sourceTask.stage === 'built' || sourceTask.stage === 'dispatched',
+        `${tunnel.id} must register before its task completes preparation`,
+      )
       if (tunnel.targetTaskId !== 'tidb-root') {
         taskById(state, tunnel.targetTaskId)
       }
@@ -798,6 +808,16 @@ export function reduceTiFlashMppLabState(
       'exactly six tunnels may be built once',
     )
     tunnels = TUNNELS
+  } else if (delta.kind === 'tiflash_mpp_tunnels_register') {
+    invariant(
+      delta.tunnelCount === 6 &&
+        tunnels.length === 6 &&
+        tunnels.every((tunnel) => tunnel.status === 'planned') &&
+        tasks.length === 4 &&
+        tasks.every((task) => task.stage === 'dispatched'),
+      'server tunnels register once after every fixture task is dispatched',
+    )
+    tunnels = tunnels.map((tunnel) => ({ ...tunnel, status: 'registered' }))
   } else if (delta.kind === 'tiflash_mpp_task_stage') {
     const task = taskById(state, delta.taskId)
     invariant(task.stage === delta.from, `${delta.taskId} stage changed unexpectedly`)
@@ -805,6 +825,22 @@ export function reduceTiFlashMppLabState(
       validTaskTransition(task, delta.from, delta.to),
       `${delta.taskId} has an invalid ${delta.from} -> ${delta.to} transition`,
     )
+    if (delta.to === 'dispatched') {
+      invariant(
+        tunnels.length === 6 &&
+          tunnels.filter((tunnel) => tunnel.sourceTaskId === task.id)
+            .every((tunnel) => tunnel.status === 'planned'),
+        `${task.id} dispatch requires its planned task links`,
+      )
+    }
+    if (delta.to === 'prepared') {
+      invariant(
+        tunnels.some((tunnel) => tunnel.sourceTaskId === task.id) &&
+          tunnels.filter((tunnel) => tunnel.sourceTaskId === task.id)
+            .every((tunnel) => tunnel.status === 'registered'),
+        `${task.id} preparation requires its registered server tunnels`,
+      )
+    }
     tasks = replaceTask(tasks, delta.taskId, (candidate) => ({
       ...candidate,
       stage: delta.to,
@@ -931,7 +967,10 @@ export function reduceTiFlashMppLabState(
       'Exchange data must use positive aggregate packet counts',
     )
     if (delta.action === 'send') {
-      invariant(tunnel.status === 'registered', `${tunnel.id} was already sent`)
+      invariant(
+        tunnel.status === 'registered',
+        `${tunnel.id} must be registered and not already sent`,
+      )
       invariant(
         sourceTask.stage ===
           (tunnel.exchangeType === 'hash_partition'

@@ -58,6 +58,8 @@ export const CITY_UI_CSS = `
 .tidb-route { display: flex; flex-wrap: wrap; gap: 7px; padding: 0; list-style: none; }
 .tidb-route li { display: flex; align-items: center; gap: 7px; }
 .tidb-route li:not(:last-child)::after { content: "→"; color: var(--tc-cyan); }
+.tidb-route-hops { margin: 6px 0 12px; padding-left: 18px; }
+.tidb-route-hops li { margin: 5px 0; overflow-wrap: anywhere; }
 .tidb-plan { margin: 6px 0 0; padding-left: 24px; color: #c9f6ef; }
 .tidb-warning { color: var(--tc-yellow); }
 .tidb-no-results { color: var(--tc-muted); border-left: 2px solid var(--tc-border); padding-left: 10px; }

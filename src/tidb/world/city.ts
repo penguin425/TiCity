@@ -41,7 +41,9 @@ import { createTiFlashMppLab } from './tiflash-mpp-lab'
 import type { TiFlashMppLab } from './tiflash-mpp-lab'
 import { createCityGeometry } from './geometry'
 import type { BoxInstance } from './geometry'
-import { addBuildingDetails, SQL_TOWER_HEIGHTS } from './building-detail'
+import { addBuildingDetails } from './building-detail'
+import { SQL_TOWERS } from './sql-architecture'
+import { addStorageArchitecture } from './storage-architecture'
 import { createRegionPeers } from './region-peers'
 
 export type CityComponentKind =
@@ -282,7 +284,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   const materials = createCityMaterials()
   const colliders: CityCollider[] = []
   const networks: CityNetwork[] = []
-  const { addBox, addCylinder, addInstancedBoxes, addFacadeWindows, addBoxOutline, addHorizontalRing, batchStaticMeshes } = createCityGeometry()
+  const geometry = createCityGeometry()
+  const { addBox, addCylinder, addInstancedBoxes, addFacadeWindows, addBoxOutline, addHorizontalRing, batchStaticMeshes } = geometry
 
   function addDistrictPad(
     parent: THREE.Object3D, bounds: PlanBounds, material: THREE.Material,
@@ -432,21 +435,26 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   addDistrictPad(tidbDistrict, DISTRICT_BOUNDS.tidb, materials.pavement, 'tidb:apron')
   for (let server = 0; server < TICITY_LAYOUT.tidbCount; server++) {
     const anchor = COMPONENT_ANCHORS[`tidb.${server}` as 'tidb.0' | 'tidb.1' | 'tidb.2']
-    const height = SQL_TOWER_HEIGHTS[server]
-    const centerY = height / 2 + 0.7
+    const building = SQL_TOWERS[server]
     const group = new THREE.Group()
     group.name = `tidb:${server}`
-    // The structural core sits behind the continuous curtain wall authored in
-    // building-detail. Narrow metal joints leave the glazed floors legible.
-    addBox(group, [30, height, 30], [anchor[0], centerY, anchor[2]], materials.darkStructure, 'sql:tower', true)
-    addBox(group, [24, 9, 24], [anchor[0], height + 5.2, anchor[2]], materials.darkStructure, 'sql:upper-tier', true)
-    addBox(group, [18, 7, 18], [anchor[0], height + 13.2, anchor[2]], materials.darkStructure, 'sql:planner-tier')
-    addBox(group, [32.4, 0.9, 32.4], [anchor[0], height + 0.8, anchor[2]], materials.structure, 'sql:optimizer')
-    addBox(group, [25.5, 0.7, 25.5], [anchor[0], height + 9.7, anchor[2]], materials.structure, 'sql:upper-cornice')
-    addBox(group, [19.7, 0.7, 19.7], [anchor[0], height + 16.9, anchor[2]], materials.structure, 'sql:roof-cornice')
-    addCylinder(group, 4.4, 1.1, [anchor[0], height + 17.8, anchor[2]], materials.trim, 'sql:roof-plant-deck', 24)
-    addCylinder(group, 2.2, 3.4, [anchor[0], height + 19.9, anchor[2]], materials.darkStructure, 'sql:stateless-core', 16)
-    addCylinder(group, 0.35, 7.5, [anchor[0], height + 23.6, anchor[2]], materials.trim, 'sql:antenna', 8)
+    const position = (part: { readonly position: Point3 }): Point3 =>
+      [anchor[0] + part.position[0], part.position[1], anchor[2] + part.position[2]]
+    addBox(group, building.podium.size, position(building.podium), materials.structure, 'sql:podium')
+    // The same authored rectangular volumes drive the selectable cores and
+    // curtain walls. Offset upper volumes leave real mechanical terraces.
+    for (let tier = 0; tier < building.tiers.length; tier++) {
+      const part = building.tiers[tier]
+      const center = position(part)
+      addBox(group, part.size, center, materials.darkStructure, `sql:tier:${tier}`, true)
+      addBox(group, [part.size[0] + 1.6, 0.8, part.size[2] + 1.6],
+        [center[0], center[1] + part.size[1] / 2 + 0.4, center[2]],
+        materials.structure, `sql:terrace:${tier}`)
+    }
+    for (let unit = 0; unit < building.roofPlant.length; unit++) {
+      const part = building.roofPlant[unit]
+      addBox(group, part.size, position(part), materials.darkStructure, `sql:roof-plant:${unit}`)
+    }
     tidbDistrict.add(group)
     registerGroup(
       registry,
@@ -458,7 +466,9 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       group,
       anchor,
     )
-    addCollider(colliders, `tidb.${server}`, [anchor[0], centerY, anchor[2]], [30, height + 0.7, 30])
+    addCollider(colliders, `tidb.${server}`,
+      [anchor[0], building.height / 2, anchor[2]],
+      [building.podium.size[0] + 0.5, building.height, 40])
   }
   root.add(tidbDistrict)
 
@@ -477,6 +487,21 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   addCylinder(pdHub, 20.3, 1, [232, 22.4, -102], materials.structure, 'pd:terrace-cornice', 32)
   addCylinder(pdHub, 13.3, 0.8, [232, 40.5, -102], materials.structure, 'pd:clock-ring', 32)
   addCylinder(pdHub, 5.2, 1.2, [232, 41.4, -102], materials.trim, 'pd:clock-plinth', 24)
+  // A vertical clock dial breaks the drum silhouette; it is an architectural
+  // TSO metaphor, not a display of measured time or a route for SQL rows.
+  const clockFace = addCylinder(pdHub, 7.8, 0.7, [232, 30, -89.4],
+    materials.darkStructure, 'pd:clock-face', 32)
+  clockFace.rotation.x = Math.PI / 2
+  const clockRim = new THREE.Mesh(new THREE.TorusGeometry(7.8, 0.65, 6, 32), materials.tso)
+  clockRim.name = 'pd:clock-dial'
+  clockRim.position.set(232, 30, -88.9)
+  pdHub.add(clockRim)
+  for (const [angle, length] of [[Math.PI / 5, 5.6], [-Math.PI / 2, 3.8]]) {
+    const hand = addBox(pdHub, [0.6, length, 0.4],
+      [232 - Math.sin(angle) * length / 2, 30 + Math.cos(angle) * length / 2, -88.3],
+      materials.structure, 'pd:clock-hand')
+    hand.rotation.z = angle
+  }
   pdDistrict.add(pdHub)
   registerGroup(
     registry,
@@ -524,39 +549,20 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     addBox(group,
       [TIKV_ARCHITECTURE.deckWidth, TIKV_ARCHITECTURE.deckHeight, TIKV_ARCHITECTURE.deckWidth],
       [anchor[0], TIKV_ARCHITECTURE.deckCenterY, anchor[2]], materials.darkStructure, 'tikv:store', true)
-    addBoxOutline(
-      group,
-      [100, 5, 100],
-      [anchor[0], 2.9, anchor[2]],
-      materials.edge,
-      'tikv:deck-outline',
-    )
-    const cornerPylons: BoxInstance[] = []
-    const cornerCaps: BoxInstance[] = []
-    for (const dx of [-44, 44]) {
-      for (const dz of [-44, 44]) {
-        cornerPylons.push({
-          position: [anchor[0] + dx, 10.5, anchor[2] + dz],
-          size: [5, 16, 5],
-        })
-        cornerCaps.push({
-          position: [anchor[0] + dx, 19, anchor[2] + dz],
-          size: [6.8, 1.4, 6.8],
-        })
-      }
-    }
-    addInstancedBoxes(group, cornerPylons, materials.trim, 'tikv:campus-pylons', true)
-    addInstancedBoxes(group, cornerCaps, materials.kv, 'tikv:campus-beacons')
+    addBoxOutline(group,
+      [TIKV_ARCHITECTURE.deckWidth, TIKV_ARCHITECTURE.deckHeight, TIKV_ARCHITECTURE.deckWidth],
+      [anchor[0], TIKV_ARCHITECTURE.deckCenterY, anchor[2]], materials.edge, 'tikv:deck-outline')
+    addStorageArchitecture(group, materials, anchor, geometry)
     addBox(
       group,
       [36, 8, 3.2],
-      [anchor[0], 9, anchor[2] - 49],
+      [anchor[0], TIKV_ARCHITECTURE.deckTop + 4, anchor[2] - 47],
       materials.kv,
       'tikv:store-sign',
     )
     addFacadeWindows(
       group,
-      [anchor[0], 9, anchor[2] - 49],
+      [anchor[0], TIKV_ARCHITECTURE.deckTop + 4, anchor[2] - 47],
       36,
       8,
       3.2,
@@ -569,7 +575,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       group,
       2.4,
       18,
-      [anchor[0], 12, anchor[2] + 47],
+      [anchor[0], TIKV_ARCHITECTURE.deckTop + 9, anchor[2] + 47],
       materials.trim,
       'tikv:telemetry-mast',
       10,
@@ -578,7 +584,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
       group,
       6.5,
       0.55,
-      [anchor[0], 21, anchor[2] + 47],
+      [anchor[0], TIKV_ARCHITECTURE.deckTop + 18, anchor[2] + 47],
       materials.kv,
       'tikv:telemetry-ring',
     )
@@ -596,8 +602,8 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     addCollider(
       colliders,
       `tikv.${store}`,
-      [anchor[0], 2.9, anchor[2]],
-      [100, 5, 100],
+      [anchor[0], (TIKV_ARCHITECTURE.deckTop + 1.1) / 2, anchor[2]],
+      [100, TIKV_ARCHITECTURE.deckTop - 1.1, 100],
     )
   }
 

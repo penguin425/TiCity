@@ -88,7 +88,11 @@ describe('TiCity Machine replay', () => {
     expect(root.querySelector('[data-detail-event-kind="snapshot_ts"] dd')?.textContent)
       .toBe('PDがスナップショットTSOを割り当て')
     expect(root.querySelector('[data-lane="tso"] .tidb-machine__lane-count')
-      ?.getAttribute('aria-label')).toBe('1件のイベント')
+      ?.getAttribute('aria-label')).toBe('2件のイベント')
+    expect(receipt.events.filter((candidate) => candidate.domain === 'tso')
+      .map((candidate) => candidate.kind)).toEqual(['snapshot_ts', 'locate_regions'])
+    expect(root.querySelector('[data-lane="tso"] .tidb-machine__lane-label')?.textContent)
+      .toBe('TSO / メタデータ制御')
     expect(root.querySelector('.tidb-machine__progress-text')?.textContent)
       .toBe(`4 / ${receipt.events.length}`)
   })
@@ -634,7 +638,7 @@ describe('TiCity Machine replay', () => {
     expect(state?.textContent).not.toContain('INSERT INTO')
   })
 
-  it('marks regular 2PC-only timestamp omissions and 1PC cleanup as not applicable in both projections', () => {
+  it('keeps candidate timestamps pending for final 2PC and marks only 1PC cleanup not applicable', () => {
     const receipt = createTiDBSimulation({ seed: 425 })
       .runScenario('commit-protocols')
     const comparisonEvent = receipt.events.find((event) =>
@@ -720,20 +724,17 @@ describe('TiCity Machine replay', () => {
         const timestamp = twoPc?.querySelector(
           `[data-protocol-timestamp="${kind}"]`,
         )
-        expect(timestamp?.getAttribute('class')).toContain('is-not-applicable')
-        expect(timestamp?.getAttribute('data-timestamp-applicable')).toBe('false')
+        expect(timestamp?.getAttribute('class')).toContain('is-pending')
+        expect(timestamp?.getAttribute('data-timestamp-applicable')).toBe('true')
         expect(timestamp?.getAttribute('data-timestamp-source')).toBe('none')
         expect(timestamp?.getAttribute('data-timestamp-value')).toBe('')
         expect(timestamp?.textContent).toContain(
-          locale === 'en' ? 'Not applicable' : '非該当',
+          locale === 'en' ? 'Not reached' : '未到達',
         )
-        expect(timestamp?.textContent).toContain(
+        expect(timestamp?.textContent).not.toContain(
           locale === 'en'
             ? 'Not used by this protocol'
             : 'このprotocolでは使用しません',
-        )
-        expect(timestamp?.textContent).not.toContain(
-          locale === 'en' ? 'Not reached' : '未到達',
         )
       }
       expect(twoPc?.querySelector('[data-protocol-timestamp="start_ts"]')
@@ -757,8 +758,8 @@ describe('TiCity Machine replay', () => {
       const twoPcTimestampSummary = twoPcMirror?.querySelectorAll('td')[2]
       expect(twoPcTimestampSummary?.textContent).toContain(
         locale === 'en'
-          ? 'latest_ts: Not applicable (Not used by this protocol)'
-          : 'latest_ts: 非該当 (このprotocolでは使用しません)',
+          ? 'latest_ts: Not allocated (Not reached)'
+          : 'latest_ts: 未割り当て (未到達)',
       )
       const onePcMirror = root.querySelector(
         '[data-protocol-mirror-lane="one_pc"]',
@@ -990,7 +991,7 @@ describe('TiCity Machine replay', () => {
     expect(lab?.getAttribute('data-gc-phase')).toBe('preparing')
     expect(lab?.getAttribute('data-gc-round')).toBe('1')
     expect(root.querySelectorAll('[data-gc-pipeline-round]')).toHaveLength(2)
-    expect(root.querySelectorAll('[data-gc-pipeline-stage]')).toHaveLength(18)
+    expect(root.querySelectorAll('[data-gc-pipeline-stage]')).toHaveLength(20)
     expect(root.querySelector(
       '[data-gc-pipeline-round="1"] [data-gc-pipeline-stage="candidate"]',
     )?.getAttribute('data-gc-pipeline-state')).toBe('complete')
@@ -1014,6 +1015,7 @@ describe('TiCity Machine replay', () => {
       'pd_published',
       'tikv_detected',
       'compaction_filter',
+      'gc_key_cleanup',
     ])
     expect(root.querySelector('[data-gc-semantic-graph="pipeline"]')
       ?.getAttribute('data-causal-dag-replaced')).toBe('false')
@@ -1114,7 +1116,7 @@ describe('TiCity Machine replay', () => {
         '[data-gc-version-state="filtered"]',
       )).toHaveLength(final.storage.filteredVersionCount)
       expect(root.querySelector(
-        '[data-gc-version="b-v2"][data-gc-write-type="delete"][data-gc-version-state="filtered"]',
+        '[data-gc-version="b-v2"][data-gc-write-type="delete"][data-gc-version-state="gc_deleted"]',
       )).not.toBeNull()
       expect(root.querySelectorAll(
         '[data-gc-version-state="filtered"][data-gc-write-type="put"][data-gc-value-storage="write_and_default_cf"]',
@@ -1196,7 +1198,7 @@ describe('TiCity Machine replay', () => {
     expect(slot.children).toHaveLength(0)
   })
 
-  it('renders the exact model-7 TiFlash learner and MPP topology at event 37', () => {
+  it('renders the exact model-8 TiFlash learner and MPP topology at event 37', () => {
     const dom = installTestDom()
     const root = dom.mount('machine')
     const receipt = createTiDBSimulation({ seed: 425 })
@@ -1215,7 +1217,7 @@ describe('TiCity Machine replay', () => {
 
     const lab = root.querySelector('[data-tiflash-mpp-machine-state="true"]')
     expect(lab?.getAttribute('data-tiflash-mpp-event-id')).toBe(event.id)
-    expect(lab?.getAttribute('data-tiflash-mpp-model')).toBe('model-7')
+    expect(lab?.getAttribute('data-tiflash-mpp-model')).toBe('model-8')
     expect(root.querySelectorAll('[data-tiflash-learner-region]')).toHaveLength(3)
     expect(root.querySelectorAll('[data-mpp-fragment]')).toHaveLength(2)
     expect(root.querySelectorAll('[data-mpp-task]')).toHaveLength(4)

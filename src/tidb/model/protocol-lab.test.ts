@@ -91,8 +91,8 @@ const EXPECTED_KINDS = [
   'protocol_client_request',
   'protocol_start_ts',
   'protocol_eligibility_check',
-  'protocol_selection',
   'protocol_latest_ts_floor',
+  'protocol_selection',
   'async_prewrite_dispatch',
   'protocol_raft_propose',
   'protocol_raft_persist_quorum',
@@ -121,6 +121,7 @@ const EXPECTED_KINDS = [
   'protocol_client_request',
   'protocol_start_ts',
   'protocol_eligibility_check',
+  'protocol_latest_ts_floor',
   'protocol_selection',
   'two_pc_prewrite_dispatch',
   'protocol_raft_propose',
@@ -152,7 +153,32 @@ const EXPECTED_KINDS = [
 ] as const
 
 describe('model-5 Protocol Lab trace', () => {
-  it('publishes the exact deterministic 74-event comparison DAG', () => {
+  it('prepares candidate timestamp floors before Region batching chooses Async or 2PC', () => {
+    const { receipt } = runProtocolLab()
+    for (const laneId of ['async_commit', 'two_pc'] as const) {
+      const eligibility = receipt.events.find((event) =>
+        event.kind === 'protocol_eligibility_check' && event.branchId === laneId)!
+      const latest = receipt.events.find((event) =>
+        event.kind === 'protocol_latest_ts_floor' && event.branchId === laneId)!
+      const selected = receipt.events.find((event) =>
+        event.kind === 'protocol_selection' && event.branchId === laneId)!
+      const dispatch = receipt.events.find((event) =>
+        event.kind === (laneId === 'two_pc' ? 'two_pc_prewrite_dispatch' : 'async_prewrite_dispatch'))!
+      expect(eligibility.metadata.onePcOutcome).toBe('candidate')
+      expect(lane(eligibility.snapshot!.protocolLab!, laneId).stage).toBe('candidates_checked')
+      expect(latest.dependsOn).toEqual([eligibility.id])
+      expect(lane(latest.snapshot!.protocolLab!, laneId).stage).toBe('latest_ts')
+      expect(selected.dependsOn).toEqual([latest.id])
+      expect(selected.metadata.onePcOutcome).toBe('rejected_before_rpc')
+      expect(selected.metadata.tryOnePc).toBe(false)
+      expect(dispatch.dependsOn).toEqual([selected.id])
+      const prepared = lane(latest.snapshot!.protocolLab!, laneId)
+      expect(prepared.requestMinCommitTs).toBe(prepared.latestTs! + 1)
+      expect(prepared.commitTs).toBeNull()
+    }
+  })
+
+  it('publishes the exact deterministic 75-event comparison DAG', () => {
     const first = runProtocolLab()
     const second = runProtocolLab()
     const { receipt } = first
@@ -160,7 +186,7 @@ describe('model-5 Protocol Lab trace', () => {
     expect(receipt).toEqual(second.receipt)
     expect(first.simulation.state).toEqual(second.simulation.state)
     expect(receipt.id).toBe('trace-1')
-    expect(receipt.events).toHaveLength(74)
+    expect(receipt.events).toHaveLength(75)
     expect(receipt.events.map((event) => event.kind)).toEqual(EXPECTED_KINDS)
     expect(receipt.events.map((event) => event.id)).toEqual(
       EXPECTED_KINDS.map((_, index) => `trace-1-event-${index + 1}`),
@@ -174,9 +200,9 @@ describe('model-5 Protocol Lab trace', () => {
 
     const backgroundIds = new Set([
       ...Array.from({ length: 11 }, (_, index) => index + 33),
-      ...Array.from({ length: 7 }, (_, index) => index + 68),
+      ...Array.from({ length: 7 }, (_, index) => index + 69),
     ])
-    for (let number = 1; number <= 74; number++) {
+    for (let number = 1; number <= 75; number++) {
       expect(eventAt(receipt, number).path, `event ${number}`).toBe(
         backgroundIds.has(number) ? 'background' : 'critical',
       )
@@ -201,7 +227,7 @@ describe('model-5 Protocol Lab trace', () => {
       visited.add(event.id)
     }
     for (const event of receipt.events) visit(event)
-    expect(visited.size).toBe(74)
+    expect(visited.size).toBe(75)
     expect(eventAt(receipt, 1).dependsOn).toEqual([])
     expect(eventAt(receipt, 19).dependsOn).toEqual(['trace-1-event-18'])
     expect(eventAt(receipt, 25).dependsOn).toEqual(['trace-1-event-18'])
@@ -219,23 +245,23 @@ describe('model-5 Protocol Lab trace', () => {
       'trace-1-event-37',
       'trace-1-event-42',
     ])
-    expect(eventAt(receipt, 54).atMs).toBeGreaterThanOrEqual(
-      eventAt(receipt, 53).atMs + eventAt(receipt, 53).durationMs,
+    expect(eventAt(receipt, 55).atMs).toBeGreaterThanOrEqual(
+      eventAt(receipt, 54).atMs + eventAt(receipt, 54).durationMs,
     )
-    for (const number of [19, 25, 33, 38, 48, 54]) {
+    for (const number of [19, 25, 33, 38, 49, 55]) {
       expect(eventAt(receipt, number).metadata).toMatchObject({
         presentationScheduling:
           'deterministic_sibling_serialization_model_policy',
       })
     }
-    expect(eventAt(receipt, 60).dependsOn).toEqual([
-      'trace-1-event-53',
-      'trace-1-event-59',
+    expect(eventAt(receipt, 61).dependsOn).toEqual([
+      'trace-1-event-54',
+      'trace-1-event-60',
     ])
-    expect(eventAt(receipt, 74).dependsOn).toEqual([
+    expect(eventAt(receipt, 75).dependsOn).toEqual([
       'trace-1-event-13',
       'trace-1-event-43',
-      'trace-1-event-73',
+      'trace-1-event-74',
     ])
   })
 
@@ -319,11 +345,11 @@ describe('model-5 Protocol Lab trace', () => {
     expect(asyncSecondCleanupDispatch).toEqual(asyncFirstCleanup)
 
     const twoPcFirstPrewrite = lane(
-      labAt(receipt, 53),
+      labAt(receipt, 54),
       'two_pc',
     ).regions[0]
     const twoPcSecondDispatch = lane(
-      labAt(receipt, 54),
+      labAt(receipt, 55),
       'two_pc',
     ).regions[0]
     expect(twoPcFirstPrewrite.mvcc).toMatchObject({
@@ -335,7 +361,7 @@ describe('model-5 Protocol Lab trace', () => {
 
   it('records exact eligibility decisions and timestamp authorities', () => {
     const { receipt, simulation } = runProtocolLab()
-    const final = labAt(receipt, 74)
+    const final = labAt(receipt, 75)
     const [one, async, two] = final.lanes
 
     expect(final).toMatchObject({
@@ -409,6 +435,9 @@ describe('model-5 Protocol Lab trace', () => {
       delta.source,
     ])).toEqual([
       ['start_ts', 'pd'],
+      ['latest_ts', 'pd'],
+      ['request_min_commit_ts', 'tidb_model_bound'],
+      ['max_commit_ts', 'tidb_model_bound'],
       ['commit_ts', 'pd'],
     ])
     expect(one.requestMinCommitTs).toBe((one.latestTs ?? 0) + 1)
@@ -422,13 +451,13 @@ describe('model-5 Protocol Lab trace', () => {
         'max_prewrite_min_commit_ts',
         'pd_tso_after_prewrite',
       ])
-    expect(two.latestTs).toBeNull()
-    expect(two.requestMinCommitTs).toBeNull()
-    expect(two.maxCommitTs).toBeNull()
-    expect(eventAt(receipt, 61).atMs).toBeGreaterThanOrEqual(
-      eventAt(receipt, 60).atMs + eventAt(receipt, 60).durationMs,
+    expect(two.latestTs).toBeGreaterThan(two.startTs!)
+    expect(two.requestMinCommitTs).toBe(two.latestTs! + 1)
+    expect(two.maxCommitTs).toBeGreaterThan(two.requestMinCommitTs!)
+    expect(eventAt(receipt, 62).atMs).toBeGreaterThanOrEqual(
+      eventAt(receipt, 61).atMs + eventAt(receipt, 61).durationMs,
     )
-    expect(simulation.state.tso.allocations).toBe(6)
+    expect(simulation.state.tso.allocations).toBe(7)
   })
 
   it('places the 1PC, Async Commit, and regular 2PC client boundaries correctly', () => {
@@ -476,18 +505,18 @@ describe('model-5 Protocol Lab trace', () => {
       region.mvcc.lockCf === 'empty' &&
       region.mvcc.writeCf === 'commit')).toBe(true)
 
-    const twoPrewritten = lane(labAt(receipt, 60), 'two_pc')
+    const twoPrewritten = lane(labAt(receipt, 61), 'two_pc')
     expect(twoPrewritten.regions.every((region) =>
       region.mvcc.lockCf === 'prewrite' &&
       region.mvcc.writeCf === 'empty' &&
       !region.mvcc.asyncCommit)).toBe(true)
-    const twoAtResponse = lane(labAt(receipt, 67), 'two_pc')
+    const twoAtResponse = lane(labAt(receipt, 68), 'two_pc')
     expect(twoAtResponse.clientResponded).toBe(true)
     expect(twoAtResponse.regions.find((region) => region.role === 'primary')
       ?.mvcc).toMatchObject({ lockCf: 'empty', writeCf: 'commit' })
     expect(twoAtResponse.regions.find((region) => region.role === 'secondary')
       ?.mvcc).toMatchObject({ lockCf: 'prewrite', writeCf: 'empty' })
-    const twoFinal = lane(labAt(receipt, 73), 'two_pc')
+    const twoFinal = lane(labAt(receipt, 74), 'two_pc')
     expect(twoFinal.backgroundComplete).toBe(true)
     expect(twoFinal.regions.every((region) =>
       region.mvcc.lockCf === 'empty' &&
@@ -529,7 +558,7 @@ describe('model-5 Protocol Lab trace', () => {
     expect(serialized).not.toMatch(
       /INSERT\s+INTO|VALUES\s*\(|account_id|\b425\b|result row|sqlText|secondaryKeys/i,
     )
-    const final = labAt(receipt, 74)
+    const final = labAt(receipt, 75)
     expect(final.phase).toBe('complete')
     expect(final.focusLaneId).toBeNull()
     expect(final.lanes.map((candidate) => candidate.stage))

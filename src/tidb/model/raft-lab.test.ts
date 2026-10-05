@@ -25,8 +25,8 @@ function initial(): TraceRaftLabSnapshot {
   )
 }
 
-function electionState(): TraceRaftLabSnapshot {
-  let state = initial()
+function electionState(startingState = initial()): TraceRaftLabSnapshot {
+  let state = startingState
   const apply = (delta: RaftLabDelta): void => {
     state = reduceRaftLabState(state, delta)
   }
@@ -164,6 +164,38 @@ describe('Raft Lab pure state', () => {
       votesGranted: ['tikv-2'],
       quorum: 2,
     })).toThrow(/two-of-three votes/)
+  })
+
+  it('lets a behind live voter elect an up-to-date candidate', () => {
+    let state = electionState(createRaftLabState(
+      0,
+      'tikv-1',
+      (['tikv-1', 'tikv-2', 'tikv-3'] as const).map((storeId) => ({
+        storeId,
+        lastLogIndex: storeId === 'tikv-3' ? 41 : 42,
+        lastLogTerm: 1,
+        commitIndex: storeId === 'tikv-3' ? 41 : 42,
+        appliedIndex: storeId === 'tikv-3' ? 41 : 42,
+      })),
+    ))
+
+    expect(state.liveVoterCount).toBe(2)
+    expect(state.election.preVotesGranted).toEqual(['tikv-2', 'tikv-3'])
+    expect(state.election.votesGranted).toEqual(['tikv-2', 'tikv-3'])
+    state = reduceRaftLabState(state, {
+      kind: 'raft_leader_elected',
+      regionId: 0,
+      oldLeaderStoreId: 'tikv-1',
+      newLeaderStoreId: 'tikv-2',
+      term: 2,
+      votesGranted: ['tikv-2', 'tikv-3'],
+      quorum: 2,
+    })
+
+    expect(state.leaderStoreId).toBe('tikv-2')
+    expect(state.peers.find((peer) => peer.storeId === 'tikv-3'))
+      .toMatchObject({ role: 'follower', lastLogIndex: 41 })
+    expect(state.log.committed).toBe(false)
   })
 
   it('does not commit or apply the current-term no-op out of order', () => {
@@ -329,4 +361,3 @@ describe('Raft Lab pure state', () => {
     })
   })
 })
-

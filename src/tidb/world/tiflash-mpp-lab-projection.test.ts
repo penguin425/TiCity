@@ -92,8 +92,8 @@ function tunnel(
         ),
     persistence: 'ephemeral_query_blocks',
     status,
-    packetCount: status === 'registered' ? 0 : 2,
-    bytesBucket: status === 'registered' ? 'none' : 'small',
+    packetCount: status === 'planned' || status === 'registered' ? 0 : 2,
+    bytesBucket: status === 'planned' || status === 'registered' ? 'none' : 'small',
   }
 }
 
@@ -325,6 +325,26 @@ describe('TiFlash MPP Lab model-to-world projection', () => {
       state: 'idle',
     })
     expect(JSON.stringify(source)).toBe(before)
+  })
+
+  it('preserves planned task links as a distinct tunnel state', () => {
+    const snapshot = detailedSnapshot()
+    const planned: TraceTiFlashMppLabSnapshot = {
+      ...snapshot,
+      tasks: snapshot.tasks.map((task) => ({ ...task, stage: 'built' })),
+      tunnels: snapshot.tunnels.map((candidate) => ({
+        ...candidate,
+        status: 'planned',
+        packetCount: 0,
+        bytesBucket: 'none',
+      })),
+    }
+    const projection = projectTiFlashMppLab(event(planned), {
+      inspect: true,
+      reducedMotion: true,
+    })!
+
+    expect(projection.tunnels.every((candidate) => candidate.state === 'planned')).toBe(true)
   })
 
   it('reports every fixed-capacity overflow without mutating malformed input', () => {
