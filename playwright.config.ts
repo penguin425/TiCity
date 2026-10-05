@@ -22,7 +22,9 @@ export default defineConfig({
   // A correct polling result can arrive after 5s while software WebGL finishes
   // a frame. Keep the assertion values intact and budget for that round trip.
   expect: { timeout: process.env.CI ? 15_000 : 5_000 },
-  reporter: process.env.CI ? [['html', { open: 'never' }], ['list']] : 'list',
+  // Native check annotations keep failures reviewable even when an execution
+  // environment cannot download the hosted log or browser artifact.
+  reporter: process.env.CI ? [['html', { open: 'never' }], ['list'], ['github']] : 'list',
   use: {
     baseURL: previewUrl,
     // Continuous trace/video capture adds GPU readbacks to every WebGL frame.
