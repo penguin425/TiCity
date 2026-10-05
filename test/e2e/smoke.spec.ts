@@ -549,7 +549,7 @@ test('Protocol Lab Machine separates its semantic graph at the regular 2PC bound
   expect(new URL(page.url()).searchParams.get('event')).toBe(eventId)
 
   const current = page.locator('[data-event-index][aria-current="step"]')
-  await expect(current).toHaveAttribute('data-event-index', '66')
+  await expect(current).toHaveAttribute('data-event-index', '67')
   await expect(current).toHaveAttribute(
     'data-event-kind',
     'protocol_client_response',
