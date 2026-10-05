@@ -10,6 +10,7 @@ export type {
   RegionState,
   ReplaySpec,
   SqlAnalysis,
+  SqlAggregateShape,
   TiCityState,
   TiDBControls,
   TiDBSimulationApi,

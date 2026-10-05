@@ -430,6 +430,7 @@ function versionColor(
     case 'retained_anchor':
       return SEMANTIC_COLORS[theme].tso
     case 'filtered':
+    case 'gc_deleted':
       return SEMANTIC_COLORS[theme].gc
     case 'present':
       return SEMANTIC_COLORS[theme].sql
@@ -639,6 +640,7 @@ export function createGcStorageLab(
     present: 'block',
     retained_anchor: 'tall-anchor',
     filtered: 'flat-filtered-marker',
+    gc_deleted: 'flat-gc-key-marker',
   })
   const flowParticles = instances(
     overviewRoot,
@@ -1026,7 +1028,7 @@ export function createGcStorageLab(
         const versionVisible = chainVisible && version.visible
         const stateHeight =
           version.state === 'retained_anchor' ? 10
-            : version.state === 'filtered' ? 0.8
+            : version.state === 'filtered' || version.state === 'gc_deleted' ? 0.8
               : 4
         const width = version.state === 'retained_anchor' ? 5 : 8
         setInstanceTransform(
@@ -1037,14 +1039,14 @@ export function createGcStorageLab(
           z,
           width * (versionVisible ? 1 : 0),
           stateHeight * (versionVisible ? 1 : 0),
-          (version.state === 'filtered' ? 9 : 7) *
+          (version.state === 'filtered' || version.state === 'gc_deleted' ? 9 : 7) *
             (versionVisible ? 1 : 0),
         )
         setInstanceColor(
           versionSlots,
           instance,
           versionColor(version.state, theme),
-          version.state === 'filtered' ? 0.44 : 1,
+          version.state === 'filtered' || version.state === 'gc_deleted' ? 0.44 : 1,
         )
       }
     }

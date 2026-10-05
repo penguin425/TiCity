@@ -9,6 +9,7 @@ import type {
   ModelPlanNode,
   SqlAccessPath,
   SqlAnalysis,
+  SqlAggregateShape,
   SqlQueryKind,
   SqlStatus,
 } from './types'
@@ -35,7 +36,19 @@ const DEMO_TABLES: Readonly<Record<string, DemoTable>> = Object.freeze({
   inventory: { primaryKey: ['sku'], tiflashReplica: false },
 })
 const AGGREGATES = new Set(['count', 'sum', 'avg', 'min', 'max'])
-const COMPLEX_SELECT = new Set(['join', 'union', 'intersect', 'except', 'window'])
+const COMPLEX_SELECT = new Set(['join', 'union', 'intersect', 'except', 'window', 'over'])
+const CLAUSES = new Set(['where', 'group', 'having', 'order', 'limit', 'for'])
+const IDENTIFIER = /^[a-z_$][a-z0-9_$]*$/i
+
+export const SQL_SUBSET_EXPLANATIONS = Object.freeze({
+  singleTable: 'Only one FROM table with an optional alias is modeled.',
+  positivePredicate: 'Only positive column/literal comparisons combined with AND are modeled.',
+  qualifiers: 'Column qualifiers must refer to the selected table or its alias.',
+  aggregate: 'DISTINCT, HAVING, and unsupported aggregate expressions are outside the current route model.',
+  scalar: 'Modeled as a scalar aggregate with TiFlash partial aggregation and final aggregation in the TiDB root task.',
+  grouped: 'Modeled as a grouped aggregate with TiFlash partial aggregation, HashPartition exchange, and TiFlash final aggregation.',
+  lockingRead: 'Locking reads are outside the current route model.',
+})
 
 function lex(sql: string): LexResult {
   const tokens: string[] = []
@@ -182,6 +195,7 @@ function emptyAnalysis(status: SqlStatus, explanation: string): SqlAnalysis {
     statementKind: 'unknown',
     table: null,
     accessPath: 'none',
+    aggregateShape: null,
     readOnly: true,
     plan: [],
     warnings: [],
@@ -198,42 +212,133 @@ function tableAfter(tokens: readonly string[], keyword: string): string | null {
   return first
 }
 
-function hasLiteralEquality(tokens: readonly string[], column: string): boolean {
-  const boundary = (token: string | undefined): boolean =>
-    token === undefined ||
-    token === 'and' ||
-    token === ')' ||
-    token === 'limit' ||
-    token === 'order' ||
-    token === 'for'
+interface TableReference {
+  table: string
+  database: string | null
+  alias: string | null
+  end: number
+}
 
-  for (let index = 0; index < tokens.length; index++) {
-    if (tokens[index] === column &&
-        tokens[index + 1] === '=' &&
-        tokens[index + 2] === '?' &&
-        boundary(tokens[index + 3])) {
-      return true
-    }
-    if (tokens[index] === '?' &&
-        tokens[index + 1] === '=' &&
-        tokens[index + 2] === column &&
-        boundary(tokens[index + 3])) {
-      return true
-    }
+function tableReference(
+  tokens: readonly string[],
+  keyword: string,
+  terminators: ReadonlySet<string> = CLAUSES,
+): TableReference | null {
+  const at = tokens.indexOf(keyword)
+  if (at < 0) return null
+  let index = at + 1
+  const first = tokens[index++]
+  if (!first || !IDENTIFIER.test(first)) return null
+  let table = first
+  let database: string | null = null
+  if (tokens[index] === '.') {
+    database = first
+    table = tokens[index + 1]
+    if (!table || !IDENTIFIER.test(table)) return null
+    index += 2
   }
-  return false
+  let alias: string | null = null
+  if (tokens[index] === 'as') {
+    alias = tokens[index + 1]
+    if (!alias || !IDENTIFIER.test(alias) || terminators.has(alias)) return null
+    index += 2
+  } else if (tokens[index] && !terminators.has(tokens[index])) {
+    alias = tokens[index++]
+    if (!IDENTIFIER.test(alias)) return null
+  }
+  if (index < tokens.length && !terminators.has(tokens[index])) return null
+  return { table, database, alias, end: index }
+}
+
+function boundColumn(tokens: readonly string[], reference: TableReference): string | null {
+  if (tokens.length === 1 && IDENTIFIER.test(tokens[0])) return tokens[0]
+  if (tokens.length === 3 && tokens[1] === '.' &&
+      tokens[0] === (reference.alias ?? reference.table) && IDENTIFIER.test(tokens[2])) {
+    return tokens[2]
+  }
+  if (tokens.length === 5 && tokens[1] === '.' && tokens[3] === '.' &&
+      !reference.alias && reference.database !== null && tokens[0] === reference.database &&
+      tokens[2] === reference.table && IDENTIFIER.test(tokens[4])) return tokens[4]
+  return null
+}
+
+function hasBoundQualifiers(tokens: readonly string[], reference: TableReference): boolean {
+  for (let index = 0; index < tokens.length; index++) {
+    if (tokens[index + 1] !== '.') continue
+    const start = index
+    while (tokens[index + 1] === '.') index += 2
+    const name = tokens.slice(start, index + 1)
+    if (name.at(-1) === '*') {
+      // A single-table qualified wildcard does not identify a key predicate.
+      if (name.length !== 3 || name[0] !== (reference.alias ?? reference.table)) return false
+    } else if (boundColumn(name, reference) === null) return false
+  }
+  return true
+}
+
+interface PredicateComparison {
+  column: string
+  operator: string
+}
+
+function predicateComparisons(
+  tokens: readonly string[],
+  reference: TableReference,
+): readonly PredicateComparison[] | null {
+  let cursor = 0
+  let nesting = 0
+  const comparisons: PredicateComparison[] = []
+  const comparison = (): boolean => {
+    if (tokens[cursor] === '(') {
+      // A classifier need not accept arbitrarily deep boolean syntax. Bound
+      // recursive descent independently of the public 64 KiB byte ceiling.
+      if (++nesting > 64) return false
+      cursor++
+      if (!conjunction() || tokens[cursor++] !== ')') return false
+      nesting--
+      return true
+    }
+    const start = cursor
+    while (cursor < tokens.length && !['and', ')'].includes(tokens[cursor])) cursor++
+    const atom = tokens.slice(start, cursor)
+    const operatorAt = atom.findIndex((token) => ['=', '<', '>', '<=', '>=', '<>', '!='].includes(token))
+    if (operatorAt < 0) return false
+    const left = atom.slice(0, operatorAt)
+    const right = atom.slice(operatorAt + 1)
+    const literal = (part: readonly string[]): boolean => part.length === 1 && part[0] === '?'
+    const column = literal(right) ? boundColumn(left, reference)
+      : literal(left) ? boundColumn(right, reference) : null
+    if (column === null) return false
+    comparisons.push({ column, operator: atom[operatorAt] })
+    return true
+  }
+  const conjunction = (): boolean => {
+    if (!comparison()) return false
+    while (tokens[cursor] === 'and') {
+      cursor++
+      if (!comparison()) return false
+    }
+    return true
+  }
+  if (!conjunction() || cursor !== tokens.length) return null
+  return comparisons
+}
+
+function whereTokens(tokens: readonly string[]): readonly string[] | null {
+  const where = tokens.indexOf('where')
+  if (where < 0) return null
+  const end = tokens.findIndex((token, index) => index > where && CLAUSES.has(token))
+  return tokens.slice(where + 1, end < 0 ? tokens.length : end)
 }
 
 function hasCompletePrimaryKeyEquality(
-  tokens: readonly string[],
+  comparisons: readonly PredicateComparison[] | null,
   table: string,
 ): boolean {
   const definition = DEMO_TABLES[table]
-  const where = tokens.indexOf('where')
-  if (!definition || where < 0) return false
-  const predicate = tokens.slice(where + 1)
-  if (predicate.includes('or')) return false
-  return definition.primaryKey.every((column) => hasLiteralEquality(predicate, column))
+  return Boolean(definition && comparisons && definition.primaryKey.every((column) =>
+    comparisons.some((comparison) => comparison.column === column && comparison.operator === '='),
+  ))
 }
 
 function matchingClose(tokens: readonly string[], open: number): number {
@@ -284,7 +389,8 @@ function supportsSingleRowInsert(tokens: readonly string[], table: string): bool
   if (!definition || into < 0 || values < 0 || values <= into) return false
 
   const columnsOpen = tokens.indexOf('(', into + 1)
-  if (columnsOpen < 0 || columnsOpen >= values) return false
+  const tableEnd = tokens[into + 2] === '.' ? into + 4 : into + 2
+  if (columnsOpen !== tableEnd || columnsOpen >= values) return false
   const columnsClose = matchingClose(tokens, columnsOpen)
   if (columnsClose < 0 || columnsClose + 1 !== values) return false
   const columns = parseIdentifierList(tokens.slice(columnsOpen + 1, columnsClose))
@@ -304,6 +410,7 @@ function plan(
   kind: Exclude<SqlQueryKind, 'explain' | 'unknown'>,
   table: string,
   path: SqlAccessPath,
+  aggregateShape: SqlAggregateShape | null,
 ): ModelPlanNode[] {
   const accessObject = `table:${table}`
 
@@ -320,6 +427,41 @@ function plan(
           task: 'cop[tikv]',
           accessObject,
           children: [],
+        }],
+      }]
+    }
+    if (aggregateShape === 'scalar') {
+      // TiDB v8.5 MppTiDB: a partial aggregate runs on TiFlash, while the
+      // scalar final aggregate runs on the TiDB root, without HashPartition.
+      return [{
+        id: 'root-scalar-final-aggregate',
+        operator: 'HashAgg(Final)',
+        task: 'root',
+        accessObject: null,
+        children: [{
+          id: 'root-mpp-gather',
+          operator: 'MPPGather',
+          task: 'root',
+          accessObject: null,
+          children: [{
+            id: 'mpp-root-passthrough',
+            operator: 'ExchangeSender(PassThrough)',
+            task: 'mpp[tiflash]',
+            accessObject: null,
+            children: [{
+              id: 'mpp-partial-aggregate',
+              operator: 'HashAgg(Partial)',
+              task: 'mpp[tiflash]',
+              accessObject: null,
+              children: [{
+                id: 'tiflash-scan',
+                operator: 'TableFullScan',
+                task: 'mpp[tiflash]',
+                accessObject,
+                children: [],
+              }],
+            }],
+          }],
         }],
       }]
     }
@@ -413,6 +555,7 @@ function supported(
   kind: Exclude<SqlQueryKind, 'explain' | 'unknown'>,
   table: string,
   accessPath: SqlAccessPath,
+  aggregateShape: SqlAggregateShape | null = null,
 ): SqlAnalysis {
   return {
     status: 'supported',
@@ -420,14 +563,17 @@ function supported(
     statementKind: kind,
     table,
     accessPath,
+    aggregateShape,
     readOnly: kind === 'point_read' || kind === 'range_read' || kind === 'aggregate',
-    plan: plan(kind, table, accessPath),
+    plan: plan(kind, table, accessPath, aggregateShape),
     warnings: [
       'MODEL: the plan and route are educational projections, not output from a TiDB server.',
     ],
     explanation: kind === 'aggregate'
       ? accessPath === 'tiflash_mpp'
-        ? 'Modeled as an HTAP aggregate dispatched to TiFlash MPP.'
+        ? aggregateShape === 'scalar'
+          ? SQL_SUBSET_EXPLANATIONS.scalar
+          : SQL_SUBSET_EXPLANATIONS.grouped
         : 'Modeled as a TiKV table scan with aggregation in the TiDB root task.'
       : kind === 'point_read'
         ? 'Modeled as a key lookup routed to one Region.'
@@ -435,6 +581,74 @@ function supported(
           ? 'Modeled as a distributed range or table scan.'
           : 'Modeled as a transactional KV mutation.',
   }
+}
+
+function commaExpressions(tokens: readonly string[]): readonly string[][] | null {
+  const expressions: string[][] = []
+  let depth = 0
+  let start = 0
+  for (let index = 0; index < tokens.length; index++) {
+    if (tokens[index] === '(') depth++
+    else if (tokens[index] === ')') depth--
+    else if (tokens[index] === ',' && depth === 0) {
+      expressions.push(tokens.slice(start, index))
+      start = index + 1
+    }
+    if (depth < 0) return null
+  }
+  expressions.push(tokens.slice(start))
+  return depth === 0 && expressions.every((expression) => expression.length > 0)
+    ? expressions : null
+}
+
+function withoutProjectionAlias(tokens: readonly string[]): readonly string[] {
+  if (tokens.length >= 3 && tokens.at(-2) === 'as' && IDENTIFIER.test(tokens.at(-1)!)) {
+    return tokens.slice(0, -2)
+  }
+  if (tokens.length >= 2 && IDENTIFIER.test(tokens.at(-1)!) &&
+      tokens.at(-2) !== '.') {
+    // Only strip an implicit alias when what precedes it is itself a complete
+    // column name or aggregate call; arbitrary expressions remain unsupported.
+    const candidate = tokens.slice(0, -1)
+    if (candidate.at(-1) === ')' || [1, 3, 5].includes(candidate.length)) return candidate
+  }
+  return tokens
+}
+
+function aggregateShape(
+  tokens: readonly string[],
+  reference: TableReference,
+): SqlAggregateShape | null {
+  if (tokens.includes('distinct') || tokens.includes('having')) return null
+  const from = tokens.indexOf('from')
+  const projections = commaExpressions(tokens.slice(1, from))
+  if (!projections) return null
+  const group = tokens.indexOf('group')
+  const groupedColumns = new Set<string>()
+  if (group >= 0) {
+    if (tokens[group + 1] !== 'by') return null
+    const end = tokens.findIndex((token, index) => index > group && CLAUSES.has(token))
+    const expressions = commaExpressions(tokens.slice(group + 2, end < 0 ? tokens.length : end))
+    if (!expressions) return null
+    for (const expression of expressions) {
+      const column = boundColumn(expression, reference)
+      if (column === null) return null
+      groupedColumns.add(column)
+    }
+  }
+  for (const projection of projections) {
+    const expression = withoutProjectionAlias(projection)
+    if (AGGREGATES.has(expression[0]) && expression[1] === '(' &&
+        matchingClose(expression, 1) === expression.length - 1) {
+      const argument = expression.slice(2, -1)
+      if (argument.length === 1 && argument[0] === '*' && expression[0] === 'count') continue
+      if (boundColumn(argument, reference) !== null) continue
+      return null
+    }
+    const column = boundColumn(expression, reference)
+    if (column === null || !groupedColumns.has(column)) return null
+  }
+  return group >= 0 ? 'grouped' : 'scalar'
 }
 
 function classifyBase(tokens: readonly string[]): SqlAnalysis {
@@ -449,28 +663,50 @@ function classifyBase(tokens: readonly string[]): SqlAnalysis {
         return emptyAnalysis('unsupported', `${token.toUpperCase()} is outside the current route model.`)
       }
     }
-    if (tokens.includes('or')) {
-      return emptyAnalysis('unsupported', 'OR predicates are ambiguous in the current route model.')
+    if (tokens.includes('not') || tokens.includes('or')) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.positivePredicate)
+    }
+    if (tokens.includes('for')) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.lockingRead)
     }
 
-    const table = tableAfter(tokens, 'from')
-    if (!table) return emptyAnalysis('invalid', 'SELECT must name one table in FROM.')
+    if (!tokens.includes('from')) return emptyAnalysis('invalid', 'SELECT must name one table in FROM.')
+    const reference = tableReference(tokens, 'from')
+    if (!reference || tokens.filter((token) => token === 'from').length !== 1) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.singleTable)
+    }
+    const { table } = reference
+    const projection = tokens.slice(1, tokens.indexOf('from'))
+    if (projection.length === 0) return emptyAnalysis('invalid', 'Malformed SELECT.')
+    const predicate = whereTokens(tokens)
+    if (!hasBoundQualifiers(projection, reference) ||
+        !hasBoundQualifiers(tokens.slice(reference.end), reference)) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.qualifiers)
+    }
+    const comparisons = predicate ? predicateComparisons(predicate, reference) : null
+    if (predicate && comparisons === null) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.positivePredicate)
+    }
     const aggregate = tokens.some((token, index) =>
       AGGREGATES.has(token) && tokens[index + 1] === '(',
     ) || tokens.includes('group')
     if (aggregate) {
+      const shape = aggregateShape(tokens, reference)
+      if (shape === null) return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.aggregate)
       return supported(
         'aggregate',
         table,
         DEMO_TABLES[table]?.tiflashReplica ? 'tiflash_mpp' : 'table_scan',
+        shape,
       )
     }
-
-    const where = tokens.indexOf('where')
-    const point = hasCompletePrimaryKeyEquality(tokens, table)
+    if (tokens.includes('distinct') || tokens.includes('having')) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.aggregate)
+    }
+    const point = hasCompletePrimaryKeyEquality(comparisons, table)
     if (point) return supported('point_read', table, 'point_get')
 
-    return supported('range_read', table, where >= 0 ? 'range_scan' : 'table_scan')
+    return supported('range_read', table, predicate ? 'range_scan' : 'table_scan')
   }
 
   if (first === 'insert') {
@@ -486,34 +722,52 @@ function classifyBase(tokens: readonly string[]): SqlAnalysis {
   }
 
   if (first === 'update') {
-    const table = tableAfter(tokens, 'update')
+    const reference = tableReference(tokens, 'update', new Set(['set']))
     const set = tokens.indexOf('set')
     const where = tokens.indexOf('where')
-    if (!table ||
-        set < 0 ||
-        (where >= 0 &&
-          (set >= where - 2 || !tokens.slice(set + 1, where).includes('=')))) {
+    if (set < 0 || (where >= 0 &&
+        (set >= where - 2 || !tokens.slice(set + 1, where).includes('=')))) {
       return emptyAnalysis('invalid', 'Malformed UPDATE.')
     }
-    if (!hasCompletePrimaryKeyEquality(tokens, table)) {
+    if (!reference) return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.singleTable)
+    const predicate = whereTokens(tokens)
+    const assignments = tokens.slice(set + 1, where < 0 ? tokens.length : where)
+    if (!hasBoundQualifiers(assignments, reference) ||
+        !hasBoundQualifiers(tokens.slice(reference.end), reference)) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.qualifiers)
+    }
+    const comparisons = predicate ? predicateComparisons(predicate, reference) : null
+    if (predicate && comparisons === null) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.positivePredicate)
+    }
+    if (!hasCompletePrimaryKeyEquality(comparisons, reference.table)) {
       return emptyAnalysis(
         'unsupported',
         'UPDATE requires literal equality on every known primary-key column.',
       )
     }
-    return supported('update', table, 'kv_write')
+    return supported('update', reference.table, 'kv_write')
   }
 
   if (first === 'delete') {
-    const table = tableAfter(tokens, 'from')
-    if (!table) return emptyAnalysis('invalid', 'Malformed DELETE.')
-    if (!hasCompletePrimaryKeyEquality(tokens, table)) {
+    if (tokens[1] !== 'from') return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.singleTable)
+    const reference = tableReference(tokens, 'from')
+    if (!reference) return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.singleTable)
+    const predicate = whereTokens(tokens)
+    if (!hasBoundQualifiers(tokens.slice(reference.end), reference)) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.qualifiers)
+    }
+    const comparisons = predicate ? predicateComparisons(predicate, reference) : null
+    if (predicate && comparisons === null) {
+      return emptyAnalysis('unsupported', SQL_SUBSET_EXPLANATIONS.positivePredicate)
+    }
+    if (!hasCompletePrimaryKeyEquality(comparisons, reference.table)) {
       return emptyAnalysis(
         'unsupported',
         'DELETE requires literal equality on every known primary-key column.',
       )
     }
-    return supported('delete', table, 'kv_write')
+    return supported('delete', reference.table, 'kv_write')
   }
 
   return emptyAnalysis('unsupported', `${(first ?? 'Empty input').toUpperCase()} is not modeled.`)

@@ -220,6 +220,7 @@ describe('GC/Storage Lab fixed-capacity world', () => {
       present: 'block',
       retained_anchor: 'tall-anchor',
       filtered: 'flat-filtered-marker',
+      gc_deleted: 'flat-gc-key-marker',
     })
     expect(lab.debug.resources).toMatchObject({
       drawableCount: 9,

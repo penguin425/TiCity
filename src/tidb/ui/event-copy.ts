@@ -135,6 +135,22 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
     'TiKVがモデル化されたスナップショットをPoint Getで読み取ります。',
     'TiKV reads the modeled snapshot with a Point Get.',
   ),
+  follower_read_index: event(
+    'followerがReadIndexを取得',
+    'Follower obtained ReadIndex',
+    '生存voterのquorumでLeaderを確認し、follower読み取りに使うcommit indexを取得します。TiFlash learnerは投票しません。',
+    'The live voter quorum confirms the leader and supplies the committed index for the follower read. TiFlash learners do not vote.',
+    'Follower ReadIndex',
+    'Follower ReadIndex',
+  ),
+  follower_apply_wait: event(
+    'followerのlocal apply条件を確認',
+    'Follower passed its local apply gate',
+    '必要ならlogを追従・適用し、applied_indexがReadIndex以上になってからsnapshotを読み取ります。',
+    'The follower catches up and applies its log when needed, then reads the snapshot only after applied_index reaches ReadIndex.',
+    'Follower apply待ち',
+    'Follower apply wait',
+  ),
   coprocessor_scan: event(
     'TiKV Coprocessor scan',
     'TiKV Coprocessor scan',
@@ -315,13 +331,38 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
     '1PC',
     '1PC',
   ),
+  min_commit_ts: event(
+    'PDのlatest TSOからrequest floorを計算',
+    'Calculate the request floor from PD latest TSO',
+    'PDが返したlatest_tsに1を加えてrequestのmin_commit_tsを作ります。commit timestampはTiKVが返します。',
+    'The client adds one to PD latest_ts to derive the request min_commit_ts; TiKV returns the commit timestamp.',
+    'latest TSOとrequest floor',
+    'Latest TSO and request floor',
+  ),
+  commit_background: event(
+    '応答後にAsync Commit lockを解決',
+    'Resolve Async Commit locks after response',
+    'クライアントへのcommit応答後、background CommitでRegionのlockを解放しcommit recordを記録します。',
+    'After the committed client response, background Commit removes Region locks and records the commit.',
+    'Async background commit',
+    'Async background commit',
+  ),
   region_split: event(
-    'PDがRegion splitをスケジュール',
-    'PD scheduled a Region split',
-    'hotspotのキー範囲を2つの代表Regionへ分割します。',
-    'The hotspot key range is split into two representative Regions.',
+    'TiKVがhotspot Regionをsplit',
+    'TiKV split the hot Region',
+    'TiKVのサイズ検査からsplitを開始します。PDのID割り当て、Region Raftの適用、PDへのmetadata報告は簡略化しています。',
+    'TiKV size checking initiates the split. PD ID allocation, Region Raft apply, and metadata reporting to PD are collapsed in this compact model.',
     'Region split',
     'Region split',
+  ),
+
+  compact_leader_noop_apply: event(
+    '新Leaderのcurrent-term no-opをcommit・適用',
+    'Committed and applied the new leader current-term no-op',
+    '生存voterの追従とempty entryの永続化・quorum commitを簡略表示し、新Leaderが適用してからReadIndexやlocal readを進めます。followerのapplyは独立して待機します。user-data mutationではありません。',
+    'This compact step summarizes live-voter catch-up, empty-entry persistence, quorum commit, and leader apply before ReadIndex or local reads. Follower apply remains independent. It is not a user-data mutation.',
+    'Leader no-op確認',
+    'Leader no-op confirmation',
   ),
 
   /* Model-4 Region Raft failure slice. */
@@ -674,18 +715,18 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
     'Protocol start_ts',
   ),
   protocol_eligibility_check: event(
-    'TryOnePc適格性を確認',
-    'Choose the TryOnePc candidate',
-    'feature flagとRegion batchingをモデルのfixture条件として判定します。',
-    'Feature flags and Region batching are evaluated as declared fixture conditions.',
+    '最適化の初期候補を確認',
+    'Check initial optimization candidates',
+    'feature flagとclient制限を確認します。Region batchingによる1PC判定はlatest TSOの準備後です。',
+    'Feature flags and client limits are checked; the Region-batching 1PC decision follows latest TSO preparation.',
     'protocol適格性確認',
     'Protocol eligibility check',
   ),
   protocol_latest_ts_floor: event(
-    'latest TSOと1PCのfloorを計算',
-    'Get latest TSO and calculate the 1PC floor',
-    'latest_tsと代表的な安全範囲からrequestのfloorを計算します。',
-    'The request floor is calculated from latest_ts and a representative safe window.',
+    '最適化候補のlatest TSOとfloorを準備',
+    'Prepare latest TSO and floor for optimization candidates',
+    'latest_ts + 1のrequest floorと代表的な安全上限を準備します。後のbatchingで2PCになっても、この準備は行われます。',
+    'The request floor is latest_ts + 1 with a representative safe bound; this preparation also precedes a later batching decision to use 2PC.',
     'latest TSO floor',
     'Latest TSO floor',
   ),
@@ -990,8 +1031,8 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
   gc_store_safe_point_detected: event(
     'TiKV Storeが新しいsafe pointを検知',
     'TiKV store detected the greater safe point',
-    'TiKV GC managerがPDのsafe pointを観測し、Compaction Filterを起動します。',
-    'The TiKV GC manager observes PD’s safe point and starts the Compaction Filter path.',
+    'TiKV GC managerがPDのsafe pointを観測してローカル値を更新します。Compaction Filterは後続のRocksDB compactionで開かれます。',
+    'The TiKV GC manager observes PD and updates its local safe point. Subsequent RocksDB compactions open Compaction Filters.',
     'Store safe point検知',
     'Store safe-point detection',
   ),
@@ -1018,6 +1059,22 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
     'The physical storage step, including filtered SST output, completes.',
     'Compaction Filter完了',
     'Compaction Filter complete',
+  ),
+  gc_delete_marker_cleanup_scheduled: event(
+    '後続compactionがDelete markerのGC-key taskを登録',
+    'A later compaction scheduled a Delete-marker GC-key task',
+    '古いversionとの重なりがないDeleteを、filterのDrop時に別GcTask::GcKeysへ登録します。この時点ではcompaction結果をまだinstallしていません。',
+    'At filter Drop, a Delete without older overlapping versions is enqueued as a separate GcTask::GcKeys before the compaction result is installed.',
+    'Delete marker GC-key task登録',
+    'Schedule Delete-marker GC-key task',
+  ),
+  gc_delete_marker_cleanup_complete: event(
+    '別GC-key taskがDelete markerを削除',
+    'A separate GC-key task removed the Delete marker',
+    'この教材fixtureは登録済みGC-key taskをcompaction完了後に実行してDelete markerを削除します。実環境の実行時刻の保証ではなく、filterによる除去とは別に集計します。',
+    'This teaching fixture executes the queued GC-key task after compaction completion and counts marker removal separately from filtering. Its task timing is not a production guarantee.',
+    'Delete marker GC-key cleanup完了',
+    'Delete-marker GC-key cleanup complete',
   ),
   gc_round_complete: event(
     'GC roundを完了',
@@ -1149,13 +1206,13 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
     'MPP task構築',
     'MPP task build',
   ),
-  tiflash_mpp_tunnels_registered: event(
-    '一時MPP tunnelを登録',
-    'Ephemeral MPP tunnels were registered',
-    'HashPartitionとPassThroughのquery block用streamを登録し、Raft replicationとは分離します。',
-    'HashPartition and PassThrough query-block streams are registered separately from Raft replication.',
-    'MPP tunnel登録',
-    'MPP tunnel registration',
+  tiflash_mpp_tunnels_planned: event(
+    'TiDBが一時MPP tunnelを計画',
+    'TiDB planned ephemeral MPP tunnels',
+    'TiDBがHashPartitionとPassThroughの接続先を計画します。TiFlash serverのtunnel登録はtask dispatch後のprepareで行います。',
+    'TiDB plans HashPartition and PassThrough task links. TiFlash registers server tunnels during preparation after task dispatch.',
+    'MPP tunnel計画',
+    'MPP tunnel planning',
   ),
   tiflash_mpp_dispatch_batch: event(
     'TiDBがMPP taskを同時dispatch',
@@ -1168,10 +1225,26 @@ const EVENT_CATALOG: Readonly<Record<string, EventTemplate>> = {
   tiflash_mpp_tasks_prepared: event(
     'TiFlashが全MPP taskをprepare',
     'TiFlash prepared and registered all tasks',
-    '各taskがDAG requestとtunnelを登録し、fragment処理の準備を完了します。',
-    'Each task registers its DAG request and tunnels and becomes ready for fragment work.',
+    'dispatchを受信したTiFlashがDAG requestを読み、taskとserver tunnelを登録してfragment処理の準備を完了します。',
+    'After receiving dispatch, TiFlash decodes the DAG request, registers each task and its server tunnels, and becomes ready for fragment work.',
     'MPP task prepare',
     'MPP task prepare',
+  ),
+  mpp_dispatch: event(
+    'TiDBがMPP taskをTiFlashへdispatch',
+    'TiDB dispatched MPP tasks to TiFlash',
+    'TiDBがMPP taskを送ります。受信したTiFlashのscan taskは、storage read前にRegionごとのsnapshot gateを確認します。',
+    'TiDB sends the modeled MPP tasks. Each receiving TiFlash scan task checks its Region snapshot gates before reading storage.',
+    'MPP task dispatch',
+    'MPP task dispatch',
+  ),
+  learner_snapshot_gate: event(
+    'TiFlashがRegion別snapshot gateを確認',
+    'TiFlash checked per-Region snapshot gates',
+    'task dispatch後に、Region別self safe-tsまたはReadIndexとapplied indexでread readinessを確認します。簡略正常系であり、node-global resolved-tsをquery TSOへ進めません。',
+    'After task dispatch, TiFlash checks each Region self safe-ts or ReadIndex plus applied-index readiness. This compact successful fixture does not advance a node-global resolved-ts to the query TSO.',
+    'TiFlash snapshot gate',
+    'TiFlash snapshot gate',
   ),
   tiflash_snapshot_gating_started: event(
     'Regionごとのsnapshot gatingを開始',
@@ -1587,6 +1660,11 @@ function dynamicCopy(
         ? 'クライアント側でregular 2PCを選択します。最適化のruntime fallbackではありません。'
         : 'The client selects regular 2PC; this is not runtime fallback from an attempted optimization.'
     }
+    if (metadataValue(source, 'onePcDecisionPoint') === 'region_batching') {
+      detail = locale === 'ja'
+        ? `latest TSOの準備後、Region batchingで1PC候補を外し${text}を選択します。TryOnePcは送信されません。`
+        : `After latest TSO preparation, Region batching disables the 1PC candidate and selects ${text}; TryOnePc is not sent.`
+    }
   }
   if (kind === 'protocol_client_request') {
     const lane = laneText(source, locale)
@@ -1982,8 +2060,8 @@ const DOMAIN_LABELS: Readonly<Record<Locale, Readonly<Record<TraceDomain, string
   ja: {
     client: 'クライアント',
     sql: 'SQL',
-    tso: 'TSO / PD',
-    txn2pc: 'トランザクション 2PC',
+    tso: 'TSO / PDメタデータ制御',
+    txn2pc: 'トランザクション commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
     tiflash: 'TiFlash / MPP',
@@ -1992,8 +2070,8 @@ const DOMAIN_LABELS: Readonly<Record<Locale, Readonly<Record<TraceDomain, string
   en: {
     client: 'CLIENT',
     sql: 'SQL',
-    tso: 'TSO / PD',
-    txn2pc: 'Transaction 2PC',
+    tso: 'TSO / PD metadata control',
+    txn2pc: 'Transaction commit',
     raft: 'Region Raft',
     kv: 'TiKV / MVCC',
     tiflash: 'TiFlash / MPP',

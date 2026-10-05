@@ -75,11 +75,11 @@ describe('Diagnose event cursor', () => {
     expect(cursor.snapshot?.tsoLastAllocated).toBe(102)
   })
 
-  it('resolves every GC deep link to its own immutable 43-event snapshot', () => {
+  it('resolves every GC deep link to its own immutable 45-event snapshot', () => {
     const gcEvents = createTiDBSimulation({ seed: 425 })
       .runScenario('gc-safe-point')
       .events
-    expect(gcEvents).toHaveLength(43)
+    expect(gcEvents).toHaveLength(45)
     for (const [index, gcEvent] of gcEvents.entries()) {
       const cursor = resolveDiagnoseCursor(gcEvents, gcEvent.id)
       expect(cursor).toMatchObject({
@@ -89,6 +89,8 @@ describe('Diagnose event cursor', () => {
       })
       expect(cursor.event?.id).toBe(gcEvents[index].id)
       expect(cursor.snapshot?.gcLab).toBe(gcEvent.snapshot?.gcLab)
+      expect(Object.isFrozen(cursor.snapshot?.gcLab)).toBe(true)
+      expect(Object.isFrozen(cursor.snapshot?.gcLab?.gcKeyCleanup)).toBe(true)
     }
   })
 })

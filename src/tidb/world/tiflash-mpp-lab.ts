@@ -2,7 +2,7 @@
  * Copyright 2026 TiCity contributors.
  * Licensed under the Apache License, Version 2.0.
  *
- * Renderer-only, fixed-capacity view of the model-7 TiFlash replication and
+ * Renderer-only, fixed-capacity view of the model-8 TiFlash replication and
  * MPP Lab. Immutable event snapshots own all transitions. This module paints
  * stable slots into geometry and materials allocated once at construction.
  */
@@ -44,6 +44,7 @@ export type TiFlashMppLabTunnelLocality =
   | 'tidb_root'
 export type TiFlashMppLabTunnelState =
   | 'idle'
+  | 'planned'
   | 'registered'
   | 'connected'
   | 'streaming'
@@ -445,6 +446,8 @@ function tunnelBrightness(state: TiFlashMppLabTunnelState): number {
       return 0.82
     case 'registered':
       return 0.54
+    case 'planned':
+      return 0.36
     case 'idle':
       return 0.28
   }

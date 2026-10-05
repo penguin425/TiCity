@@ -132,6 +132,7 @@ function flowStep(phase: TraceGcLabPhase): GcStorageLabFlowStep {
     case 'tikv_observing':
       return 'observe'
     case 'compacting':
+    case 'cleaning_delete_markers':
       return 'compact'
     case 'between_rounds':
     case 'complete':

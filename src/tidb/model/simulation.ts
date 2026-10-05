@@ -202,6 +202,12 @@ function freezeTraceDelta(delta: TraceStateDelta): TraceStateDelta {
       retainedAnchorIds: Object.freeze([...delta.retainedAnchorIds]),
     })
   }
+  if (delta.kind === 'gc_key_cleanup') {
+    return Object.freeze({
+      ...delta,
+      versionIds: Object.freeze([...delta.versionIds]),
+    })
+  }
   return Object.freeze({ ...delta })
 }
 
@@ -647,16 +653,21 @@ export function createTiDBSimulation(
     builder?: TraceBuilder,
     path: TracePath = 'critical',
   ): boolean {
-    const eligibleVoters = region.peers.filter((peer) =>
-      peer.healthy && peer.matchIndex >= region.commitIndex,
-    )
-    if (eligibleVoters.length < 2) {
+    const liveVoters = region.peers.filter((peer) => peer.healthy)
+    if (liveVoters.length < 2) {
       updateRegionHealth(region)
       return false
     }
     const current = region.peers.find((peer) => peer.storeId === region.leaderStoreId)
     if (current?.healthy && current.matchIndex >= region.commitIndex) return true
-    const replacement = eligibleVoters[0]
+    /* A behind voter can vote for an up-to-date candidate and catch up after
+       election. Election quorum counts live votes, not equally recent logs. */
+    const replacement = liveVoters
+      .filter((peer) => peer.matchIndex >= region.commitIndex)
+      .sort((left, right) =>
+        right.matchIndex - left.matchIndex ||
+        left.storeId.localeCompare(right.storeId),
+      )[0]
     if (!replacement) {
       updateRegionHealth(region)
       return false
@@ -679,6 +690,39 @@ export function createTiDBSimulation(
         regionId: region.id,
         path,
         metadata: { term: region.term, quorum: 2 },
+      },
+    )
+    /* Raft ReadIndex cannot succeed until the leader commits an entry in its
+       current term; local leader reads also wait for that term's apply. The
+       compact route collapses catch-up and no-op persistence/commit here,
+       while follower apply remains independent and can lag this index. */
+    const noOpIndex = replacement.matchIndex + 1
+    for (const peer of liveVoters) peer.matchIndex = noOpIndex
+    replacement.appliedIndex = noOpIndex
+    region.commitIndex = noOpIndex
+    region.appliedIndex = noOpIndex
+    state.metrics.raftEntries++
+    builder?.add(
+      'raft',
+      'compact_leader_noop_apply',
+      'Confirm the compact leader with a current-term no-op',
+      `Live voters catch up and persist the empty term ${region.term} entry at index ${noOpIndex}; quorum commits it and ${replacement.storeId} applies it before reading. Follower apply remains independent.`,
+      {
+        source: replacement.storeId,
+        target: replacement.storeId,
+        regionId: region.id,
+        path,
+        metadata: {
+          term: region.term,
+          index: noOpIndex,
+          operation: 'leader_noop',
+          persistedVoters: liveVoters.length,
+          quorum: 2,
+          currentTermConfirmed: true,
+          userDataMutation: false,
+          catchUpCollapsed: true,
+          followerApplyDeferred: true,
+        },
       },
     )
     return true
@@ -714,6 +758,9 @@ export function createTiDBSimulation(
     const liveFollower = region.peers.find((peer) =>
       peer.healthy && peer.storeId !== region.leaderStoreId,
     )
+    const catchUpVoters = region.peers.filter((peer) =>
+      peer.healthy && peer.matchIndex < region.commitIndex,
+    ).length
     leader.matchIndex = nextIndex
     builder.add(
       'raft',
@@ -726,13 +773,22 @@ export function createTiDBSimulation(
         regionId: region.id,
         transactionId,
         path,
-        metadata: { term: region.term, index: nextIndex, operation },
+        metadata: {
+          term: region.term,
+          index: nextIndex,
+          operation,
+          catchUpVoters,
+          catchUpThroughIndex: region.commitIndex,
+          catchUpCollapsed: true,
+        },
       },
     )
 
     let acknowledgements = 0
     for (const peer of region.peers) {
       if (!peer.healthy) continue
+      /* The compact replication step includes any missing committed entries
+         before this voter can acknowledge the new entry. */
       peer.matchIndex = nextIndex
       acknowledgements++
     }
@@ -806,13 +862,20 @@ export function createTiDBSimulation(
     builder.add(
       'kv',
       'region_split',
-      'PD scheduled a Region split',
+      'TiKV split the hot Region',
       `Region ${regionId} split at key ${midpoint}; Region ${nextId} owns the lower range and Region ${regionId} retains the sequential upper range.`,
       {
-        source: 'pd-1',
+        source: region.leaderStoreId,
         target: region.leaderStoreId,
         regionId,
-        metadata: { splitKey: midpoint, newRegionId: nextId, epoch: region.epoch },
+        metadata: {
+          splitKey: midpoint,
+          newRegionId: nextId,
+          epoch: region.epoch,
+          initiator: 'tikv_size_split_checker',
+          pdRole: 'allocate_ids_and_observe_metadata',
+          raftApplyCollapsed: true,
+        },
       },
     )
   }
@@ -902,6 +965,7 @@ export function createTiDBSimulation(
         statementKind: analysisSnapshot.statementKind,
         table: analysisSnapshot.table,
         accessPath: analysisSnapshot.accessPath,
+        aggregateShape: analysisSnapshot.aggregateShape,
       }),
       transactionMode: state.controls.transactionMode,
       commitProtocol: protocol,
@@ -949,7 +1013,7 @@ export function createTiDBSimulation(
       },
     )
     builder.add(
-      'sql',
+      'tso',
       'locate_regions',
       'Locate Regions',
       `The table key range maps to ${regions.length} representative Region(s).`,
@@ -985,37 +1049,36 @@ export function createTiDBSimulation(
           warnings,
         )
       }
-      if (state.tiflash.resolvedTs < startTs) {
-        builder.add(
-          'tiflash',
-          'learner_snapshot_gate',
-          'Gate the TiFlash snapshot per Region',
-          'A production TiFlash read uses each Region self safe-ts or ReadIndex plus local applied-index waiting; this aggregate route does not advance a node-global resolved-ts to start_ts.',
-          {
-            source: regions[0]?.leaderStoreId ?? 'tikv-1',
-            target: 'tiflash-1',
-            regionId: regions[0]?.id,
-            durationMs: Math.max(
-              state.controls.networkLatencyMs,
-              state.controls.tiflashLagSeconds * 1_000,
-            ),
-            metadata: {
-              snapshotTs: startTs,
-              nodeGlobalResolvedTsAdvanced: false,
-              staleRead: false,
-            },
-          },
-        )
-      }
       builder.add(
         'tiflash',
         'mpp_dispatch',
-        'Dispatch MPP fragments',
-        `${regions.length} representative partitions scan after their TiFlash snapshot gates pass.`,
+        'Dispatch MPP tasks',
+        'TiDB sent the modeled MPP tasks to TiFlash; each scan task checks its Region snapshot gates before reading storage.',
         {
           source: tidbId,
           target: 'tiflash-1',
           metadata: { regionCount: regions.length, snapshotTs: startTs },
+        },
+      )
+      builder.add(
+        'tiflash',
+        'learner_snapshot_gate',
+        'Gate the TiFlash snapshot per Region',
+        'After task dispatch, TiFlash checks each Region self safe-ts or ReadIndex plus local applied-index readiness. This compact successful fixture summarizes those gates without advancing a node-global resolved-ts to start_ts.',
+        {
+          source: 'tiflash-1',
+          target: 'tiflash-1',
+          durationMs: Math.max(
+            state.controls.networkLatencyMs,
+            state.controls.tiflashLagSeconds * 1_000,
+          ),
+          metadata: {
+            regionCount: regions.length,
+            snapshotTs: startTs,
+            correctnessScope: 'per_region',
+            nodeGlobalResolvedTsAdvanced: false,
+            staleRead: false,
+          },
         },
       )
       state.tiflash.mppQueries++
@@ -1027,9 +1090,40 @@ export function createTiDBSimulation(
         }
         let target = region.leaderStoreId
         if (state.controls.readPolicy === 'follower') {
-          target = region.peers.find((peer) =>
+          const follower = region.peers.find((peer) =>
             peer.healthy && peer.storeId !== region.leaderStoreId,
-          )?.storeId ?? target
+          )
+          if (follower) {
+            target = follower.storeId
+            const readIndex = region.commitIndex
+            builder.add(
+              'raft',
+              'follower_read_index',
+              'Follower obtained a quorum-confirmed ReadIndex',
+              'This compact successful fixture confirms the leader with the live voter quorum before using its committed index; TiFlash learners do not vote.',
+              {
+                source: target,
+                target: region.leaderStoreId,
+                regionId: region.id,
+                metadata: { readIndex, snapshotTs: startTs, liveVoterQuorum: 2 },
+              },
+            )
+            const appliedBefore = follower.appliedIndex
+            follower.matchIndex = Math.max(follower.matchIndex, readIndex)
+            follower.appliedIndex = Math.max(follower.appliedIndex, readIndex)
+            builder.add(
+              'raft',
+              'follower_apply_wait',
+              'Follower passed the local apply gate',
+              'The modeled follower catches up and waits for applied_index >= ReadIndex before serving the snapshot. Equal indexes take the ready fast path.',
+              {
+                source: target,
+                target,
+                regionId: region.id,
+                metadata: { readIndex, appliedBefore, appliedIndex: follower.appliedIndex, waited: appliedBefore < readIndex },
+              },
+            )
+          }
         }
         builder.add(
           'kv',
@@ -1067,7 +1161,7 @@ export function createTiDBSimulation(
   }
 
   /**
-   * Model-7 fixed TiFlash/MPP vertical slice. Region Raft learner replication
+   * Model-8 fixed TiFlash/MPP vertical slice. Region Raft learner replication
    * is persistent storage state; MPP tunnels carry ephemeral aggregate blocks.
    */
   function traceDetailedTiFlashMpp(
@@ -1433,9 +1527,9 @@ export function createTiDBSimulation(
     )
     const tunnelsBuilt = addTiFlashMppEvent(
       'tiflash',
-      'tiflash_mpp_tunnels_registered',
-      'Six ephemeral MPP tunnels were registered',
-      'Four HashPartition task tunnels and two PassThrough root streams carry query blocks; none are Raft replication.',
+      'tiflash_mpp_tunnels_planned',
+      'TiDB planned six ephemeral MPP tunnels',
+      'Four HashPartition task links and two PassThrough root links are planned in TiDB; TiFlash server tunnels are registered only after task dispatch.',
       {
         source: 'tidb-1',
         target: 'tiflash-1',
@@ -1489,7 +1583,13 @@ export function createTiDBSimulation(
         source: 'tiflash-mpp',
         target: 'tiflash-mpp',
         dependsOn: [dispatched.id],
-        deltas: preparedDeltas,
+        deltas: [
+          {
+            kind: 'tiflash_mpp_tunnels_register',
+            tunnelCount: 6,
+          },
+          ...preparedDeltas,
+        ],
         metadata: {
           preparedTaskCount: 4,
         },
@@ -2949,7 +3049,7 @@ export function createTiDBSimulation(
       },
     )
     const observed = addRaftEvent(
-      'raft',
+      'tso',
       'pd_observes_region_leader',
       'PD observes the new leader heartbeat',
       `${candidateStoreId} reports Region ${region.id}'s new leader metadata to PD after the Raft peers completed the election.`,
@@ -2957,7 +3057,8 @@ export function createTiDBSimulation(
         source: candidateStoreId,
         target: pdId,
         regionId: region.id,
-        dependsOn: [leaderApplied.id],
+        dependsOn: [elected.id],
+        presentationAfter: leaderApplied.id,
         branchId: 'routing-recovery',
         deltas: [{
           kind: 'raft_pd_state',
@@ -2970,6 +3071,7 @@ export function createTiDBSimulation(
           pdRole: 'observer_only',
           pdVoted: false,
           leaderStoreId: candidateStoreId,
+          leaderApplyRequired: false,
         },
       },
     )
@@ -3050,7 +3152,7 @@ export function createTiDBSimulation(
         source: candidateStoreId,
         target: tidbId,
         regionId: region.id,
-        dependsOn: [attemptTwo.id],
+        dependsOn: [attemptTwo.id, leaderApplied.id],
         branchId: 'region-request',
         deltas: [{
           kind: 'raft_region_request',
@@ -5605,9 +5707,9 @@ export function createTiDBSimulation(
         branchId: 'one_pc',
         deltas: [{
           kind: 'protocol_lane_stage',
-          laneId: 'one_pc',
-          from: 'started',
-          to: 'selected',
+            laneId: 'one_pc',
+            from: 'started',
+            to: 'candidates_checked',
         }],
         metadata: {
           candidate: '1pc',
@@ -5656,7 +5758,7 @@ export function createTiDBSimulation(
           {
             kind: 'protocol_lane_stage',
             laneId: 'one_pc',
-            from: 'selected',
+            from: 'candidates_checked',
             to: 'latest_ts',
           },
         ],
@@ -5863,43 +5965,25 @@ export function createTiDBSimulation(
       'txn2pc',
       'protocol_eligibility_check',
       'Check 1PC and Async Commit candidates',
-      'Two Region batches reject 1PC before any TryOnePc RPC. The two-mutation profile remains within the pinned Async Commit client limits.',
+      'Both optimization candidates pass the initial client checks; Region batching is checked only after latest TSO preparation.',
       {
         source: tidbId,
         target: tidbId,
         dependsOn: [asyncStart.id],
         branchId: 'async_commit',
-        metadata: {
-          onePcOutcome: 'rejected_before_rpc',
-          onePcDecisionPoint: 'region_batching',
-          asyncMutationLimit: 256,
-          asyncTotalKeyBytesLimit: 4096,
-          mutationCount: 2,
-          totalKeyBytes: 16,
-        },
-      },
-    )
-    const asyncSelected = addProtocolEvent(
-      'txn2pc',
-      'protocol_selection',
-      'Select Async Commit',
-      'The client selects Async Commit before prewrite; no TiKV runtime fallback occurs in this fixture.',
-      {
-        source: tidbId,
-        target: tidbId,
-        dependsOn: [asyncEligibility.id],
-        branchId: 'async_commit',
         deltas: [{
           kind: 'protocol_lane_stage',
           laneId: 'async_commit',
           from: 'started',
-          to: 'selected',
+          to: 'candidates_checked',
         }],
         metadata: {
-          selected: 'async_commit',
-          useAsyncCommit: true,
-          tryOnePc: false,
-          runtimeFallback: false,
+          onePcOutcome: 'candidate',
+          asyncOutcome: 'candidate',
+          asyncMutationLimit: 256,
+          asyncTotalKeyBytesLimit: 4096,
+          mutationCount: 2,
+          totalKeyBytes: 16,
         },
       },
     )
@@ -5914,7 +5998,7 @@ export function createTiDBSimulation(
       {
         source: tidbId,
         target: 'pd-1',
-        dependsOn: [asyncSelected.id],
+        dependsOn: [asyncEligibility.id],
         branchId: 'async_commit',
         deltas: [
           {
@@ -5941,7 +6025,7 @@ export function createTiDBSimulation(
           {
             kind: 'protocol_lane_stage',
             laneId: 'async_commit',
-            from: 'selected',
+            from: 'candidates_checked',
             to: 'latest_ts',
           },
         ],
@@ -5949,6 +6033,32 @@ export function createTiDBSimulation(
           latestTs: asyncLatestTs,
           minCommitTsFloor: asyncMinFloor,
           maxCommitTs: asyncMaxTs,
+        },
+      },
+    )
+    const asyncSelected = addProtocolEvent(
+      'txn2pc',
+      'protocol_selection',
+      'Select Async Commit after Region batching',
+      'After latest TSO preparation, two Region batches disable TryOnePc before wire dispatch. Async Commit remains eligible; no TiKV runtime fallback occurs.',
+      {
+        source: tidbId,
+        target: tidbId,
+        dependsOn: [asyncLatest.id],
+        branchId: 'async_commit',
+        deltas: [{
+          kind: 'protocol_lane_stage',
+          laneId: 'async_commit',
+          from: 'latest_ts',
+          to: 'selected',
+        }],
+        metadata: {
+          selected: 'async_commit',
+          onePcOutcome: 'rejected_before_rpc',
+          onePcDecisionPoint: 'region_batching',
+          useAsyncCommit: true,
+          tryOnePc: false,
+          runtimeFallback: false,
         },
       },
     )
@@ -5966,7 +6076,7 @@ export function createTiDBSimulation(
           source: tidbId,
           target: byRegionId.get(regionId)?.leaderStoreId,
           regionId,
-          dependsOn: [asyncLatest.id],
+          dependsOn: [asyncSelected.id],
           ...(previousAsyncPrewriteResult
             ? { presentationAfter: previousAsyncPrewriteResult.id }
             : {}),
@@ -5975,7 +6085,7 @@ export function createTiDBSimulation(
             ? [{
               kind: 'protocol_lane_stage',
               laneId: 'async_commit',
-              from: 'latest_ts',
+              from: 'selected',
               to: 'prewriting',
             }]
             : [],
@@ -6246,15 +6356,21 @@ export function createTiDBSimulation(
     const twoEligibility = addProtocolEvent(
       'txn2pc',
       'protocol_eligibility_check',
-      'Reject optimization candidates before RPC',
-      '257 mutations exceed the pinned Async Commit client default of 256; two Region batches also reject 1PC before TryOnePc.',
+      'Check optimization candidates before timestamp preparation',
+      '257 mutations exceed the pinned Async Commit client default of 256. The enabled 1PC candidate still requires latest TSO preparation before Region batching.',
       {
         source: tidbId,
         target: tidbId,
         dependsOn: [twoStart.id],
         branchId: 'two_pc',
+        deltas: [{
+          kind: 'protocol_lane_stage',
+          laneId: 'two_pc',
+          from: 'started',
+          to: 'candidates_checked',
+        }],
         metadata: {
-          onePcDecisionPoint: 'region_batching',
+          onePcOutcome: 'candidate',
           asyncDecisionPoint: 'client_precheck',
           mutationCount: 257,
           mutationLimit: 256,
@@ -6264,24 +6380,53 @@ export function createTiDBSimulation(
         },
       },
     )
+    const twoLatestTs = allocateProtocolTs()
+    const twoMinFloor = twoLatestTs + 1
+    const twoMaxTs = twoLatestTs + 80
+    const twoLatest = addProtocolEvent(
+      'tso',
+      'protocol_latest_ts_floor',
+      'Prepare the 1PC candidate latest TSO before batching',
+      `The enabled 1PC candidate obtains latest_ts ${twoLatestTs} and its request floor before Region batching selects regular 2PC.`,
+      {
+        source: tidbId,
+        target: 'pd-1',
+        dependsOn: [twoEligibility.id],
+        branchId: 'two_pc',
+        deltas: [
+          { kind: 'protocol_timestamp', laneId: 'two_pc', purpose: 'latest_ts', source: 'pd', timestamp: twoLatestTs },
+          { kind: 'protocol_timestamp', laneId: 'two_pc', purpose: 'request_min_commit_ts', source: 'tidb_model_bound', timestamp: twoMinFloor },
+          { kind: 'protocol_timestamp', laneId: 'two_pc', purpose: 'max_commit_ts', source: 'tidb_model_bound', timestamp: twoMaxTs },
+          { kind: 'protocol_lane_stage', laneId: 'two_pc', from: 'candidates_checked', to: 'latest_ts' },
+        ],
+        metadata: {
+          latestTs: twoLatestTs,
+          minCommitTsFloor: twoMinFloor,
+          maxCommitTs: twoMaxTs,
+          onePcCandidate: true,
+        },
+      },
+    )
     const twoSelected = addProtocolEvent(
       'txn2pc',
       'protocol_selection',
       'Select regular 2PC',
-      'This is client-side selection, not a TiKV runtime fallback from an attempted optimization.',
+      'Region batching disables the 1PC candidate after timestamp preparation, before wire dispatch. This is not a TiKV runtime fallback.',
       {
         source: tidbId,
         target: tidbId,
-        dependsOn: [twoEligibility.id],
+        dependsOn: [twoLatest.id],
         branchId: 'two_pc',
         deltas: [{
           kind: 'protocol_lane_stage',
           laneId: 'two_pc',
-          from: 'started',
+          from: 'latest_ts',
           to: 'selected',
         }],
         metadata: {
           selected: '2pc',
+          onePcOutcome: 'rejected_before_rpc',
+          onePcDecisionPoint: 'region_batching',
           tryOnePc: false,
           useAsyncCommit: false,
           runtimeFallback: false,
@@ -7179,7 +7324,7 @@ export function createTiDBSimulation(
       const filtered = addGcEvent(
         'gc_compaction_filter_apply',
         'Compaction Filter removed obsolete MVCC records',
-        'Rollback/Lock records are discarded, a last Put at or below the safe point is retained as the snapshot anchor, and a last Delete can remove the whole old chain.',
+        'Rollback/Lock records and older versions are discarded. The last eligible Put or Delete is kept; a Delete marker is cleaned later through a separate GC-key task.',
         {
           source: storeIds[0],
           target: 'gc-worker',
@@ -7199,6 +7344,27 @@ export function createTiDBSimulation(
           },
         },
       )
+      let filterDropParent = filtered
+      if (round === 2) {
+        filterDropParent = addGcEvent(
+          'gc_delete_marker_cleanup_scheduled',
+          'The second compaction scheduled a Delete-marker GC-key task',
+          'At filter Drop, before the compaction result is installed, the retained Delete has no older overlapping versions. A separate GcTask::GcKeys is enqueued; the filter itself kept the marker.',
+          {
+            source: storeIds[0],
+            target: storeIds[0],
+            dependsOn: [filtered.id],
+            path: 'background',
+            deltas: [{ kind: 'gc_key_cleanup', safePoint, action: 'schedule', versionIds: ['b-v2'] }],
+            metadata: {
+              task: 'GcTask::GcKeys',
+              scheduledBy: 'compaction_filter_drop',
+              compactionResultInstalled: false,
+              deleteMarkerFilteredInline: false,
+            },
+          },
+        )
+      }
       const storageComplete = addGcEvent(
         'gc_compaction_filter_complete',
         'All representative store filters completed',
@@ -7206,7 +7372,7 @@ export function createTiDBSimulation(
         {
           source: storeIds[0],
           target: 'gc-worker',
-          dependsOn: [filtered.id],
+          dependsOn: [filterDropParent.id],
           path: 'background',
           deltas: storeIds.map((storeId) => ({
             kind: 'gc_compaction_state' as const,
@@ -7221,6 +7387,30 @@ export function createTiDBSimulation(
           },
         },
       )
+      let completionParent = storageComplete
+      if (round === 2) {
+        completionParent = addGcEvent(
+          'gc_delete_marker_cleanup_complete',
+          'The GC-key task removed the retained Delete marker',
+          'The teaching fixture executes the separately queued GC-key task after compaction completion. It removes the synthetic Delete marker, counted separately from filter decisions; this task timing is not a production guarantee.',
+          {
+            source: storeIds[0],
+            target: storeIds[0],
+            dependsOn: [storageComplete.id],
+            path: 'background',
+            deltas: [
+              { kind: 'gc_phase', round, from: 'compacting', to: 'cleaning_delete_markers' },
+              { kind: 'gc_key_cleanup', safePoint, action: 'delete', versionIds: ['b-v2'] },
+            ],
+            metadata: {
+              task: 'GcTask::GcKeys',
+              deletedMarkers: 1,
+              compactionFilterRemoval: false,
+              executionOrder: 'after_compaction_completion_model_fixture',
+            },
+          },
+        )
+      }
       return addGcEvent(
         round === 1 ? 'gc_round_complete' : 'gc_storage_lab_complete',
         round === 1
@@ -7232,18 +7422,19 @@ export function createTiDBSimulation(
         {
           source: 'gc-worker',
           target: 'tidb-1',
-          dependsOn: [storageComplete.id],
+          dependsOn: [completionParent.id],
           path: 'background',
           deltas: [{
             kind: 'gc_phase',
             round,
-            from: 'compacting',
+            from: round === 2 ? 'cleaning_delete_markers' : 'compacting',
             to: finishPhase,
           }],
           metadata: {
             round,
             safePoint,
             filteredVersions: gcLab.storage.filteredVersionCount,
+            gcKeyDeletedVersions: gcLab.storage.gcKeyDeletedVersionCount,
             retainedAnchors: gcLab.storage.retainedAnchorCount,
             compactionRaftEntriesCreated: 0,
           },
@@ -7261,7 +7452,7 @@ export function createTiDBSimulation(
       1,
       blockedSafePoint,
       roundOneDetections,
-      ['a-v1', 'b-v1', 'b-v2', 'd-v1'],
+      ['a-v1', 'b-v1', 'd-v1'],
       ['a-v2', 'd-v2'],
       'between_rounds',
     )
@@ -7538,7 +7729,8 @@ export function createTiDBSimulation(
     state.gc.safePoint = gcLab.safePoint.published
     state.gc.blockedByStartTs = null
     state.gc.obsoleteVersions = 0
-    state.gc.collectedVersions = gcLab.storage.filteredVersionCount
+    state.gc.collectedVersions = gcLab.storage.filteredVersionCount +
+      gcLab.storage.gcKeyDeletedVersionCount
     state.gc.backlog = 0
     state.metrics.gcRuns += 2
     warnings.push(
@@ -7740,9 +7932,32 @@ export function createTiDBSimulation(
 
     let commitTs: number | null = null
     let returnedToClient = false
+    const latestTs = protocol === '2pc' ? null : allocateTs()
+    const requestMinCommitTs = latestTs === null ? null : latestTs + 1
+    if (latestTs !== null) {
+      builder.add(
+        'tso',
+        'min_commit_ts',
+        'Get latest TSO and calculate the request floor',
+        `PD returns latest_ts ${latestTs}; the client derives min_commit_ts ${requestMinCommitTs} as latest_ts + 1. TiKV will return the commit timestamp.`,
+        {
+          source: tidbId,
+          target: 'pd-1',
+          transactionId: transaction.id,
+          metadata: {
+            startTs,
+            latestTs,
+            minCommitTs: requestMinCommitTs ?? latestTs + 1,
+            source: 'pd_latest_tso',
+            minCommitTsSource: 'tidb_latest_ts_plus_one',
+            protocol,
+          },
+        },
+      )
+    }
     if (protocol === '1pc') {
       transaction.phase = 'committing'
-      commitTs = allocateTs()
+      const onePcCommitTs = requestMinCommitTs!
       builder.add(
         'txn2pc',
         'one_phase_commit',
@@ -7753,7 +7968,12 @@ export function createTiDBSimulation(
           target: regions[0].leaderStoreId,
           regionId: regions[0].id,
           transactionId: transaction.id,
-          metadata: { startTs, commitTs },
+          metadata: {
+            startTs,
+            minCommitTs: requestMinCommitTs!,
+            tryOnePc: true,
+            normalCommitRpc: false,
+          },
         },
       )
       if (!raftMutation(regions[0], 'one_phase_commit', transaction, tidbId, builder)) {
@@ -7764,25 +7984,25 @@ export function createTiDBSimulation(
           warnings,
           `Region ${regions[0].id} lost quorum during one-phase commit.`,
         )
-        commitTs = null
-      }
-    } else {
-      transaction.phase = 'prewriting'
-      const minCommitTs = protocol === 'async_commit' ? allocateTs() : null
-      if (minCommitTs !== null) {
+      } else {
+        commitTs = onePcCommitTs
         builder.add(
-          'tso',
-          'min_commit_ts',
-          'Get latest timestamp for Async Commit',
-          `The modeled prewrite carries min_commit_ts ${minCommitTs}; there is no later Get_commit_ts on the client critical path.`,
+          'txn2pc',
+          'one_pc_result',
+          'TiKV returned one_pc_commit_ts',
+          `The successful Prewrite/TryOnePc response returns synthetic commit_ts ${onePcCommitTs}; PD did not allocate it.`,
           {
-            source: tidbId,
-            target: 'pd-1',
+            source: regions[0].leaderStoreId,
+            target: tidbId,
+            regionId: regions[0].id,
             transactionId: transaction.id,
-            metadata: { startTs, minCommitTs },
+            metadata: { onePcCommitTs, source: 'tikv_calculated', selected: '1pc' },
           },
         )
       }
+    } else {
+      transaction.phase = 'prewriting'
+      const returnedMinCommitTimestamps: number[] = []
       for (const region of regions) {
         builder.add(
           'txn2pc',
@@ -7797,9 +8017,9 @@ export function createTiDBSimulation(
             metadata: {
               primaryRegionId: transaction.primaryRegionId,
               startTs,
-              ...(minCommitTs === null
+              ...(requestMinCommitTs === null
                 ? {}
-                : { minCommitTs, asyncCommit: true }),
+                : { minCommitTs: requestMinCommitTs, asyncCommit: true }),
             },
           },
         )
@@ -7826,22 +8046,42 @@ export function createTiDBSimulation(
             warnings,
           )
         }
+        if (protocol === 'async_commit') {
+          // This compact fixture has no concurrent reader raising max_ts.
+          // All Regions can return the same floor; a later PD start_ts must
+          // still observe this completed write without a hidden TSO request.
+          const returnedMinCommitTs = requestMinCommitTs!
+          returnedMinCommitTimestamps.push(returnedMinCommitTs)
+          builder.add(
+            'txn2pc',
+            'async_prewrite_result',
+            `Region ${region.id} returned min_commit_ts`,
+            `The successful Prewrite response returns synthetic TiKV min_commit_ts ${returnedMinCommitTs}, at least the request floor.`,
+            {
+              source: region.leaderStoreId,
+              target: tidbId,
+              regionId: region.id,
+              transactionId: transaction.id,
+              metadata: { minCommitTs: returnedMinCommitTs, source: 'tikv_calculated' },
+            },
+          )
+        }
       }
 
       transaction.phase = 'committing'
       if (protocol === 'async_commit') {
-        commitTs = minCommitTs
+        commitTs = Math.max(...returnedMinCommitTimestamps)
         builder.add(
           'txn2pc',
           'async_commit_decision',
           'Prewrite established Async Commit',
-          `All modeled prewrites persisted the primary, secondaries, and min_commit_ts; commit_ts is ${commitTs}.`,
+          `All modeled prewrites succeeded; commit_ts ${commitTs} is the maximum min_commit_ts returned by the Regions.`,
           {
             source: regions[0].leaderStoreId,
             target: tidbId,
             regionId: regions[0].id,
             transactionId: transaction.id,
-            metadata: { commitTs: commitTs ?? startTs },
+            metadata: { commitTs, source: 'max_prewrite_min_commit_ts' },
           },
         )
         addReturn(builder, true, tidbId)
@@ -8041,6 +8281,7 @@ export function createTiDBSimulation(
       scenarioId === 'tiflash-mpp' &&
       analysis.readOnly &&
       analysis.accessPath === 'tiflash_mpp' &&
+      analysis.aggregateShape === 'grouped' &&
       regions.map((region) => region.id).join(',') === '24,25,26'
     ) {
       return traceDetailedTiFlashMpp(

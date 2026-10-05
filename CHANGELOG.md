@@ -6,6 +6,32 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-05
+
+- Correct eight source-audited flow families against the pinned TiDB v8.5.0,
+  client-go, TiKV, raft-rs, PD and TiFlash implementations; advance the
+  deterministic replay contract to `tidb-v8.5-model-8`.
+- Separate live Raft voters from current log progress, allow an up-to-date
+  candidate to receive lagging voters' votes, and gate follower reads on
+  quorum-confirmed ReadIndex and local apply readiness.
+- Reject negated key predicates, comma joins and window expressions outside
+  the conservative SQL subset. Distinguish scalar from grouped aggregation
+  in model plans, replay metadata and detailed MPP scenario selection.
+- Separate SQL data routes, PD timestamp/metadata control, transaction commit
+  and Raft replication in the bilingual workbench. Identify automatic
+  threshold splits as TiKV-initiated and separate PD observation from the
+  current-term apply gate.
+- Prepare optimization timestamp floors before Region batching, preserve
+  latestTS on an optimization-enabled fixture that ultimately uses 2PC, and
+  derive compact 1PC/Async timestamps from modeled TiKV responses rather than
+  assigning PD timestamps as their results.
+- Plan MPP tunnels before dispatch and register them during TiFlash task
+  preparation. Dispatch compact MPP tasks before their learner read gates.
+- Keep the latest eligible Delete marker during the first Compaction Filter
+  pass and show its later GC-key cleanup separately. Align coordinator,
+  visibility, compaction and cleanup explanations across all three pages.
+- Add the source audit, deterministic regression coverage and an offline
+  reproduction tool; include the audit in the downloadable release archive.
 - Rework the campus massing around three raised TiKV rack decks with open
   service floors, braced supports and visible cooling machinery; preserve
   Region selection, role markers and the deterministic educational model.

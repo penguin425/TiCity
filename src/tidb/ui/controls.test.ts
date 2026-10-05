@@ -33,6 +33,7 @@ describe('TiCity controls', () => {
           statementKind: 'unknown' as const,
           table: null,
           accessPath: 'none' as const,
+          aggregateShape: null,
           readOnly: true,
           plan: [],
           warnings: [],

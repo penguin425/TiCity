@@ -128,11 +128,13 @@ function snapshot(): TraceGcLabSnapshot {
       chain('chain-c', 20, ['filtered', 'retained_anchor', 'present']),
       chain('chain-d', 20, ['filtered', 'present']),
     ],
+    gcKeyCleanup: { eligibleVersionIds: [], scheduledVersionIds: [], deletedVersionIds: [] },
     storage: {
       representation: 'logical_chains_counted_once',
       compactionLevel: 'bottommost_model_fixture',
       initialVersionCount: 12,
       filteredVersionCount: 5,
+      gcKeyDeletedVersionCount: 0,
       retainedAnchorCount: 2,
       presentVersionCount: 7,
       deletedDefaultCfValues: 4,

@@ -537,6 +537,7 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     chainSlot: '合成chain',
     versions: 'version数',
     filtered: 'filter済み',
+    gcKeyDeleted: '別GC-key削除',
     anchors: '保持anchor',
     present: '残存',
     defaultCfDeletes: 'Default CF削除',
@@ -707,6 +708,7 @@ const COLUMN_TITLES: Record<Locale, Readonly<Record<string, string>>> = {
     chainSlot: 'synthetic chain',
     versions: 'versions',
     filtered: 'filtered',
+    gcKeyDeleted: 'separate GC-key deletions',
     anchors: 'retained anchors',
     present: 'present',
     defaultCfDeletes: 'Default CF deletes',
@@ -781,6 +783,7 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'stage:idle': '待機',
     'stage:requested': 'request受付',
     'stage:started': 'transaction開始',
+    'stage:candidates_checked': '最適化候補を確認済み',
     'stage:selected': 'protocol選択済み',
     'stage:latest_ts': 'timestamp floor計算済み',
     'stage:prewriting': 'Prewrite中',
@@ -886,8 +889,8 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
       'commit_ts <= 公開safe point',
     'anchorRule:newest_put_at_or_below_safe_point_retained':
       'safe point以下の最新Putをsnapshot anchorとして保持',
-    'deleteRule:newest_delete_can_remove_older_chain':
-      '最新Deleteならそれ以前のchain全体を削除可能',
+    'deleteRule:filter_keeps_newest_delete_separate_gc_keys_task_cleans_marker':
+      'Filterは最新Deleteを保持。後続の別GC-key taskがmarkerを削除',
     'compactionLevel:bottommost_model_fixture':
       'bottommost（MODEL fixture）',
     'representation:logical_chains_counted_once':
@@ -930,6 +933,7 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
     'stage:idle': 'idle',
     'stage:requested': 'request received',
     'stage:started': 'transaction started',
+    'stage:candidates_checked': 'optimization candidates checked',
     'stage:selected': 'protocol selected',
     'stage:latest_ts': 'timestamp floor ready',
     'stage:prewriting': 'prewriting',
@@ -1029,8 +1033,8 @@ const CELL_VALUE_COPY: Record<Locale, Readonly<Record<string, string>>> = {
       'commit_ts <= published safe point',
     'anchorRule:newest_put_at_or_below_safe_point_retained':
       'retain the newest Put at or below the safe point as snapshot anchor',
-    'deleteRule:newest_delete_can_remove_older_chain':
-      'a newest Delete can remove its entire older chain',
+    'deleteRule:filter_keeps_newest_delete_separate_gc_keys_task_cleans_marker':
+      'filter keeps the newest Delete; a later separate GC-key task cleans the marker',
     'compactionLevel:bottommost_model_fixture':
       'bottommost (MODEL fixture)',
     'representation:logical_chains_counted_once':
@@ -1300,6 +1304,7 @@ const GC_PHASE_ORDER = [
   'publishing_safe_point',
   'tikv_observing',
   'compacting',
+  'cleaning_delete_markers',
   'between_rounds',
   'complete',
 ] as const
@@ -1531,16 +1536,17 @@ function gcMvccChainRows(state: Record<string, unknown>): DiagnosticRow[] {
       region: value(chain.regionId),
       versions: value(versions.length),
       filtered: value(filtered.length),
+      gcKeyDeleted: value(versions.filter((version) => version.state === 'gc_deleted').length),
       anchors: value(versions.filter((version) =>
         version.state === 'retained_anchor').length),
       present: value(versions.filter((version) =>
-        version.state !== 'filtered').length),
+        version.state !== 'filtered' && version.state !== 'gc_deleted').length),
       defaultCfDeletes: value(filtered.filter((version) =>
         version.writeType === 'put' &&
         version.valueStorage === 'write_and_default_cf').length),
       eligibility: 'commit_ts_at_or_below_published_safe_point',
       anchorRule: 'newest_put_at_or_below_safe_point_retained',
-      deleteRule: 'newest_delete_can_remove_older_chain',
+      deleteRule: 'filter_keeps_newest_delete_separate_gc_keys_task_cleans_marker',
       compactionLevel: value(storage.compactionLevel),
       representation: value(storage.representation),
       timingBoundary:

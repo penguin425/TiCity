@@ -75,6 +75,8 @@ export interface Messages {
   analyze: string
   clear: string
   route: string
+  routePlanes: Readonly<Record<'data' | 'control' | 'transaction' | 'replication', string>>
+  routeHelp: string
   modelPlan: string
   warning: string
   supported: string
@@ -128,6 +130,13 @@ const ja: Messages = {
   analyze: '経路を解析',
   clear: 'クリア',
   route: 'モデル経路',
+  routePlanes: {
+    data: 'SQL・KV要求と応答',
+    control: 'TSO・Regionメタデータ制御',
+    transaction: 'トランザクションcommit protocol',
+    replication: 'Raft・learner複製',
+  },
+  routeHelp: '矢印は個々のイベントの送信元と送信先です。制御・commit・複製はデータ要求と別の経路で、表示順は通信の直列接続を意味しません。',
   modelPlan: 'モデル計画',
   warning: '注意',
   supported: '対応',
@@ -225,8 +234,8 @@ const ja: Messages = {
     },
     legend: {
       sql: 'SQL / データ経路',
-      tso: 'TSO / 制御',
-      txn2pc: 'トランザクション 2PC',
+      tso: 'TSO / メタデータ制御',
+      txn2pc: 'トランザクション commit',
       raft: 'Region Raft',
       kv: 'KV / MVCC',
       tiflash: 'TiFlash / MPP',
@@ -247,6 +256,13 @@ const en: Messages = {
   analyze: 'Analyze route',
   clear: 'Clear',
   route: 'Model route',
+  routePlanes: {
+    data: 'SQL and KV requests / responses',
+    control: 'TSO and Region metadata control',
+    transaction: 'Transaction commit protocols',
+    replication: 'Raft and learner replication',
+  },
+  routeHelp: 'Each arrow shows one event source and target. Control, commit, and replication use separate paths from data requests; list order does not connect these hops into one pipeline.',
   modelPlan: 'Model plan',
   warning: 'Notice',
   supported: 'Supported',
@@ -344,8 +360,8 @@ const en: Messages = {
     },
     legend: {
       sql: 'SQL / data route',
-      tso: 'TSO / control',
-      txn2pc: 'Transaction 2PC',
+      tso: 'TSO / metadata control',
+      txn2pc: 'Transaction commit',
       raft: 'Region Raft',
       kv: 'KV / MVCC',
       tiflash: 'TiFlash / MPP',
@@ -401,4 +417,51 @@ export function persistLocale(
 
 export function message<K extends keyof Messages>(locale: Locale, key: K): Messages[K] {
   return CATALOG[locale][key]
+}
+
+
+/** Classifier messages are stable, literal-free model metadata. The view
+ * translates them without modifying the receipt or retaining SQL input. */
+const SQL_EXPLANATION_COPY: Readonly<Record<string, { ja: string; en: string }>> = {
+  'Only one FROM table with an optional alias is modeled.': {
+    ja: '対応範囲は、1 つのテーブルと任意の alias です。複数テーブルの FROM は未対応です。',
+    en: 'Only one FROM table with an optional alias is modeled.',
+  },
+  'Only positive column/literal comparisons combined with AND are modeled.': {
+    ja: '対応範囲は、列とリテラルの肯定的な比較を AND で結ぶ条件です。NOT、OR、複雑な条件式は未対応です。',
+    en: 'Only positive column/literal comparisons combined with AND are modeled.',
+  },
+  'Column qualifiers must refer to the selected table or its alias.': {
+    ja: '列の修飾名は、選択したテーブルまたはその alias に一致する必要があります。',
+    en: 'Column qualifiers must refer to the selected table or its alias.',
+  },
+  'DISTINCT, HAVING, and unsupported aggregate expressions are outside the current route model.': {
+    ja: 'DISTINCT、HAVING、複雑な集約式は、この経路モデルの対応範囲外です。',
+    en: 'DISTINCT, HAVING, and unsupported aggregate expressions are outside the current route model.',
+  },
+  'Modeled as a scalar aggregate with TiFlash partial aggregation and final aggregation in the TiDB root task.': {
+    ja: 'scalar 集約のモデルです。TiFlash で部分集約し、TiDB の root task で最終集約します。',
+    en: 'Modeled as a scalar aggregate with TiFlash partial aggregation and final aggregation in the TiDB root task.',
+  },
+  'Modeled as a grouped aggregate with TiFlash partial aggregation, HashPartition exchange, and TiFlash final aggregation.': {
+    ja: 'GROUP BY 集約のモデルです。TiFlash の部分集約、HashPartition exchange、TiFlash の最終集約を示します。',
+    en: 'Modeled as a grouped aggregate with TiFlash partial aggregation, HashPartition exchange, and TiFlash final aggregation.',
+  },
+  'Locking reads are outside the current route model.': {
+    ja: 'ロック付き読み取りは、この経路モデルの対応範囲外です。',
+    en: 'Locking reads are outside the current route model.',
+  },
+}
+
+export function sqlExplanation(locale: Locale, explanation: string): string {
+  const wrapper = 'Modeled EXPLAIN wrapper: '
+  if (explanation.startsWith(wrapper)) {
+    const prefix = locale === 'ja' ? 'モデルの EXPLAIN ラッパー: ' : wrapper
+    return prefix + sqlExplanation(locale, explanation.slice(wrapper.length))
+  }
+  const copy = SQL_EXPLANATION_COPY[explanation]
+  if (copy) return copy[locale]
+  const unsupported = explanation.match(/^(JOIN|UNION|INTERSECT|EXCEPT|WINDOW|OVER) is outside the current route model\.$/)
+  if (locale === 'ja' && unsupported) return `${unsupported[1]} は、この経路モデルの対応範囲外です。`
+  return explanation
 }

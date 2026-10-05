@@ -333,8 +333,8 @@ function validateProtocolLab(state: TraceProtocolLabSnapshot): void {
     )
     if (lane.latestTs !== null) {
       invariant(
-        lane.protocol !== '2pc' && lane.startTs !== null,
-        `${lane.id} latest_ts is only modeled for 1PC/Async`,
+        lane.startTs !== null && lane.latestTs > lane.startTs,
+        `${lane.id} candidate latest_ts must follow start_ts`,
       )
     }
     if (lane.requestMinCommitTs !== null) {

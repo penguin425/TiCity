@@ -273,7 +273,7 @@ describe('model-2 detailed cross-Region transaction', () => {
     const first = detailedReceipt()
     const second = detailedReceipt()
 
-    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-7')
+    expect(TIDB_MODEL_VERSION).toBe('tidb-v8.5-model-8')
     expect(first).toEqual(second)
 
     const byId = new Map(first.events.map((candidate) => [candidate.id, candidate]))
@@ -1067,7 +1067,7 @@ describe('guided scenarios', () => {
       .filter((event) => typeof event.metadata.selected === 'string')
       .map((event) => event.metadata.selected)
 
-    expect(receipt.events).toHaveLength(74)
+    expect(receipt.events).toHaveLength(75)
     expect(selected).toEqual(['1pc', 'async_commit', '2pc'])
     expect(sim.state.transactions.map((transaction) => transaction.protocol))
       .toEqual(['1pc', 'async_commit', '2pc'])
@@ -1099,5 +1099,44 @@ describe('guided scenarios', () => {
     expect(second.id).toBe('trace-1')
     expect(second).not.toBe(first)
     expect(second.events).not.toEqual(first.events)
+  })
+})
+
+
+describe('SQL source-audit route invariants', () => {
+  it('does not create a receipt or mutate model state for unsupported route-changing SQL', () => {
+    const sim = createTiDBSimulation()
+    const before = JSON.stringify(sim.state)
+    for (const sql of [
+      'SELECT * FROM accounts WHERE NOT id = 1',
+      'DELETE FROM accounts WHERE NOT id = 1',
+      'SELECT * FROM accounts a, orders o WHERE a.id = 1',
+      'SELECT COUNT(*) OVER () FROM events',
+      'SELECT COUNT(DISTINCT account_id) FROM events',
+    ]) {
+      const submission = sim.submitSql(sql)
+      expect(submission.analysis.status, sql).toBe('unsupported')
+      expect(submission.receipt, sql).toBeNull()
+      expect(JSON.stringify(sim.state), sql).toBe(before)
+    }
+  })
+
+  it('keeps scalar/grouped shape in deterministic replay metadata without SQL or literals', () => {
+    const secret = 'audit-aggregate-literal-425'
+    const scalarSql = `SELECT COUNT(*) FROM events WHERE event_type = '${secret}'`
+    const scalar = createTiDBSimulation({ seed: 425 }).submitSql(scalarSql).receipt!
+    const replayed = createTiDBSimulation({ seed: 425 }).submitSql(scalarSql).receipt!
+    const grouped = createTiDBSimulation({ seed: 425 }).submitSql(
+      `SELECT account_id, COUNT(*) FROM events WHERE event_type = '${secret}' GROUP BY account_id`,
+    ).receipt!
+    expect(scalar).toEqual(replayed)
+    expect(scalar.replay.query.aggregateShape).toBe('scalar')
+    expect(grouped.replay.query.aggregateShape).toBe('grouped')
+    for (const receipt of [scalar, grouped]) {
+      const metadata = JSON.stringify(receipt.replay)
+      expect(metadata).not.toContain(secret)
+      expect(metadata).not.toContain('SELECT')
+      expect(Object.isFrozen(receipt.replay.query)).toBe(true)
+    }
   })
 })

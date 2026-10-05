@@ -61,6 +61,7 @@ jobs:
           cp LICENSE NOTICE README.md README.ja.md CHANGELOG.md "${package_dir}/"
           cp \
             docs/MODEL_BOUNDARY.md \
+            docs/SOURCE_AUDIT.md \
             docs/GRAPHICS.md \
             docs/screenshot.png \
             docs/lock-lab.png \

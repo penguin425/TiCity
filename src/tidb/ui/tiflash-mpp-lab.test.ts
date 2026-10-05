@@ -100,6 +100,31 @@ describe('TiFlash MPP Lab accessible projection', () => {
     )
   })
 
+  it('distinguishes planned links from registered server tunnels in both languages', () => {
+    installTestDom()
+    const receipt = trace()
+    const planned = receipt.events.find((event) =>
+      event.kind === 'tiflash_mpp_tunnels_planned')!
+    const prepared = receipt.events.find((event) =>
+      event.kind === 'tiflash_mpp_tasks_prepared')!
+    const panel = createTiFlashMppLabPanel('en')
+    panel.update(planned)
+
+    expect(panel.root.querySelectorAll('[data-tunnel-status="planned"]'))
+      .toHaveLength(6)
+    expect(panel.root.querySelector('[data-tunnel-id]')?.textContent).toContain('Planned')
+    expect(panel.root.textContent).not.toContain('Registered')
+    panel.setLocale('ja')
+    expect(panel.root.querySelector('[data-tunnel-id]')?.textContent).toContain('計画済み')
+
+    panel.update(prepared)
+    expect(panel.root.querySelectorAll('[data-tunnel-status="registered"]'))
+      .toHaveLength(6)
+    expect(panel.root.querySelector('[data-tunnel-id]')?.textContent).toContain('登録済み')
+    panel.setLocale('en')
+    expect(panel.root.querySelector('[data-tunnel-id]')?.textContent).toContain('Registered')
+  })
+
   it('switches to Japanese while preserving exact synthetic state', () => {
     installTestDom()
     const complete = detailedEvents(trace()).at(-1)!

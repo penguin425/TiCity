@@ -53,6 +53,7 @@ describe('Diagnose page copy', () => {
     const events = createTiDBSimulation({ seed: 425 })
       .runScenario('commit-protocols')
       .events
+    expect(events).toHaveLength(75)
     for (const [index, candidate] of events.entries()) {
       const cursor: DiagnoseCursor = {
         event: candidate,
@@ -68,11 +69,11 @@ describe('Diagnose page copy', () => {
     }
   })
 
-  it('keeps all 43 GC deep-link options exact, numbered, and localized', () => {
+  it('keeps all 45 GC deep-link options exact, numbered, and localized', () => {
     const events = createTiDBSimulation({ seed: 425 })
       .runScenario('gc-safe-point')
       .events
-    expect(events).toHaveLength(43)
+    expect(events).toHaveLength(45)
     for (const [index, candidate] of events.entries()) {
       const cursor: DiagnoseCursor = {
         event: candidate,
@@ -87,6 +88,12 @@ describe('Diagnose page copy', () => {
       expect(diagnoseEventOptionLabel('en', candidate, index, cursor))
         .toBe(`${index + 1}. ${candidate.label}`)
     }
+    const scheduled = events.find((candidate) => candidate.kind === 'gc_delete_marker_cleanup_scheduled')
+    const completed = events.find((candidate) => candidate.kind === 'gc_delete_marker_cleanup_complete')
+    if (!scheduled || !completed) throw new Error('Expected separate Delete-marker cleanup events')
+    expect(diagnoseEventName('ja', scheduled)).toContain('後続compaction')
+    expect(diagnoseEventName('ja', scheduled)).toContain('別GC-key taskを登録')
+    expect(diagnoseEventName('ja', completed)).toContain('GC-key taskがDelete markerを削除')
   })
 
   it('localizes every model-7 TiFlash/MPP event without changing English', () => {
