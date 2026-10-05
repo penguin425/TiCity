@@ -99,6 +99,10 @@ and resolve small collisions near the building with short leader lines.
 
 ![Portrait overview](graphics/city-mobile.png)
 
+At intermediate desktop widths, the Lab and replay dock remain side by side.
+The dock uses one column with five touch-sized controls, retains the status
+label, and keeps the Lab clear with its Inspector both open and closed.
+
 ## Rendering boundaries
 
 - `world/layout.ts`: authored geography, including roads, gardens, trees, lamps,

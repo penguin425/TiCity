@@ -2170,6 +2170,45 @@ a {
   }
 }
 
+@media (min-width: 901px) and (max-width: 1199px) {
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback {
+    left: auto;
+    right: max(0.8rem, env(safe-area-inset-right));
+    width: 23rem;
+    grid-template-areas:
+      "heading"
+      "current"
+      "rail"
+      "progress"
+      "controls"
+      "inspector";
+    grid-template-columns: minmax(0, 1fr);
+    transform: none;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__eyebrow {
+    display: none;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__meta {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__controls {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__control {
+    min-height: 2.75rem;
+  }
+
+  .tidb-layout[data-inspect="open"][data-panel="closed"] .tidb-trace-playback__control.is-loop {
+    min-height: 2.75rem;
+    grid-column: auto;
+  }
+}
+
 .tidb-layout[data-camera-view="orbit"][data-trace-state="playing"] .tidb-scene-hint,
 .tidb-layout[data-camera-view="orbit"][data-trace-state="holding"] .tidb-scene-hint,
 .tidb-layout[data-camera-view="orbit"][data-trace-state="paused"] .tidb-scene-hint {

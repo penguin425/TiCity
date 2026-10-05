@@ -103,7 +103,7 @@ test('Diagnose Japanese inspector keeps causal cursor navigation in the same sce
   expect(external).toEqual([])
 })
 
-test('City mobile inspector starts folded, preserves focus on seek, and passes its accessibility gate', async ({ page }) => {
+test('City inspector keeps focus, touch controls, and clear mobile and midsize layouts', async ({ page }) => {
   const external = recordExternalRequests(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/?lang=en&scenario=${SCENARIO}&event=${EVENT_ID}`)
@@ -158,6 +158,37 @@ test('City mobile inspector starts folded, preserves focus on seek, and passes i
   const accessibility = await new AxeBuilder({ page }).include('[data-trace-inspector]').analyze()
   expect(accessibility.violations.filter(({ impact }) => impact === 'serious' || impact === 'critical'))
     .toEqual([])
+
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await expect(page.locator('[data-tiflash-mpp-lab]')).toBeVisible()
+  for (const open of [true, false]) {
+    if ((await inspector.getAttribute('open') !== null) !== open) {
+      await inspector.locator('summary').click()
+    }
+    const layout = await page.evaluate(() => {
+      const lab = document.querySelector('[data-tiflash-mpp-lab]')!.getBoundingClientRect()
+      const dock = document.querySelector('[data-trace-dock]')!.getBoundingClientRect()
+      return {
+        separated: lab.right <= dock.left + 1 || dock.right <= lab.left + 1,
+        visibleLab: lab.width > 0 && lab.height > 0,
+        fits: dock.top >= 0 && dock.bottom <= innerHeight + 1 && dock.right <= innerWidth + 1,
+        buttons: [...document.querySelectorAll('.tidb-trace-playback__controls button')]
+          .map((button) => {
+            const box = button.getBoundingClientRect()
+            return { width: box.width, height: box.height }
+          }),
+        labelWidth: document.querySelector('.tidb-trace-playback__label')!.getBoundingClientRect().width,
+      }
+    })
+    expect(layout.visibleLab).toBe(true)
+    expect(layout.separated, `Lab and dock overlap at 1024px with Inspector open=${open}`).toBe(true)
+    expect(layout.fits).toBe(true)
+    expect(layout.buttons).toHaveLength(5)
+    expect(layout.buttons.every((button) => button.width >= 45 && button.height >= 44)).toBe(true)
+    expect(layout.labelWidth).toBeGreaterThanOrEqual(200)
+    await expect(page.locator('[data-trace-status]')).toBeVisible()
+    await expect(page.locator('[data-trace-dock]')).toHaveAttribute('data-phase', 'paused')
+  }
   expect(external).toEqual([])
 })
 

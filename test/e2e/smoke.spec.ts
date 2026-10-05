@@ -111,7 +111,7 @@ async function expectRaftVoteCity(page: Page): Promise<void> {
   expect(labBox).not.toBeNull()
   expect(dockBox).not.toBeNull()
   if (!labBox || !dockBox) throw new Error('Raft Lab overlays have no layout box')
-  if (await page.evaluate(() => innerWidth < 1200)) {
+  if (await page.evaluate(() => innerWidth <= 900)) {
     expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
   } else {
     // Wide layouts can place the dock beside the Lab. Verify that the complete
