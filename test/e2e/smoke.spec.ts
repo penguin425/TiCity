@@ -111,7 +111,19 @@ async function expectRaftVoteCity(page: Page): Promise<void> {
   expect(labBox).not.toBeNull()
   expect(dockBox).not.toBeNull()
   if (!labBox || !dockBox) throw new Error('Raft Lab overlays have no layout box')
-  expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
+  if (await page.evaluate(() => innerWidth < 1200)) {
+    expect(labBox.y + labBox.height).toBeLessThanOrEqual(dockBox.y + 1)
+  } else {
+    // Wide layouts can place the dock beside the Lab. Verify that the complete
+    // rectangles are disjoint, rather than requiring only vertical stacking.
+    expect(
+      labBox.x + labBox.width <= dockBox.x + 1 ||
+      dockBox.x + dockBox.width <= labBox.x + 1 ||
+      labBox.y + labBox.height <= dockBox.y + 1 ||
+      dockBox.y + dockBox.height <= labBox.y + 1,
+      'Raft Lab and trace controls must not overlap',
+    ).toBe(true)
+  }
   expect(
     await page.evaluate(() =>
       document.documentElement.scrollWidth <= window.innerWidth + 1),
