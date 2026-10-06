@@ -226,7 +226,7 @@ a {
 .tidb-movement-pad {
   position: absolute;
   z-index: 26;
-  top: 8.55rem;
+  top: 9.75rem;
   left: max(0.65rem, env(safe-area-inset-left));
   display: none;
   grid-template: repeat(3, 2.75rem) / repeat(3, 2.75rem);
@@ -3229,7 +3229,7 @@ a {
 
 @media (max-width: 900px) and (max-height: 830px) {
   .tidb-movement-pad:not([hidden]) {
-    top: 8.55rem;
+    top: 9.75rem;
     right: max(0.125rem, env(safe-area-inset-right));
     left: max(0.125rem, env(safe-area-inset-left));
     width: auto;
