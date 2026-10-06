@@ -19,13 +19,18 @@ const GAP = 6
  * Resolve only small, local collisions around the actual building anchor.
  * Candidates move sideways before vertically, so dense central labels cannot
  * cascade down the city and become associated with another district.
+ * A top overlay excludes its occupied screen space without extending these
+ * local candidates or creating detached leaders.
  * The caller reuses both the placements and their ordered array.
  */
 export function placeCityLabels(
   labels: readonly CityLabelPlacement[],
   width: number,
   height: number,
+  topInset = 0,
 ): void {
+  const safeTopInset = Number.isFinite(topInset) ? Math.max(0, topInset) : 0
+  const topMargin = Math.max(MARGIN, safeTopInset + GAP)
   for (let index = 0; index < labels.length; index++) {
     const label = labels[index]
     if (!label.visible) continue
@@ -40,7 +45,7 @@ export function placeCityLabels(
     for (let row = 0; row < 5 && !placed; row++) {
       const rowOffset = row === 0 ? 0 : Math.ceil(row / 2) * (row % 2 ? -1 : 1)
       const y = preferredY + rowOffset * (label.height + GAP)
-      if (y - label.height < MARGIN || y > height - MARGIN) continue
+      if (y - label.height < topMargin || y > height - MARGIN) continue
       for (let column = 0; column < 3; column++) {
         const columnOffset = column === 0 ? 0 : column === 1 ? -1 : 1
         const x = Math.max(

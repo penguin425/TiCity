@@ -66,6 +66,30 @@ export interface CityCopy {
   legendLabel: string
 }
 
+export interface DashboardCopy {
+  title: string
+  ariaLabel: string
+  show: string
+  hide: string
+  showAria: string
+  hideAria: string
+  help: string
+  modelTime: string
+  running: string
+  paused: string
+  history: string
+  unavailable: string
+  awaitingWindow: string
+  tiflashUnavailable: string
+  rateWindow: (seconds: string) => string
+  regionsHealthy: string
+  versions: string
+  metric: Readonly<Record<'statements' | 'commits' | 'raft' | 'regions' | 'gc' | 'tiflash', string>>
+  metricHelp: Readonly<Record<'statements' | 'commits' | 'raft' | 'regions' | 'gc' | 'tiflash', string>>
+  boundary: string
+  sampling: string
+}
+
 export interface Messages {
   appName: string
   citySubtitle: string
@@ -119,6 +143,7 @@ export interface Messages {
   realClusterCheck: string
   navigation: NavigationMessages
   city: CityCopy
+  dashboard: DashboardCopy
 }
 
 const ja: Messages = {
@@ -248,6 +273,43 @@ const ja: Messages = {
     },
     legendLabel: '意味を表す色',
   },
+  dashboard: {
+    title: 'ダッシュボード',
+    ariaLabel: 'モデルダッシュボード',
+    show: '指標を表示',
+    hide: '指標を隠す',
+    showAria: 'モデルダッシュボードの指標を表示する',
+    hideAria: 'モデルダッシュボードの指標を隠す',
+    help: '指標の読み方',
+    modelTime: 'モデル時刻',
+    running: '進行中',
+    paused: '一時停止',
+    history: 'モデル時間の履歴',
+    unavailable: '—',
+    awaitingWindow: '集計中',
+    tiflashUnavailable: 'TiFlash 未利用',
+    rateWindow: (seconds) => `背景負荷 · ${seconds} / 5 モデル秒`,
+    regionsHealthy: '正常 / 全Region',
+    versions: 'GC待機バージョン',
+    metric: {
+      statements: 'SQL · statement/秒',
+      commits: 'COMMIT · 件/秒',
+      raft: 'Raft log · entry/秒',
+      regions: '正常なRegion',
+      gc: 'GC backlog · バージョン',
+      tiflash: 'TiFlash lag · モデル秒',
+    },
+    metricHelp: {
+      statements: '背景負荷による直近5モデル秒のstatement増分を、観測したモデル時間で割った値です。設定QPSや明示的なシナリオの実行回数とは別の値です。',
+      commits: '背景負荷による直近5モデル秒のcommit増分を、観測したモデル時間で割った値です。明示的なシナリオの実行やRaft commitとは別のカウンターです。',
+      raft: '背景負荷による直近5モデル秒のRaft log entry増分を、観測時間で割った値です。明示的なシナリオの実行やWALのバイト量は含みません。',
+      regions: '同じモデル状態にある正常なRegion数と、全Region数です。',
+      gc: '同じモデル状態にあるGC backlogのバージョン数です。PostgreSQLのdirty bufferとは別の指標です。',
+      tiflash: '同じモデル状態にあるTiFlash learnerの遅延です。TiKV voterのquorumとは別の状態です。',
+    },
+    boundary: 'MODEL / SIMULATED — 学習用モデルの値です。実クラスタの監視値やベンチマークではありません。',
+    sampling: '小さなグラフは、このページで観測したモデル時間の履歴です。一時停止するとモデル時間の履歴も止まり、リセットすると履歴を消去します。',
+  },
 }
 
 const en: Messages = {
@@ -376,6 +438,43 @@ const en: Messages = {
       tiflash: 'TiFlash / MPP',
     },
     legendLabel: 'Semantic colours',
+  },
+  dashboard: {
+    title: 'Dashboard',
+    ariaLabel: 'Model dashboard',
+    show: 'Show metrics',
+    hide: 'Hide metrics',
+    showAria: 'Show model dashboard metrics',
+    hideAria: 'Hide model dashboard metrics',
+    help: 'About these metrics',
+    modelTime: 'Model time',
+    running: 'Running',
+    paused: 'Paused',
+    history: 'Model-time history',
+    unavailable: '—',
+    awaitingWindow: 'Collecting',
+    tiflashUnavailable: 'TiFlash unavailable',
+    rateWindow: (seconds) => `Background load · ${seconds} / 5 model s`,
+    regionsHealthy: 'healthy / total Regions',
+    versions: 'versions awaiting GC',
+    metric: {
+      statements: 'SQL · statements/s',
+      commits: 'COMMIT · commits/s',
+      raft: 'Raft log · entries/s',
+      regions: 'Healthy Regions',
+      gc: 'GC backlog · versions',
+      tiflash: 'TiFlash lag · model s',
+    },
+    metricHelp: {
+      statements: 'Background-load statement-counter growth during up to five observed model seconds, divided by the observed interval. Configured QPS and explicit scenario execution are separate.',
+      commits: 'Background-load commit-counter growth during up to five observed model seconds, divided by the observed interval. Explicit scenario execution and Raft commits are separate.',
+      raft: 'Background-load Raft-log-entry growth during up to five observed model seconds, divided by the observed interval. Explicit scenario execution and WAL byte counts are excluded.',
+      regions: 'Healthy and total Region counts from the same model state.',
+      gc: 'GC-backlog version count from the same model state. This is a different metric from PostgreSQL dirty buffers.',
+      tiflash: 'TiFlash learner lag from the same model state. It is separate from TiKV voter quorum.',
+    },
+    boundary: 'MODEL / SIMULATED — Educational model values, not live-cluster monitoring or a benchmark.',
+    sampling: 'Sparklines show model-time history observed on this page. Pausing freezes the model-time history; resetting clears it.',
   },
 }
 

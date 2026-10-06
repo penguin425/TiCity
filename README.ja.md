@@ -12,15 +12,17 @@ Apache-2.0ライセンスの独立した教育プロジェクトです。TiCity�
 
 公開先: <https://penguin425.github.io/TiCity/>
 
-![昼のTiCityキャンパス全景](docs/graphics/tidb-fresh-day.png)
+![昼のTiCityキャンパス全景](docs/graphics/dashboard-day.png)
 
 [昼夜の描画と設計](docs/GRAPHICS.md)に、拡大・モバイル表示とスクリーンショットの
 再現コマンドをまとめています。
 
 画面上部の「配色」で、白・淡いミント／水色・TiDBの赤を組み合わせた **TiDB フレッシュ** と、従来の **クラシック** を選べます。昼夜はどちらでも切り替えられ、選択は3D俯瞰・2D構成図・診断に引き継がれます。[配色の操作と出典](docs/APPEARANCE.md)も参照してください。
 
+City上部のダッシュボードに、背景SQL・commitの毎秒件数、Raft entry、正常なRegion数、GC滞留、TiFlashのモデル遅延と履歴グラフを表示します。「指標を表示／隠す」で切り替えられ、狭い画面や高さの低い画面では折りたたんで始まります。[指標の意味と停止・リセット時の扱い](docs/DASHBOARD.md)も参照してください。
+
 > [!IMPORTANT]
-> TiCity v0.13.0はTiDB v8.5 LTS系列を対象にした
+> TiCity v0.14.0はTiDB v8.5 LTS系列を対象にした
 > 静的・オフラインのモデルで、model-9 TiFlash/MPP Labを含みます。SQLを実行せず、
 > 実データや架空の結果行も返しません。入力した単一SQL文をブラウザ内で分類し、
 > モデル上の経路と説明だけを生成します。

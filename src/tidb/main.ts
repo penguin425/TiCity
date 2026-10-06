@@ -36,6 +36,8 @@ import { createGcStorageLabPanel } from './ui/gc-storage-lab'
 import { createTiFlashMppLabPanel } from './ui/tiflash-mpp-lab'
 import { createTracePlaybackDock } from './ui/trace-playback'
 import { createTransactionLabPanel } from './ui/transaction-lab'
+import { createCityDashboard } from './ui/dashboard'
+import { createDashboardMetrics } from './ui/dashboard-metrics'
 import { createTiDBWorld, type WorldHandle } from './world'
 import type { CityComponent } from './world/city'
 import { CITY_ORBIT, type CityMovementInput, type CityViewMode } from './engine/camera'
@@ -52,6 +54,16 @@ const SCENARIOS: readonly ScenarioId[] = [
   'tiflash-mpp',
 ]
 const NO_ACTIVE_TRACE_EVENTS: readonly string[] = Object.freeze([])
+const DASHBOARD_STORAGE_KEY = 'ticity:dashboard-expanded'
+
+function savedDashboardExpansion(): boolean | null {
+  try {
+    const value = window.localStorage.getItem(DASHBOARD_STORAGE_KEY)
+    return value === 'true' ? true : value === 'false' ? false : null
+  } catch {
+    return null
+  }
+}
 
 const copy = {
   ja: CATALOG.ja.city,
@@ -536,16 +548,20 @@ function boot(): void {
   if (world) worldHost.append(movementPad.root)
 
   const setPlayback = (mode: TiCityState['playback']): void => {
+    updateDashboard()
     simulation.setPlayback(mode)
     world?.shell.flows.setPaused(mode === 'step')
+    updateDashboard()
   }
 
   const setControl = <K extends keyof TiDBControls>(
     key: K,
     value: TiDBControls[K],
   ): void => {
+    updateDashboard()
     simulation.setControl(key, value)
     if (key === 'paused') world?.shell.flows.setPaused(Boolean(value))
+    updateDashboard()
   }
 
   const topbar = document.createElement('header')
@@ -632,6 +648,42 @@ function boot(): void {
   topCluster.append(navigation.root, viewActions)
   topbar.append(wordmarkHost, topCluster)
 
+  const dashboardMetrics = createDashboardMetrics()
+  const compactDashboard = window.matchMedia('(max-width: 700px), (max-height: 700px)')
+  const savedExpansion = savedDashboardExpansion()
+  let dashboardChosen = savedExpansion !== null
+  let applyingDashboardDefault = false
+  const dashboard = createCityDashboard(locale, {
+    initialExpanded: savedExpansion ?? !compactDashboard.matches,
+    onExpandedChange(expanded) {
+      layout.dataset.dashboardExpanded = String(expanded)
+      if (!applyingDashboardDefault) {
+        dashboardChosen = true
+        try {
+          window.localStorage.setItem(DASHBOARD_STORAGE_KEY, String(expanded))
+        } catch {
+          // The control remains available with restricted preference storage.
+        }
+      }
+      syncDashboardLayout()
+    },
+    onHelpChange(open) {
+      layout.dataset.dashboardHelpOpen = String(open)
+      syncDashboardLayout()
+    },
+  })
+  layout.dataset.dashboardExpanded = String(dashboard.expanded)
+  function updateDashboard(): void {
+    dashboard.update(dashboardMetrics.sample(simulation.state))
+  }
+  const onCompactDashboardChange = (): void => {
+    if (dashboardChosen) return
+    applyingDashboardDefault = true
+    dashboard.setExpanded(!compactDashboard.matches)
+    applyingDashboardDefault = false
+  }
+  compactDashboard.addEventListener('change', onCompactDashboardChange)
+
   const hud = document.createElement('aside')
   hud.className = 'tidb-hud'
   const status = document.createElement('dl')
@@ -680,15 +732,19 @@ function boot(): void {
       const hasDetailedSnapshot = activeLab !== null
       setInspect(hasDetailedSnapshot, hasDetailedSnapshot)
     }
+    updateDashboard()
   }
 
   const runScenario = (id: ScenarioId): TraceReceipt => {
+    dashboardMetrics.reset()
     const receipt = simulation.runScenario(id)
     applyReceipt(receipt)
     return receipt
   }
 
   const submitSql = (sql: string): SqlSubmission => {
+    // Flush elapsed background work before the synchronous trace counter jump.
+    updateDashboard()
     const submission = simulation.submitSql(sql)
     applyReceipt(submission.receipt)
     return submission
@@ -760,6 +816,7 @@ function boot(): void {
       gcStorageLabPanel.setLocale(next)
       tiflashMppLabPanel.setLocale(next)
       movementPad.setLocale(next)
+      dashboard.setLocale(next)
       hint.textContent = copy[next].hint[currentView]
       surfaceLinkKey = ''
       queueMicrotask(() => {
@@ -776,8 +833,43 @@ function boot(): void {
   syncSurfaceLinks(initialEventId)
 
   hud.append(status, uiHost)
-  layout.append(pageTitle, worldHost, topbar, hud, selected, hint, legend)
+  layout.append(pageTitle, worldHost, topbar, dashboard.root, hud, selected, hint, legend)
   app.replaceChildren(layout)
+  updateDashboard()
+
+  function syncDashboardLayout(): void {
+    if (disposed || !layout.isConnected) return
+    // Measure only when a header/drawer changes, never inside the render loop.
+    const headerBottom = Math.max(
+      topbar.getBoundingClientRect().bottom,
+      viewActions.getBoundingClientRect().bottom,
+    )
+    const top = Math.ceil(headerBottom + 8)
+    layout.style.setProperty('--tidb-dashboard-top', `${top}px`)
+    const dashboardBox = dashboard.root.getBoundingClientRect()
+    const contentTop = Math.ceil(top + dashboardBox.height + 8)
+    layout.style.setProperty('--tidb-content-top', `${contentTop}px`)
+    const dockTop = world ? traceDock.root.getBoundingClientRect().top : window.innerHeight - 16
+    const drawerHeight = Math.max(80, Math.floor(dockTop - dashboardBox.bottom - 16))
+    layout.style.setProperty('--tidb-dashboard-drawer-height', `${drawerHeight}px`)
+    const metricsBox = dashboard.root.querySelector<HTMLElement>('[data-dashboard-metrics]')
+      ?.getBoundingClientRect()
+    const explanationBox = dashboard.root.querySelector<HTMLElement>('[data-dashboard-help][open] .tidb-dashboard__explanation')
+      ?.getBoundingClientRect()
+    const labelInset = window.innerWidth <= 700 && explanationBox
+      ? explanationBox.bottom + 4
+      : window.innerWidth <= 700 && dashboard.expanded && metricsBox
+      ? metricsBox.bottom + 4
+      : contentTop
+    world?.shell.setLabelTopInset(Math.max(0, labelInset - worldHost.getBoundingClientRect().top))
+  }
+  const dashboardLayoutObserver = new ResizeObserver(syncDashboardLayout)
+  dashboardLayoutObserver.observe(topbar)
+  dashboardLayoutObserver.observe(viewActions)
+  dashboardLayoutObserver.observe(dashboard.root)
+  if (world) dashboardLayoutObserver.observe(traceDock.root)
+  window.addEventListener('resize', syncDashboardLayout)
+  syncDashboardLayout()
 
   let last = performance.now()
   let lastStatus = 0
@@ -823,6 +915,7 @@ function boot(): void {
 
     if (now - lastStatus >= 250) {
       lastStatus = now
+      updateDashboard()
       qps.value.textContent = String(simulation.state.controls.qps)
       const latest = simulation.state.lastTrace
       txn.value.textContent =
@@ -877,6 +970,8 @@ function boot(): void {
 
   const reset = () => {
     simulation.reset()
+    dashboardMetrics.reset()
+    updateDashboard()
     currentTrace = null
     activeLab = null
     layout.dataset.activeLab = 'none'
@@ -894,11 +989,15 @@ function boot(): void {
     get state(): TiCityState {
       return deepFreezeSnapshot(structuredClone(simulation.state))
     },
-    update: (deltaSeconds) => simulation.update(deltaSeconds),
+    update: (deltaSeconds) => {
+      simulation.update(deltaSeconds)
+      updateDashboard()
+    },
     setControl,
     runScenario,
     submitSql,
     requestTrace(request: TraceRequest) {
+      updateDashboard()
       const receipt = simulation.requestTrace(request)
       applyReceipt(receipt)
       return receipt
@@ -929,6 +1028,10 @@ function boot(): void {
     disposed = true
     cancelAnimationFrame(animationFrame)
     themeObserver.disconnect()
+    dashboardLayoutObserver.disconnect()
+    window.removeEventListener('resize', syncDashboardLayout)
+    compactDashboard.removeEventListener('change', onCompactDashboardChange)
+    dashboard.dispose()
     cityUi.dispose()
     traceDock.dispose()
     transactionLabPanel.dispose()

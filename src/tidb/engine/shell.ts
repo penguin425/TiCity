@@ -60,6 +60,7 @@ export interface CityShell {
   /** @deprecated Use `setLabInspect`. */
   setTransactionLabInspect(enabled: boolean): void
   setHudExpanded(expanded: boolean): void
+  setLabelTopInset(inset: number): void
   resize(): void
   start(): void
   stop(): void
@@ -412,6 +413,9 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
       if (hudExpanded === expanded) return
       hudExpanded = expanded
       resize()
+    },
+    setLabelTopInset(inset: number): void {
+      labels.setTopInset(inset)
     },
     resize,
     start,
