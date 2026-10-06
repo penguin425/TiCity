@@ -11,6 +11,7 @@ export const CITY_UI_CSS = `
   --tc-text: #e8fbf8;
   --tc-muted: #9dbab7;
   --tc-cyan: #62eadb;
+  --tc-model-accent: #62eadb;
   --tc-yellow: #ffd866;
   --tc-red: #ff7883;
   color: var(--tc-text);

@@ -98,7 +98,13 @@ test('Diagnose Japanese inspector keeps causal cursor navigation in the same sce
   await inspector.locator('[data-inspector-relation="fence"]').click()
   await expect(inspector).toHaveAttribute('data-inspector-event-id', FENCE_ID)
   const url = new URL(page.url())
-  expect(Object.fromEntries(url.searchParams)).toEqual({ event: FENCE_ID, scenario: SCENARIO, lang: 'ja' })
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    event: FENCE_ID,
+    scenario: SCENARIO,
+    lang: 'ja',
+    theme: 'day',
+    appearance: 'tidb',
+  })
   await expect(page.locator('select[aria-label="投影するイベント時点"]')).toHaveValue(FENCE_ID)
   expect(external).toEqual([])
 })

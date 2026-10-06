@@ -22,6 +22,9 @@ export interface NavigationMessages {
   relatedSurfaces: string
   switchToDay: string
   switchToNight: string
+  appearance: string
+  appearanceTiDB: string
+  appearanceClassic: string
 }
 
 export interface CityCopy {
@@ -186,6 +189,9 @@ const ja: Messages = {
     relatedSurfaces: '関連画面',
     switchToDay: '昼テーマに切り替える',
     switchToNight: '夜テーマに切り替える',
+    appearance: '配色',
+    appearanceTiDB: 'TiDB フレッシュ',
+    appearanceClassic: 'クラシック',
   },
   city: {
     skip: 'メインコンテンツへ移動',
@@ -312,6 +318,9 @@ const en: Messages = {
     relatedSurfaces: 'Related surfaces',
     switchToDay: 'Switch to day theme',
     switchToNight: 'Switch to night theme',
+    appearance: 'Palette',
+    appearanceTiDB: 'TiDB Fresh',
+    appearanceClassic: 'Classic',
   },
   city: {
     skip: 'Skip to main content',

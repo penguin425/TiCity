@@ -224,6 +224,7 @@ export function createTransactionLabPanel(
   const root = element('section', {
     className: 'tidb-transaction-lab',
     attrs: {
+      tabindex: '0',
       'aria-live': 'polite',
       'aria-atomic': 'true',
       'data-transaction-lab': '',

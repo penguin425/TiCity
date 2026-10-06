@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { installTestDom } from '../../../test/dom'
+import { applyAppearance, applyTheme } from '../page-shell'
 import type { TraceFlowPlayback } from '../engine/trace-flows'
 import type { TraceEvent, TraceReceipt } from '../model/types'
 import { createTracePlaybackDock } from './trace-playback'
@@ -118,6 +119,27 @@ function noActions() {
 }
 
 describe('trace playback dock', () => {
+  it('keeps client and trace-domain accents independent of palette and lighting selection', () => {
+    installTestDom()
+    const trace = receipt()
+    const dock = createTracePlaybackDock('en', noActions())
+    const expected = ['var(--domain-client)', 'var(--domain-sql)', 'var(--domain-tso)', 'var(--city-text)']
+
+    for (const appearance of ['classic', 'tidb'] as const) {
+      applyAppearance(appearance)
+      for (const theme of ['day', 'night'] as const) {
+        applyTheme(theme)
+        for (let index = 0; index < trace.events.length; index += 1) {
+          dock.update(playback(trace, { currentIndex: index }), trace)
+          expect(Reflect.get(dock.root.style, '--trace-color')).toBe(expected[index])
+        }
+        const ticks = dock.root.querySelectorAll<HTMLElement>('[data-event-index]')
+        expect([...ticks].map((tick) => Reflect.get(tick.style, '--trace-color'))).toEqual(expected)
+      }
+    }
+    dock.dispose()
+  })
+
   it('shows the current event, direction, progress, and colour-independent rail state', () => {
     const dom = installTestDom()
     const trace = receipt()

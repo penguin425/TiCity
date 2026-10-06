@@ -13,6 +13,10 @@ function option(name, fallback) {
 const baseURL = option('--base-url', 'http://127.0.0.1:4173')
 const siteURL = new URL(baseURL.endsWith('/') ? baseURL : `${baseURL}/`)
 const directory = resolve(option('--output', 'artifacts/graphics'))
+const appearance = option('--appearance', 'tidb')
+if (appearance !== 'tidb' && appearance !== 'classic') {
+  throw new Error('--appearance must be tidb or classic')
+}
 await mkdir(directory, { recursive: true })
 
 const browser = await chromium.launch({
@@ -41,7 +45,9 @@ try {
   }
   async function open(path = '/') {
     // Keep a deployment prefix such as /TiCity/ when capturing GitHub Pages.
-    await page.goto(new URL(path.replace(/^\/+/, ''), siteURL).href)
+    const url = new URL(path.replace(/^\/+/, ''), siteURL)
+    url.searchParams.set('appearance', appearance)
+    await page.goto(url.href)
     await page.waitForFunction(() => Boolean(window.TICITY?.world))
     await page.evaluate(() => {
       window.TICITY.model.setPlayback('step')

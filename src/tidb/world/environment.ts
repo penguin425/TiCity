@@ -7,6 +7,7 @@
  */
 
 import * as THREE from 'three'
+import type { CityAppearance } from '../appearance'
 import { DISTRICT_BOUNDS, TICITY_LAYOUT } from './layout'
 import type { CityTheme } from './palette'
 import { createSkyline } from './environment-skyline'
@@ -17,7 +18,7 @@ export interface CityEnvironment {
   readonly object: THREE.Group
   readonly ground: THREE.Mesh
   update(deltaSeconds: number): void
-  setTheme(theme: CityTheme): void
+  setTheme(theme: CityTheme, appearance?: CityAppearance): void
   dispose(): void
 }
 
@@ -412,7 +413,7 @@ export function createCityEnvironment(): CityEnvironment {
     createSkyline(skylineMaterial, beaconMaterial),
   )
 
-  function setTheme(next: CityTheme): void {
+  function setTheme(next: CityTheme, appearance: CityAppearance = 'classic'): void {
     const night = next === 'night'
     foundationMaterial.color.setHex(night ? 0x142430 : 0x344c52)
     groundMaterial.color.setHex(night ? 0x21333f : 0x778785)
@@ -436,6 +437,7 @@ export function createCityEnvironment(): CityEnvironment {
     beaconMaterial.color.setHex(night ? 0xeed2a3 : 0x8faeb4)
     beaconMaterial.emissive.setHex(night ? 0xcfac72 : 0x000000)
     beaconMaterial.emissiveIntensity = night ? 0.4 : 0
+    lightPoolMaterial.color.setHex(0xffc47a)
     lightPoolMaterial.opacity = night ? 0.4 : 0
     starMaterial.opacity = night ? 0.8 : 0
     stars.visible = night
@@ -451,6 +453,33 @@ export function createCityEnvironment(): CityEnvironment {
       .normalize()
     ;(uniforms.uSunColor.value as THREE.Color).setHex(night ? 0xbfd8ff : 0xfff2c8)
     uniforms.uSunStrength.value = night ? 0.25 : 1.18
+
+    if (appearance === 'tidb') {
+      // Recolour existing surfaces and uniforms: appearance switching owns no
+      // extra geometry, textures or animation and leaves the campus unchanged.
+      foundationMaterial.color.setHex(night ? 0x16363f : 0xb3cdd0)
+      groundMaterial.color.setHex(night ? 0x26474e : 0xd7e9e3)
+      roadMaterial.color.setHex(night ? 0x1d3945 : 0x839fa7)
+      pavingMaterial.color.setHex(night ? 0x618b91 : 0xeef5f2)
+      laneMaterial.color.setHex(night ? 0xb7e5e9 : 0xf5ffff)
+      districtMaterial.color.setHex(night ? 0x6dadb5 : 0x5f8892)
+      poleMaterial.color.setHex(night ? 0x395965 : 0x577b88)
+      lampMaterial.color.setHex(night ? 0xffd3bc : 0xeff4e6)
+      lampMaterial.emissive.setHex(night ? 0xffa583 : 0x000000)
+      foliageMaterial.color.setHex(night ? 0x3c786a : 0x69a876)
+      lawnMaterial.color.setHex(night ? 0x35695f : 0x8fc991)
+      timberMaterial.color.setHex(night ? 0x937566 : 0xc79976)
+      waterMaterial.color.setHex(night ? 0x245669 : 0x68adb5)
+      skylineMaterial.color.setHex(night ? 0x325e71 : 0xa7c7d1)
+      skylineMaterial.emissive.setHex(night ? 0x123348 : 0x000000)
+      beaconMaterial.color.setHex(night ? 0xffc8b1 : 0xaccfd7)
+      beaconMaterial.emissive.setHex(night ? 0xf4a789 : 0x000000)
+      lightPoolMaterial.color.setHex(0xffb39b)
+      ;(uniforms.uZenith.value as THREE.Color).setHex(night ? 0x081c33 : 0x7cbcdf)
+      ;(uniforms.uHorizon.value as THREE.Color).setHex(night ? 0x234862 : 0xdaf4f8)
+      ;(uniforms.uHaze.value as THREE.Color).setHex(night ? 0x1a3c50 : 0xd5eaee)
+      ;(uniforms.uSunColor.value as THREE.Color).setHex(night ? 0xc3ddff : 0xf1fbff)
+    }
   }
 
   function update(deltaSeconds: number): void {

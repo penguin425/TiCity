@@ -10,9 +10,11 @@ import type { CityViewMode } from '../engine/camera'
 import type { CityComponent } from './city'
 import type { CityTheme } from './palette'
 import type { Locale } from '../ui/catalog'
+import type { CityAppearance } from '../appearance'
 
 export interface WorldOptions {
   readonly theme?: CityTheme
+  readonly appearance?: CityAppearance
   readonly locale?: Locale
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
@@ -29,6 +31,7 @@ export interface WorldHandle {
   update(state: TiCityState, trace?: TraceReceipt | null): void
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
+  setAppearance(appearance: CityAppearance): void
   setLocale(locale: Locale): void
   setMode(mode: CityViewMode): void
   setLabInspect(enabled: boolean): void
@@ -61,6 +64,9 @@ export function createTiDBWorld(
     },
     setTheme(theme: CityTheme): void {
       shell.setTheme(theme)
+    },
+    setAppearance(appearance: CityAppearance): void {
+      shell.setAppearance(appearance)
     },
     setLocale(locale: Locale): void {
       shell.setLocale(locale)

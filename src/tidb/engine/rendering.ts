@@ -8,6 +8,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import type { CityAppearance } from '../appearance'
 import { TICITY_LAYOUT } from '../world/layout'
 import type { CityTheme } from '../world/palette'
 import { CityAmbientOcclusionPass } from './ambient-occlusion'
@@ -17,7 +18,7 @@ import { CITY_SUN_POSITION, createCityReflections } from './reflections'
 export interface CityRendering {
   /** Completed City renders, independent of Three.js postprocessing passes. */
   readonly renderedFrames: number
-  setTheme(theme: CityTheme): void
+  setTheme(theme: CityTheme, appearance?: CityAppearance): void
   resize(width: number, height: number, pixelRatio: number): void
   invalidateShadows(): void
   render(): void
@@ -87,10 +88,13 @@ export function createCityRendering(
   let disposed = false
   let renderedFrames = 0
 
-  function setTheme(next: CityTheme): void {
+  function setTheme(next: CityTheme, appearance: CityAppearance = 'classic'): void {
     theme = next
     const night = next === 'night'
-    const background = night ? 0x071425 : 0xc2dce8
+    const fresh = appearance === 'tidb'
+    const background = fresh
+      ? (night ? 0x0b2238 : 0xd8eff1)
+      : (night ? 0x071425 : 0xc2dce8)
     if (scene.background instanceof THREE.Color) scene.background.setHex(background)
     else scene.background = new THREE.Color(background)
     const fog = TICITY_LAYOUT.fog[next]
@@ -114,6 +118,17 @@ export function createCityRendering(
     renderer.toneMappingExposure = night ? 1.1 : 0.94
     occlusion.blendIntensity = night ? 0.6 : 0.85
     bloom.enabled = night
+
+    if (fresh) {
+      // Neutral daylight keeps white architecture and pale blue glass clear;
+      // the same baked outdoor reflections serve both appearance palettes.
+      hemisphere.color.setHex(night ? 0xa5cee9 : 0xd6efff)
+      hemisphere.groundColor.setHex(night ? 0x183c46 : 0x9eaaa0)
+      ambient.color.setHex(night ? 0x86b1cb : 0xf4ffff)
+      sun.color.setHex(night ? 0xc3ddff : 0xf1fbff)
+      sun.intensity = night ? 1.7 : 3.1
+      rim.color.setHex(night ? 0x679dcb : 0xc2e5ff)
+    }
     renderer.shadowMap.needsUpdate = true
   }
 

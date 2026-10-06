@@ -88,7 +88,11 @@ test('narrow Machine and Diagnose pages keep a visible link back to the City ove
     await expect(city).toBeVisible()
     await expect(city).toHaveAttribute('href', /\.\.\/\?lang=ja/)
     await city.click()
-    await expect(page).toHaveURL(/\/\?lang=ja$/)
+    await expect(page).toHaveURL((url) => url.pathname === '/')
+    const url = new URL(page.url())
+    expect(url.searchParams.get('lang')).toBe('ja')
+    expect(url.searchParams.get('appearance')).toBe('tidb')
+    expect(url.searchParams.get('theme')).toBe('day')
     await expect(page.locator('[data-nav="city"]')).toHaveAttribute('aria-current', 'page')
   }
 })

@@ -119,4 +119,41 @@ describe('architectural surfaces', () => {
     materials.dispose()
     expect([...disposed.values()].every((count) => count === 1)).toBe(true)
   })
+
+  it('restores Classic exactly after switching paint without changing protocol colours or resources', () => {
+    const materials = createCityMaterials()
+    const resources = [...materials.all]
+    const surfaces = [materials.structure, materials.darkStructure, materials.glass,
+      materials.window, materials.trim]
+    const maps = surfaces.map((material) => [material.map, material.roughnessMap, material.bumpMap])
+    const protocol = () => [materials.sql, materials.tso, materials.txn2pc,
+      materials.raft, materials.kv, materials.dataLine, materials.controlLine, materials.htapLine]
+      .map((material) => material.color.getHex())
+    const snapshot = () => materials.all.map((material) => material.toJSON())
+    try {
+      for (const theme of ['day', 'night'] as const) {
+        materials.apply(theme, 'classic')
+        const classic = snapshot()
+        const semantics = protocol()
+        const wall = materials.structure.color.getHex()
+        materials.setNetworkEmphasis(true)
+        const emphasizedOpacity = materials.dataLine.opacity
+        materials.apply(theme, 'tidb')
+        expect(materials.structure.color.getHex()).not.toBe(wall)
+        expect(protocol()).toEqual(semantics)
+        expect(materials.dataLine.opacity).toBe(emphasizedOpacity)
+        expect(materials.all).toEqual(resources)
+        surfaces.forEach((material, index) => {
+          expect(material.map).toBe(maps[index][0])
+          expect(material.roughnessMap).toBe(maps[index][1])
+          expect(material.bumpMap).toBe(maps[index][2])
+        })
+        materials.setNetworkEmphasis(false)
+        materials.apply(theme, 'classic')
+        expect(snapshot()).toEqual(classic)
+      }
+    } finally {
+      materials.dispose()
+    }
+  })
 })

@@ -14,12 +14,14 @@ import type {
   TraceRequest,
 } from './model/types'
 import {
+  applyAppearance,
   applyTheme,
   createNavigation,
   createWordmark,
   prepareDocument,
   type Theme,
 } from './page-shell'
+import type { CityAppearance } from './appearance'
 import {
   CATALOG,
   mountCityUi,
@@ -65,6 +67,7 @@ interface TiCityPublicApi {
   setControl<K extends keyof TiDBControls>(key: K, value: TiDBControls[K]): void
   setView(mode: CityViewMode): void
   setTheme(theme: Theme): void
+  setAppearance(appearance: CityAppearance): void
   setInspect(enabled: boolean): void
   reset(): void
 }
@@ -126,6 +129,8 @@ function surfaceHref(
   const params = new URLSearchParams({
     scenario,
     lang: locale,
+    theme: document.documentElement.dataset.theme === 'night' ? 'night' : 'day',
+    appearance: document.documentElement.dataset.appearance === 'classic' ? 'classic' : 'tidb',
   })
   if (eventId) params.set('event', eventId)
   return `${surface}/?${params.toString()}`
@@ -457,6 +462,7 @@ function boot(): void {
   try {
     world = createTiDBWorld(worldHost, {
       theme: document.documentElement.dataset.theme === 'day' ? 'day' : 'night',
+      appearance: document.documentElement.dataset.appearance === 'classic' ? 'classic' : 'tidb',
       mode: currentView,
       locale,
       hudExpanded: panelExpanded,
@@ -854,11 +860,15 @@ function boot(): void {
 
   const themeObserver = new MutationObserver(() => {
     world?.setTheme(document.documentElement.dataset.theme === 'day' ? 'day' : 'night')
+    world?.setAppearance(document.documentElement.dataset.appearance === 'classic' ? 'classic' : 'tidb')
     navigation.syncTheme()
+    navigation.syncAppearance()
+    surfaceLinkKey = ''
+    syncSurfaceLinks(world?.shell.flows.playback.event?.id ?? null)
   })
   themeObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['data-theme'],
+    attributeFilter: ['data-theme', 'data-appearance'],
   })
 
   const setTheme = (theme: Theme) => {
@@ -910,6 +920,7 @@ function boot(): void {
     },
     setView,
     setTheme,
+    setAppearance: applyAppearance,
     setInspect,
     reset,
   }

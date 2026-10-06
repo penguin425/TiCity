@@ -56,13 +56,15 @@ function isTypingTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null
   if (!element) return false
   const tag = element.tagName
+  const focusedRegion = element.closest?.('[tabindex]')
   return (
     tag === 'INPUT' ||
     tag === 'TEXTAREA' ||
     tag === 'SELECT' ||
     tag === 'BUTTON' ||
     tag === 'A' ||
-    element.isContentEditable
+    element.isContentEditable ||
+    Boolean(focusedRegion && focusedRegion.tagName !== 'CANVAS')
   )
 }
 
@@ -206,6 +208,7 @@ export function createCityCameraController(options: CityCameraOptions): CityCame
 
   function onKeyUp(event: KeyboardEvent): void {
     pressedCodes.delete(event.code)
+    if (isTypingTarget(event.target)) return
     if (mode !== 'orbit' && movementForCode(event.code) !== null) event.preventDefault()
   }
 
