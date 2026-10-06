@@ -124,7 +124,7 @@ const COPY: Readonly<Record<Locale, TracePlaybackCopy>> = {
 }
 
 const DOMAIN_COLORS: Readonly<Record<TraceEvent['domain'], string>> = {
-  client: 'var(--city-cyan)',
+  client: 'var(--domain-client)',
   sql: 'var(--domain-sql)',
   tso: 'var(--domain-tso)',
   txn2pc: 'var(--domain-txn2pc)',

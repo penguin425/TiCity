@@ -160,12 +160,15 @@ function boot(): void {
 
   const inspector = createTraceInspector(receipt, cursor.event, locale, (eventId) => {
     const url = new URL(location.href)
-    // An Inspector cursor contains model identifiers only.
+    // An Inspector link contains model identifiers and explicit appearance
+    // choices only; arbitrary input from the previous URL is not copied.
     url.search = ''
     url.hash = ''
     url.searchParams.set('event', eventId)
     url.searchParams.set('scenario', scenario)
     url.searchParams.set('lang', locale)
+    url.searchParams.set('theme', document.documentElement.dataset.theme === 'night' ? 'night' : 'day')
+    url.searchParams.set('appearance', document.documentElement.dataset.appearance === 'classic' ? 'classic' : 'tidb')
     location.assign(url)
   })
   root.replaceChildren(top, controls, inspector, content)

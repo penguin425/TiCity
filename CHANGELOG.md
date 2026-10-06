@@ -6,6 +6,22 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-10-06
+
+- Add TiDB Fresh: white architecture, aqua/mint campus surfaces and the official
+  TiDB red accent. Retain the existing Classic palette and independent day/night
+  lighting, with shared settings across City, Machine and Diagnose.
+- Keep palette switching in place, without replacing the WebGL context,
+  materials, textures, model state or an active immutable trace. Preserve
+  transaction 2PC and Raft semantic colours and the existing graphics budgets.
+- Persist visual settings safely and preserve explicit shared URL choices after
+  selecting a different palette or time of day, including restricted storage.
+- Keep the palette selector visible on mobile, retain keyboard focus during
+  trace navigation, and verify readable Fresh panels in both languages. Avoid
+  mobile toolbar/lab overlap, make the Transaction Lab keyboard-scrollable,
+  and keep movement shortcuts out of focused interface regions.
+- The deterministic educational model remains `tidb-v8.5-model-9`.
+
 ## [0.12.0] — 2026-10-05
 
 - Refine the pinned TiDB 8.5 teaching model as `tidb-v8.5-model-9`, with

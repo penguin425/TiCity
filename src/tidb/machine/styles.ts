@@ -461,7 +461,7 @@ export const MACHINE_CSS = `
 }
 .tidb-machine__wait-node-box {
   fill: color-mix(in srgb, var(--tc-panel) 90%, var(--tc-bg));
-  stroke: var(--tc-cyan);
+  stroke: var(--tc-model-accent);
   stroke-width: 1.5;
 }
 .tidb-machine__wait-node.is-waiting .tidb-machine__wait-node-box {
@@ -533,7 +533,7 @@ export const MACHINE_CSS = `
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 3px 9px;
-  border-left: 3px solid var(--tc-cyan);
+  border-left: 3px solid var(--tc-model-accent);
   border-radius: 6px;
   padding: 7px 9px;
   background: color-mix(in srgb, var(--tc-panel-2) 74%, transparent);
@@ -557,7 +557,7 @@ export const MACHINE_CSS = `
 .tidb-machine__lock-transactions code { color: var(--tc-text); }
 .tidb-machine__lock-transactions strong {
   grid-column: 1 / -1;
-  color: var(--tc-cyan);
+  color: var(--tc-model-accent);
 }
 .tidb-machine__lock-grid {
   display: grid;
@@ -574,7 +574,7 @@ export const MACHINE_CSS = `
 .tidb-machine__lock-card > strong {
   display: block;
   margin-top: 8px;
-  color: var(--tc-cyan);
+  color: var(--tc-model-accent);
   font: 800 11px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 .tidb-machine__lock-card p {
@@ -787,7 +787,7 @@ export const MACHINE_CSS = `
 }
 .tidb-machine__raft-node-box {
   fill: color-mix(in srgb, var(--tc-panel) 90%, var(--tc-bg));
-  stroke: var(--tc-cyan);
+  stroke: var(--tc-model-accent);
   stroke-width: 1.5;
 }
 .tidb-machine__raft-node.is-leader .tidb-machine__raft-node-box {
@@ -887,7 +887,7 @@ export const MACHINE_CSS = `
 .tidb-machine__raft-peer {
   min-width: 0;
   border: 1px solid var(--tc-border);
-  border-top: 3px solid var(--tc-cyan);
+  border-top: 3px solid var(--tc-model-accent);
   border-radius: 9px;
   padding: 10px;
   background: color-mix(in srgb, var(--tc-panel-2) 68%, transparent);
@@ -946,7 +946,7 @@ export const MACHINE_CSS = `
   border-left: 4px solid var(--domain-tso, #ffd166);
 }
 .tidb-machine__raft-card.is-retry-boundary {
-  border-left: 4px solid var(--tc-cyan);
+  border-left: 4px solid var(--tc-model-accent);
 }
 .tidb-machine__raft-card[data-client-result="success"] {
   border-left-style: double;
@@ -1116,7 +1116,7 @@ export const MACHINE_CSS = `
   background: color-mix(in srgb, var(--tc-panel) 75%, transparent);
 }
 .tidb-machine__protocol-lane.is-one_pc {
-  --protocol-color: var(--tc-cyan);
+  --protocol-color: var(--tc-model-accent);
 }
 .tidb-machine__protocol-lane.is-async_commit {
   --protocol-color: var(--domain-tso, #ffd166);
@@ -1329,7 +1329,7 @@ export const MACHINE_CSS = `
   letter-spacing: .08em;
 }
 .tidb-machine__protocol-boundary {
-  border-top: 3px solid var(--tc-cyan);
+  border-top: 3px solid var(--tc-model-accent);
 }
 .tidb-machine__protocol-boundary > strong {
   display: block;
@@ -1346,7 +1346,7 @@ export const MACHINE_CSS = `
   font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 .tidb-machine__protocol-path-label.is-critical {
-  color: var(--tc-cyan);
+  color: var(--tc-model-accent);
 }
 .tidb-machine__protocol-path-label.is-background {
   border-top: 1px dashed var(--tc-muted);

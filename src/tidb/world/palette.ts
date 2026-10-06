@@ -4,6 +4,7 @@
  */
 
 import * as THREE from 'three'
+import type { CityAppearance } from '../appearance'
 import {
   applyArchitecturalSurface,
   createArchitecturalSurfaces,
@@ -73,7 +74,7 @@ export interface CityMaterials {
   readonly htapLine: THREE.LineDashedMaterial
   readonly ground: THREE.MeshStandardMaterial
   readonly all: readonly THREE.Material[]
-  apply(theme: CityTheme): void
+  apply(theme: CityTheme, appearance?: CityAppearance): void
   setNetworkEmphasis(active: boolean): void
   dispose(): void
 }
@@ -247,7 +248,7 @@ export function createCityMaterials(): CityMaterials {
     htapLine.opacity = opacity.htap * factor
   }
 
-  function apply(theme: CityTheme): void {
+  function apply(theme: CityTheme, appearance: CityAppearance = 'classic'): void {
     currentTheme = theme
     const palette = SEMANTIC_COLORS[theme]
     const night = theme === 'night'
@@ -268,6 +269,23 @@ export function createCityMaterials(): CityMaterials {
     edge.opacity = night ? 0.18 : 0.15
     ground.color.setHex(night ? 0x07101a : 0x919fa7)
 
+    // Brand paint is independent of protocol colours. TiDB's official mark
+    // uses #DC150B; broad white/aqua surfaces keep that accent restrained.
+    // Recolour the shared materials in place so switching never rebuilds the
+    // campus, its textures, model state, or an active trace.
+    if (appearance === 'tidb') {
+      structure.color.setHex(night ? 0x91afb5 : 0xf4f8f8)
+      darkStructure.color.setHex(night ? 0x203b4a : 0x375b68)
+      pavement.color.setHex(night ? 0x3b5961 : 0xe1efed)
+      glass.color.setHex(night ? 0x497d91 : 0x83c3d2)
+      glass.emissive.setHex(night ? 0x1a607b : 0x000000)
+      window.color.setHex(night ? 0xc7e6e8 : 0xb5dce3)
+      window.emissive.setHex(night ? 0x9cdae3 : 0x000000)
+      trim.color.setHex(night ? 0xf08378 : 0xdc150b)
+      edge.color.setHex(night ? 0x91dde3 : 0x557f88)
+      ground.color.setHex(night ? 0x122b35 : 0xd6e8e5)
+    }
+
     const semantic: readonly [THREE.MeshStandardMaterial, SemanticDomain][] = [
       [client, 'client'],
       [sql, 'sql'],
@@ -284,7 +302,9 @@ export function createCityMaterials(): CityMaterials {
     }
     // Columnar halls read as architecture; blue accents identify their role
     // without turning every wall into a light source.
-    tiflash.color.setHex(night ? 0x385a74 : 0x325b73)
+    tiflash.color.setHex(appearance === 'tidb'
+      ? night ? 0x4c7b91 : 0xc3dfe8
+      : night ? 0x385a74 : 0x325b73)
     tiflash.emissive.setHex(night ? 0x143046 : 0x000000)
     tiflash.emissiveIntensity = night ? 0.14 : 0
     raft.color.setHex(palette.raft)

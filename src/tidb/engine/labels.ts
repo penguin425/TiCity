@@ -131,7 +131,7 @@ export function createCityLabels(
   })
   appearanceObserver.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['lang', 'data-theme', 'class'],
+    attributeFilter: ['lang', 'data-theme', 'data-appearance', 'class'],
   })
 
   function update(force = false): void {

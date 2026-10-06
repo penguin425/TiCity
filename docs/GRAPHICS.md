@@ -7,7 +7,19 @@ details separate from the state-driven database explanation.
 
 ## Educational campus
 
-![Daytime campus](graphics/city-day.png)
+TiDB Fresh is the default appearance, combining white architecture and pale
+aqua/mint landscaping with TiDB's official red accent. Use **Palette / 配色**
+to select the original Classic appearance. Day/night lighting remains an
+independent choice. See [appearance choices and colour sources](APPEARANCE.md).
+
+![TiDB Fresh daytime campus](graphics/tidb-fresh-day.png)
+
+![TiDB Fresh nighttime campus](graphics/tidb-fresh-night.png)
+
+The following Classic captures document the v0.12 architecture, also retained
+by the new selectable appearance:
+
+![Classic daytime campus](graphics/city-day.png)
 
 ![Nighttime campus](graphics/city-night.png)
 

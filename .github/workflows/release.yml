@@ -64,6 +64,7 @@ jobs:
             docs/SOURCE_AUDIT.md \
             docs/REFINEMENT.md \
             docs/GRAPHICS.md \
+            docs/APPEARANCE.md \
             docs/screenshot.png \
             docs/lock-lab.png \
             docs/raft-lab.png \

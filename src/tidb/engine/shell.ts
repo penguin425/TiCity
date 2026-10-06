@@ -9,6 +9,7 @@ import { FOCUS_COMPONENT_TARGETS, TICITY_LAYOUT } from '../world/layout'
 import { createTiDBSceneGraph } from '../world/city'
 import type { CityComponent, TiDBSceneGraph } from '../world/city'
 import type { CityTheme } from '../world/palette'
+import type { CityAppearance } from '../appearance'
 import { CATALOG, type Locale } from '../ui/catalog'
 import { createCityAudio } from './audio'
 import type { CityAudio } from './audio'
@@ -27,6 +28,7 @@ export type { CityLabProjections } from './lab-projections'
 
 export interface CityShellOptions {
   readonly theme?: CityTheme
+  readonly appearance?: CityAppearance
   readonly locale?: Locale
   readonly mode?: CityViewMode
   readonly hudExpanded?: boolean
@@ -51,6 +53,7 @@ export interface CityShell {
   update(state: TiCityState, trace?: TraceReceipt | null): void
   focus(targetId: string): boolean
   setTheme(theme: CityTheme): void
+  setAppearance(appearance: CityAppearance): void
   setLocale(locale: Locale): void
   setMode(mode: CityViewMode): void
   setLabInspect(enabled: boolean): void
@@ -189,6 +192,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
   labels.setMode(options.mode ?? 'orbit')
   const audio = createCityAudio()
   let theme: CityTheme = options.theme ?? 'night'
+  let appearance: CityAppearance = options.appearance ?? 'classic'
   const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
 
   let raf = 0
@@ -241,10 +245,17 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
 
   function setTheme(next: CityTheme): void {
     theme = next
-    city.setTheme(next)
+    city.setTheme(next, appearance)
     flows.setTheme(next)
     picker.setTheme(next)
-    rendering.setTheme(next)
+    rendering.setTheme(next, appearance)
+  }
+
+  function setAppearance(next: CityAppearance): void {
+    if (appearance === next) return
+    appearance = next
+    city.setTheme(theme, appearance)
+    rendering.setTheme(theme, appearance)
   }
 
   function setLocale(next: Locale): void {
@@ -382,6 +393,7 @@ export function createCityShell(container: HTMLElement, options: CityShellOption
     update,
     focus,
     setTheme,
+    setAppearance,
     setLocale,
     setMode,
     setLabInspect(enabled: boolean): void {

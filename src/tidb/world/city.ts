@@ -26,6 +26,7 @@ import {
 import type { ComponentAnchorId, PlanBounds, Point3, RouteLeg } from './layout'
 import { createCityEnvironment } from './environment'
 import { createCityMaterials } from './palette'
+import type { CityAppearance } from '../appearance'
 import type { CityMaterials, CityTheme, SemanticDomain } from './palette'
 import { createTransactionLab } from './transaction-lab'
 import type { TransactionLab } from './transaction-lab'
@@ -111,7 +112,7 @@ export interface TiDBSceneGraph {
   getAnchor(id: string, out: THREE.Vector3): boolean
   updateState(state: TiCityState): void
   updateVisuals(deltaSeconds: number): void
-  setTheme(theme: CityTheme): void
+  setTheme(theme: CityTheme, appearance?: CityAppearance): void
   setNetworkEmphasis(active: boolean): void
   setFocus(id: string | null): void
   dispose(): void
@@ -738,6 +739,7 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
   for (const network of networks) root.add(network.object)
 
   let theme: CityTheme = 'night'
+  let appearance: CityAppearance = 'classic'
   let focused: CityComponent | undefined
   let disposed = false
 
@@ -799,11 +801,12 @@ export function createTiDBSceneGraph(): TiDBSceneGraph {
     updateVisuals(deltaSeconds: number): void {
       environment.update(deltaSeconds)
     },
-    setTheme(next: CityTheme): void {
-      if (next === theme) return
+    setTheme(next: CityTheme, nextAppearance: CityAppearance = 'classic'): void {
+      if (next === theme && nextAppearance === appearance) return
       theme = next
-      materials.apply(next)
-      environment.setTheme(next)
+      appearance = nextAppearance
+      materials.apply(next, appearance)
+      environment.setTheme(next, appearance)
       transactionLab.setTheme(next)
       lockLab.setTheme(next)
       raftLab.setTheme(next)

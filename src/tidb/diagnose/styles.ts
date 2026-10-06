@@ -52,6 +52,34 @@ export const DIAGNOSE_CSS = `
   --diag-shadow: rgba(33, 73, 88, 0.14);
 }
 
+:root[data-appearance="tidb"] .tidb-diagnose {
+  --diag-surface: var(--tc-panel);
+  --diag-surface-raised: var(--tc-panel-2);
+  --diag-surface-soft: color-mix(in srgb, var(--city-blue) 5%, transparent);
+}
+
+:root[data-appearance="tidb"][data-theme="day"] .tidb-diagnose {
+  --diag-neutral: #496372;
+}
+
+:root[data-appearance="tidb"][data-theme="day"] .tidb-diagnose__head {
+  background:
+    linear-gradient(108deg, color-mix(in srgb, var(--tc-cyan) 3%, transparent), transparent 42%),
+    var(--diag-surface);
+}
+
+:root[data-appearance="tidb"] .tidb-diagnose__guide[data-guide="lock-wait"] {
+  --guide-accent: var(--city-orange);
+}
+
+:root[data-appearance="tidb"] .tidb-diagnose__guide[data-guide="gc-backlog"] {
+  --guide-accent: var(--city-violet);
+}
+
+:root[data-appearance="tidb"] .tidb-diagnose__guide[data-guide="tiflash-lag"] {
+  --guide-accent: var(--domain-tiflash);
+}
+
 .tidb-diagnose::before {
   position: absolute;
   z-index: -1;
