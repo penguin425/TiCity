@@ -6,6 +6,20 @@ recorded in `NOTICE`.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-07
+
+- Add a bilingual City dashboard inspired by PGSimCity's compact metric strip.
+  Show background statement/commit/Raft-entry rates, healthy Regions, GC backlog
+  and TiFlash model lag, with bounded model-time sparklines.
+- Derive rates from observed model-counter changes over up to five model seconds;
+  exclude synchronous trace jumps and never invent latency or WAL measurements.
+  Freeze history during pause and clear it on isolated scenarios and reset.
+- Keep Fresh/Classic and day/night styling, accessible explanatory controls,
+  remembered visibility, and scrollable mobile metrics. Reserve measured space
+  around navigation, lab panels, movement controls and local building labels.
+- Include the dashboard guide and reviewed captures in the static archive.
+  The deterministic educational model remains `tidb-v8.5-model-9`.
+
 ## [0.13.0] — 2026-10-06
 
 - Add TiDB Fresh: white architecture, aqua/mint campus surfaces and the official

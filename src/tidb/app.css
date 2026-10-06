@@ -3291,3 +3291,60 @@ a {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* The dashboard and navigation reserve one measured area above City tools. */
+.tidb-layout[data-dashboard-expanded] :is(
+  .tidb-transaction-lab, .tidb-lock-lab, .tidb-raft-lab,
+  .tidb-protocol-lab, .tidb-gc-storage-lab, .tidb-tiflash-mpp-lab,
+  .tidb-movement-pad
+) {
+  top: var(--tidb-content-top, 9.75rem);
+}
+
+.tidb-layout[data-panel="closed"][data-dashboard-expanded] .tidb-status-strip {
+  display: none;
+}
+
+@media (min-width: 901px) {
+  .tidb-layout[data-dashboard-expanded] .tidb-hud {
+    top: var(--tidb-content-top, 5.6rem);
+  }
+
+  .tidb-layout[data-dashboard-expanded] :is(
+    .tidb-transaction-lab, .tidb-lock-lab, .tidb-raft-lab,
+    .tidb-protocol-lab, .tidb-gc-storage-lab, .tidb-tiflash-mpp-lab
+  ) {
+    max-height: max(5rem, calc(100dvh - var(--tidb-content-top, 5.6rem) - 13.4rem));
+  }
+}
+
+@media (max-width: 900px) {
+  .tidb-dashboard {
+    position: fixed;
+  }
+
+  .tidb-layout[data-panel="closed"][data-dashboard-expanded] .tidb-hud {
+    top: var(--tidb-content-top, 9.75rem);
+  }
+
+  .tidb-layout[data-dashboard-expanded] .tidb-hud-jumps {
+    top: var(--tidb-content-top, 9.75rem);
+  }
+
+  .tidb-layout[data-dashboard-expanded] .tidb-ui-host :is(
+    #tidb-controls-title, #tidb-sql-title, #tidb-tour-title, #tidb-legal-title
+  ) {
+    scroll-margin-top: calc(var(--tidb-content-top, 9.75rem) + 3.6rem);
+  }
+}
+
+@media (max-width: 700px) {
+  /* The metric drawer occupies the inspection area while its toggle retains focus. */
+  .tidb-layout[data-dashboard-expanded]:is([data-dashboard-expanded="true"], [data-dashboard-help-open="true"]) :is(
+    .tidb-transaction-lab, .tidb-lock-lab, .tidb-raft-lab,
+    .tidb-protocol-lab, .tidb-gc-storage-lab, .tidb-tiflash-mpp-lab,
+    .tidb-movement-pad
+  ) {
+    display: none;
+  }
+}

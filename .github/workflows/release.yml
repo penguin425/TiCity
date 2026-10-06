@@ -65,6 +65,7 @@ jobs:
             docs/REFINEMENT.md \
             docs/GRAPHICS.md \
             docs/APPEARANCE.md \
+            docs/DASHBOARD.md \
             docs/screenshot.png \
             docs/lock-lab.png \
             docs/raft-lab.png \

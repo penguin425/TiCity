@@ -13,15 +13,17 @@ Japanese and can be switched to English.
 
 Live site: <https://penguin425.github.io/TiCity/>
 
-![TiCity campus overview in daylight](docs/graphics/tidb-fresh-day.png)
+![TiCity campus overview in daylight](docs/graphics/dashboard-day.png)
 
 See the [day/night graphics and rendering design](docs/GRAPHICS.md), including
 close-up and mobile views and the reproducible screenshot command.
 
 Choose **TiDB Fresh** (white, aqua and TiDB red) or the existing **Classic** palette from the top navigation. Both have independent day/night lighting, and the choice carries across City, Machine and Diagnose. See [palette choices and sources](docs/APPEARANCE.md).
 
+The City dashboard shows background SQL and commit rates, Raft entries, healthy Regions, GC backlog and TiFlash model lag with bounded model-time sparklines. Use **Show metrics / Hide metrics** to choose the display; narrow or short screens start collapsed. See the [dashboard guide](docs/DASHBOARD.md) for each metric and the reset/pause boundaries.
+
 > [!IMPORTANT]
-> TiCity v0.13.0 targets the TiDB v8.5 LTS
+> TiCity v0.14.0 targets the TiDB v8.5 LTS
 > line as a static, offline model and includes the model-9 TiFlash/MPP Lab.
 > TiCity does not execute SQL or return real data or invented result rows. A
 > single SQL statement entered by the user is classified entirely in the

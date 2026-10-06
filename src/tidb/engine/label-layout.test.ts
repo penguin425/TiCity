@@ -60,6 +60,61 @@ describe('district label geography', () => {
     }
   })
 
+  it('keeps a collapsed dashboard clear while retaining all short-height district identities', () => {
+    const entries = [
+      label(600, 150), label(600, 170, 1), label(600, 188, -1),
+      label(850, 200), label(395, 290), label(600, 290), label(805, 290),
+      label(270, 410), label(930, 410),
+    ]
+    placeCityLabels(entries, 1_200, 630, 100)
+    expect(entries.filter((entry) => entry.visible)).toHaveLength(9)
+    expectSeparated(entries)
+    for (const entry of entries) {
+      expect(entry.y - entry.height).toBeGreaterThanOrEqual(106)
+      expect(Math.abs(entry.y - entry.anchorY)).toBeLessThanOrEqual(66)
+      expect(Math.abs(entry.x - entry.anchorX)).toBeLessThanOrEqual(entry.width / 2 + 70)
+    }
+  })
+
+  it('moves only nearby labels below an expanded dashboard and omits unreachable anchors', () => {
+    const entries = [
+      label(195, 40), label(195, 150), label(195, 170, 1),
+      label(195, 188, -1), label(330, 260),
+    ]
+    placeCityLabels(entries, 390, 844, 140)
+    expect(entries[0].visible).toBe(false)
+    expect(entries[1].visible).toBe(true)
+    expect(entries[1].y).toBeGreaterThan(entries[1].anchorY)
+    expect(entries.filter((entry) => entry.visible)).toHaveLength(4)
+    expectSeparated(entries)
+    for (const entry of entries.filter((entry) => entry.visible)) {
+      expect(entry.y - entry.height).toBeGreaterThanOrEqual(146)
+      expect(Math.abs(entry.y - entry.anchorY)).toBeLessThanOrEqual(66)
+      expect(Math.abs(entry.x - entry.anchorX)).toBeLessThanOrEqual(entry.width / 2 + 70)
+    }
+  })
+
+  it('restores the original placement when the top overlay is collapsed', () => {
+    const entries = [label(180, 140), label(190, 155, 1), label(200, 172, -1)]
+    const original = entries.map((entry) => ({ ...entry }))
+    placeCityLabels(original, 390, 844)
+    placeCityLabels(entries, 390, 844, 160)
+    for (const entry of entries) entry.visible = true
+    placeCityLabels(entries, 390, 844, 0)
+    expect(entries).toEqual(original)
+  })
+
+  it('preserves the omitted-inset API and normalizes invalid insets to the original bounds', () => {
+    const entries = [label(180, 32), label(190, 55, 1), label(200, 72, -1)]
+    const original = entries.map((entry) => ({ ...entry }))
+    placeCityLabels(original, 390, 844)
+    for (const inset of [0, -20, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const normalized = entries.map((entry) => ({ ...entry }))
+      placeCityLabels(normalized, 390, 844, inset)
+      expect(normalized).toEqual(original)
+    }
+  })
+
   it('reflows changed language and compact dimensions without stale rectangles', () => {
     const entries = [label(180, 140), label(190, 155, 1), label(200, 172, -1)]
     placeCityLabels(entries, 390, 844)

@@ -20,6 +20,7 @@ import { placeCityLabels, type CityLabelPlacement } from './label-layout'
 export interface CityLabels {
   setMode(mode: CityViewMode): void
   setLocale(locale: Locale): void
+  setTopInset(inset: number): void
   update(force?: boolean): void
   dispose(): void
 }
@@ -108,6 +109,7 @@ export function createCityLabels(
   const lastCameraPosition = new THREE.Vector3(Infinity, Infinity, Infinity)
   const lastCameraQuaternion = new THREE.Quaternion(0, 0, 0, 0)
   let hidden = false
+  let topInset = 0
 
   function applyLocale(next: Locale): void {
     if (next === locale) return
@@ -180,7 +182,7 @@ export function createCityLabels(
       entry.anchorY = (-entry.projected.y * 0.5 + 0.5) * height
     }
     orderedEntries.sort((left, right) => left.anchorY - right.anchorY)
-    placeCityLabels(orderedEntries, width, height)
+    placeCityLabels(orderedEntries, width, height, topInset)
 
     for (const entry of entries) {
       entry.node.hidden = !entry.visible
@@ -206,6 +208,12 @@ export function createCityLabels(
     setLocale(next: Locale): void {
       followDocumentLocale = false
       applyLocale(next)
+    },
+    setTopInset(inset: number): void {
+      const next = Number.isFinite(inset) ? Math.max(0, inset) : 0
+      if (next === topInset) return
+      topInset = next
+      update(true)
     },
     setMode(mode: CityViewMode): void {
       hidden = mode === 'walk'
